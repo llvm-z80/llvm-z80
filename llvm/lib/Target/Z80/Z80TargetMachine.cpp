@@ -228,8 +228,10 @@ bool Z80PassConfig::addLegalizeMachineIR() {
 }
 
 void Z80PassConfig::addPreRegBankSelect() {
-  if (getOptLevel() != CodeGenOptLevel::None)
-    addPass(createZ80PostLegalizerCombiner());
+  // Post-legalization combiner must run at all optimization levels.
+  // It contains correctness rules (z80_cross_size_copy, merge_combines)
+  // that are required for instruction selection to succeed.
+  addPass(createZ80PostLegalizerCombiner());
   addPass(createZ80LowerSelectPass());
 }
 
