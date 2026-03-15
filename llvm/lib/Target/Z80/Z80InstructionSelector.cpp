@@ -1922,17 +1922,30 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           !RBI.constrainGenericRegister(AddrReg, Z80::GR16RegClass, MRI))
         return false;
 
-      // Copy value to DE (for E=low, D=high)
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(SrcReg);
+      // Copy value to DE (for E=low, D=high).
+      // For undef sources, skip the COPY and mark the implicit sub-register
+      // uses as undef directly — processImplicitDefs only propagates undef
+      // to the first user instruction, missing subsequent sub-register uses.
+      MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
+      bool IsUndef = SrcDef &&
+                     SrcDef->getOpcode() == TargetOpcode::G_IMPLICIT_DEF;
+
+      if (!IsUndef)
+        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE)
+            .addReg(SrcReg);
       // Copy address to HL
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
           .addReg(AddrReg);
       // Store low byte directly from E (no A intermediary)
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_E));
+      auto &StoreLo = *BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_E));
       // Increment address
       BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
       // Store high byte directly from D
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_D));
+      auto &StoreHi = *BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_D));
+      if (IsUndef) {
+        StoreLo.findRegisterUseOperand(Z80::E, /*TRI=*/nullptr)->setIsUndef();
+        StoreHi.findRegisterUseOperand(Z80::D, /*TRI=*/nullptr)->setIsUndef();
+      }
       MI.eraseFromParent();
       return true;
     }
