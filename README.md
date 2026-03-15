@@ -1,5 +1,8 @@
-<img width="2560" height="1280" alt="LLVM-Z80" src="https://github.com/user-attachments/assets/0425ae08-9ecb-4270-840d-90145678df09" />
-
+<p align="center">
+  <img width="2560" alt="LLVM-Z80" src="https://github.com/user-attachments/assets/0425ae08-9ecb-4270-840d-90145678df09">
+  <br/>
+  <sub>Artwork by zlfn. Created with <a href="https://www.aseprite.org/">Aseprite</a>. Lettering assisted by AI & fonts.</sub>
+</p>
 
 LLVM-Z80 is a LLVM fork supporting the Zilog Z80 series of microprocessors.  
 [[Backend Code]](https://github.com/llvm-z80/llvm-z80/tree/main/llvm/lib/Target/Z80) | [[Tests / Utilities]](https://github.com/llvm-z80/llvm-z80/tree/main/z80-utils) | [[Wiki]](https://github.com/llvm-z80/llvm-z80/wiki) | [[FAQ]](https://github.com/llvm-z80/llvm-z80/wiki/FAQ) | [[Prebuilt Binaries]](https://github.com/llvm-z80/llvm-z80/releases) | [[AUTHORS]](https://github.com/llvm-z80/llvm-z80/blob/main/AUTHORS) | [[NOTICE]](https://github.com/llvm-z80/llvm-z80/blob/main/NOTICE)
