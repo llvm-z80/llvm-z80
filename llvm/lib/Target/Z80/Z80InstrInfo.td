@@ -570,11 +570,11 @@ class Z80Pseudo<dag outs, dag ins> : Instruction {
 // Spill/Reload pseudo instructions for stack slots (frame index).
 // No static Defs: small offsets expand to IX+d (no clobbers), large offsets
 // are expanded in eliminateFrameIndex with register scavenging.
-def SPILL_GR16 : Z80Pseudo<(outs), (ins GR16:$src, i32imm:$fi)> {
+def SPILL_GR16 : Z80Pseudo<(outs), (ins GR16:$src, i32imm:$fi, i32imm:$offset)> {
   let mayStore = true;
   let mayLoad = false;
 }
-def RELOAD_GR16 : Z80Pseudo<(outs GR16:$dst), (ins i32imm:$fi)> {
+def RELOAD_GR16 : Z80Pseudo<(outs GR16:$dst), (ins i32imm:$fi, i32imm:$offset)> {
   let mayLoad = true;
   let mayStore = false;
 }
@@ -597,15 +597,15 @@ def SUB_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi)> {
   let mayStore = false;
   let Predicates = [HasZ80];
 }
-def SPILL_GR8 : Z80Pseudo<(outs), (ins GR8:$src, i32imm:$fi)> {
+def SPILL_GR8 : Z80Pseudo<(outs), (ins GR8:$src, i32imm:$fi, i32imm:$offset)> {
   let mayStore = true;
   let mayLoad = false;
 }
-def SPILL_IMM8 : Z80Pseudo<(outs), (ins i8imm:$val, i32imm:$fi)> {
+def SPILL_IMM8 : Z80Pseudo<(outs), (ins i8imm:$val, i32imm:$fi, i32imm:$offset)> {
   let mayStore = true;
   let mayLoad = false;
 }
-def RELOAD_GR8 : Z80Pseudo<(outs GR8:$dst), (ins i32imm:$fi)> {
+def RELOAD_GR8 : Z80Pseudo<(outs GR8:$dst), (ins i32imm:$fi, i32imm:$offset)> {
   let mayLoad = true;
   let mayStore = false;
 }

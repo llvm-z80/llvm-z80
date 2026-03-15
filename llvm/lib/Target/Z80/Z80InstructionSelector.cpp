@@ -1778,7 +1778,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
           return false;
         BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR8), DstReg)
-            .addFrameIndex(FI);
+            .addFrameIndex(FI)
+            .addImm(0);
         MI.eraseFromParent();
         return true;
       }
@@ -1786,7 +1787,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
           return false;
         BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR16), DstReg)
-            .addFrameIndex(FI);
+            .addFrameIndex(FI)
+            .addImm(0);
         MI.eraseFromParent();
         return true;
       }
@@ -1870,32 +1872,29 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
           if (SrcDef && SrcDef->getOpcode() == TargetOpcode::G_CONSTANT) {
             int64_t Val = SrcDef->getOperand(1).getCImm()->getSExtValue();
-            auto MIB = BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_IMM8))
-                           .addImm(Val & 0xFF)
-                           .addFrameIndex(FI);
-            if (ExtraOffset)
-              MIB.addImm(ExtraOffset);
+            BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_IMM8))
+                .addImm(Val & 0xFF)
+                .addFrameIndex(FI)
+                .addImm(ExtraOffset);
             MI.eraseFromParent();
             return true;
           }
           if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
             return false;
-          auto MIB = BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_GR8))
-                         .addReg(SrcReg)
-                         .addFrameIndex(FI);
-          if (ExtraOffset)
-            MIB.addImm(ExtraOffset);
+          BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_GR8))
+              .addReg(SrcReg)
+              .addFrameIndex(FI)
+              .addImm(ExtraOffset);
           MI.eraseFromParent();
           return true;
         }
         if (SrcTy.getSizeInBits() <= 16) {
           if (!RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
             return false;
-          auto MIB = BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_GR16))
-                         .addReg(SrcReg)
-                         .addFrameIndex(FI);
-          if (ExtraOffset)
-            MIB.addImm(ExtraOffset);
+          BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_GR16))
+              .addReg(SrcReg)
+              .addFrameIndex(FI)
+              .addImm(ExtraOffset);
           MI.eraseFromParent();
           return true;
         }

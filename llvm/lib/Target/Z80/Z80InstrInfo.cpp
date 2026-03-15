@@ -404,6 +404,7 @@ void Z80InstrInfo::storeRegToStackSlot(
     BuildMI(MBB, MI, DL, get(Z80::SPILL_GR8))
         .addReg(SrcReg, getKillRegState(isKill))
         .addFrameIndex(FrameIndex)
+        .addImm(0)
         .addMemOperand(MF.getMachineMemOperand(
             MachinePointerInfo::getFixedStack(MF, FrameIndex),
             MachineMemOperand::MOStore, 1, MFI.getObjectAlign(FrameIndex)));
@@ -418,6 +419,7 @@ void Z80InstrInfo::storeRegToStackSlot(
       BuildMI(MBB, MI, DL, get(Z80::SPILL_GR16))
           .addReg(SrcReg, getKillRegState(isKill))
           .addFrameIndex(FrameIndex)
+          .addImm(0)
           .addMemOperand(MF.getMachineMemOperand(
               MachinePointerInfo::getFixedStack(MF, FrameIndex),
               MachineMemOperand::MOStore, 2, MFI.getObjectAlign(FrameIndex)));
@@ -448,6 +450,7 @@ void Z80InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
     BuildMI(MBB, MI, DL, get(Z80::RELOAD_GR8))
         .addReg(DestReg, RegState::Define)
         .addFrameIndex(FrameIndex)
+        .addImm(0)
         .addMemOperand(MF.getMachineMemOperand(
             MachinePointerInfo::getFixedStack(MF, FrameIndex),
             MachineMemOperand::MOLoad, 1, MFI.getObjectAlign(FrameIndex)));
@@ -462,6 +465,7 @@ void Z80InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       BuildMI(MBB, MI, DL, get(Z80::RELOAD_GR16))
           .addReg(DestReg, RegState::Define)
           .addFrameIndex(FrameIndex)
+          .addImm(0)
           .addMemOperand(MF.getMachineMemOperand(
               MachinePointerInfo::getFixedStack(MF, FrameIndex),
               MachineMemOperand::MOLoad, 2, MFI.getObjectAlign(FrameIndex)));
