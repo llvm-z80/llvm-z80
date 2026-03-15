@@ -294,8 +294,10 @@ fn build_suites(mode: &Mode) -> Vec<SuiteDef> {
     add_custom(&mut suites, "custom Z80", Target::Z80);
     add_custom(&mut suites, "custom SM83", Target::SM83);
 
-    add_utils(&mut suites, "utils Z80", Target::Z80);
-    add_utils(&mut suites, "utils SM83", Target::SM83);
+    if matches!(mode, Mode::Full) {
+        add_utils(&mut suites, "utils Z80", Target::Z80);
+        add_utils(&mut suites, "utils SM83", Target::SM83);
+    }
 
     suites
 }

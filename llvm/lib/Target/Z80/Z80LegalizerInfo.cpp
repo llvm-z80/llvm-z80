@@ -247,7 +247,23 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .clampScalar(0, S8, S16);
 
   // Memory operations
-  getActionDefinitionsBuilder({G_LOAD, G_STORE})
+  // The pre-legalization combiner can fold G_ANYEXT(G_LOAD s8) into a
+  // G_LOAD with result s16 and memory s8.  Custom-lower extending loads
+  // (result type > memory type) back to G_LOAD + G_ANYEXT, since the
+  // generic LegalizerHelper::lowerLoad does not handle this case.
+  // G_LOAD and G_STORE are defined separately because the extending load
+  // customIf must not apply to G_STORE.
+  getActionDefinitionsBuilder(G_LOAD)
+      .legalForTypesWithMemDesc(
+          {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1}})
+      .lowerIfMemSizeNotByteSizePow2()
+      .customIf([](const LegalityQuery &Q) {
+        return Q.Types[0].getSizeInBits() >
+               Q.MMODescrs[0].MemoryTy.getSizeInBits();
+      })
+      .clampScalar(0, S8, S16);
+
+  getActionDefinitionsBuilder(G_STORE)
       .legalForTypesWithMemDesc(
           {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1}})
       .lowerIfMemSizeNotByteSizePow2()
@@ -599,6 +615,19 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     assert(MI.hasOneMemOperand());
     MIRBuilder.buildStore(FINAddr, MI.getOperand(0).getReg(),
                           *MI.memoperands()[0]);
+    MI.eraseFromParent();
+    return true;
+  }
+  case TargetOpcode::G_LOAD: {
+    // Extending G_LOAD (result type > memory type): decompose into
+    // G_LOAD at memory width + G_ANYEXT.  Created by the pre-legalization
+    // combiner folding G_ANYEXT(G_LOAD).
+    Register Dst = MI.getOperand(0).getReg();
+    Register Ptr = MI.getOperand(1).getReg();
+    MachineMemOperand &MMO = **MI.memoperands_begin();
+    LLT MemTy = MMO.getMemoryType();
+    auto Load = MIRBuilder.buildLoad(MemTy, Ptr, MMO);
+    MIRBuilder.buildAnyExt(Dst, Load);
     MI.eraseFromParent();
     return true;
   }

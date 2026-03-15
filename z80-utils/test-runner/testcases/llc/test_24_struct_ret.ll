@@ -1,7 +1,8 @@
 ; Test 24: aggregate (struct) register return
-; Tests small struct returns packed into registers via stack slot.
-; Covers {i1, i16}, {i8, i8}, {i16, i16}, {i16, i8} return types.
-; expect 0x001F (5 bits, all pass)
+; Tests small struct returns packed directly into registers.
+; Covers {i1, i16}, {i8, i8}, {i16, i16}, {i16, i8}, {i8, i16},
+; {i8, i8, i16}, {i8, i8, i8} return types.
+; expect 0x00FF (8 bits, all pass)
 
 define void @_start() {
   call void asm sideeffect "ld sp, #0xFFFE", ""()
@@ -33,11 +34,34 @@ define {i16, i16} @make_pair_i16(i16 %a, i16 %b) {
   ret {i16, i16} %r1
 }
 
-; {i16, i8}: 3-byte struct with padding
+; {i16, i8}: 3-byte struct, field 0 in Lo, field 1 anyext in Hi
 define {i16, i8} @make_mixed(i16 %a, i8 %b) {
   %r0 = insertvalue {i16, i8} undef, i16 %a, 0
   %r1 = insertvalue {i16, i8} %r0, i8 %b, 1
   ret {i16, i8} %r1
+}
+
+; {i8, i16}: 3-byte struct, field 0 anyext in Lo, field 1 in Hi
+define {i8, i16} @make_mixed2(i8 %a, i16 %b) {
+  %r0 = insertvalue {i8, i16} undef, i8 %a, 0
+  %r1 = insertvalue {i8, i16} %r0, i16 %b, 1
+  ret {i8, i16} %r1
+}
+
+; {i8, i8, i16}: 4-byte struct, merge(f0,f1) in Lo, f2 in Hi
+define {i8, i8, i16} @make_triple(i8 %a, i8 %b, i16 %c) {
+  %r0 = insertvalue {i8, i8, i16} undef, i8 %a, 0
+  %r1 = insertvalue {i8, i8, i16} %r0, i8 %b, 1
+  %r2 = insertvalue {i8, i8, i16} %r1, i16 %c, 2
+  ret {i8, i8, i16} %r2
+}
+
+; {i8, i8, i8}: 3-byte struct, merge(f0,f1) in Lo, f2 anyext in Hi
+define {i8, i8, i8} @make_triple_i8(i8 %a, i8 %b, i8 %c) {
+  %r0 = insertvalue {i8, i8, i8} undef, i8 %a, 0
+  %r1 = insertvalue {i8, i8, i8} %r0, i8 %b, 1
+  %r2 = insertvalue {i8, i8, i8} %r1, i8 %c, 2
+  ret {i8, i8, i8} %r2
 }
 
 define i16 @main() {
@@ -89,7 +113,7 @@ set2:
   br label %t3
 t3:
 
-  ; Bit 3: {i16, i8} return (3-byte struct with padding)
+  ; Bit 3: {i16, i8} return
   %mixed = call {i16, i8} @make_mixed(i16 500, i8 77)
   %mx_a = extractvalue {i16, i8} %mixed, 0
   %mx_b = extractvalue {i16, i8} %mixed, 1
@@ -108,11 +132,62 @@ t4:
   %opt_none = call {i1, i16} @make_option(i16 0, i1 false)
   %none_flag = extractvalue {i1, i16} %opt_none, 0
   %none_ok = icmp eq i1 %none_flag, false
-  br i1 %none_ok, label %set4, label %done
+  br i1 %none_ok, label %set4, label %t5
 set4:
   %s4 = load i16, ptr %status
   %s4a = or i16 %s4, 16
   store i16 %s4a, ptr %status
+  br label %t5
+t5:
+
+  ; Bit 5: {i8, i16} return — anyext field 0 in Lo, field 1 in Hi
+  %mixed2 = call {i8, i16} @make_mixed2(i8 33, i16 7777)
+  %m2_a = extractvalue {i8, i16} %mixed2, 0
+  %m2_b = extractvalue {i8, i16} %mixed2, 1
+  %m2a_ok = icmp eq i8 %m2_a, 33
+  %m2b_ok = icmp eq i16 %m2_b, 7777
+  %m2_ok = and i1 %m2a_ok, %m2b_ok
+  br i1 %m2_ok, label %set5, label %t6
+set5:
+  %s5 = load i16, ptr %status
+  %s5a = or i16 %s5, 32
+  store i16 %s5a, ptr %status
+  br label %t6
+t6:
+
+  ; Bit 6: {i8, i8, i16} return — merge(f0,f1) in Lo, f2 in Hi
+  %triple = call {i8, i8, i16} @make_triple(i8 10, i8 20, i16 3000)
+  %tr_a = extractvalue {i8, i8, i16} %triple, 0
+  %tr_b = extractvalue {i8, i8, i16} %triple, 1
+  %tr_c = extractvalue {i8, i8, i16} %triple, 2
+  %tra_ok = icmp eq i8 %tr_a, 10
+  %trb_ok = icmp eq i8 %tr_b, 20
+  %trc_ok = icmp eq i16 %tr_c, 3000
+  %trab_ok = and i1 %tra_ok, %trb_ok
+  %tr_ok = and i1 %trab_ok, %trc_ok
+  br i1 %tr_ok, label %set6, label %t7
+set6:
+  %s6 = load i16, ptr %status
+  %s6a = or i16 %s6, 64
+  store i16 %s6a, ptr %status
+  br label %t7
+t7:
+
+  ; Bit 7: {i8, i8, i8} return — merge(f0,f1) in Lo, f2 anyext in Hi
+  %tri8 = call {i8, i8, i8} @make_triple_i8(i8 5, i8 15, i8 25)
+  %t8_a = extractvalue {i8, i8, i8} %tri8, 0
+  %t8_b = extractvalue {i8, i8, i8} %tri8, 1
+  %t8_c = extractvalue {i8, i8, i8} %tri8, 2
+  %t8a_ok = icmp eq i8 %t8_a, 5
+  %t8b_ok = icmp eq i8 %t8_b, 15
+  %t8c_ok = icmp eq i8 %t8_c, 25
+  %t8ab_ok = and i1 %t8a_ok, %t8b_ok
+  %t8_ok = and i1 %t8ab_ok, %t8c_ok
+  br i1 %t8_ok, label %set7, label %done
+set7:
+  %s7 = load i16, ptr %status
+  %s7a = or i16 %s7, 128
+  store i16 %s7a, ptr %status
   br label %done
 done:
 

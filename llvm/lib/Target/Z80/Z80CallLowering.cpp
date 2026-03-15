@@ -246,8 +246,103 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
     ComputeValueVTs(*getTLI(), DL, RetTy, SplitVTs, nullptr, &Offsets, 0);
     assert(VRegs.size() == SplitVTs.size());
 
-    // Create a temporary stack slot (rounded up to 2 or 4 bytes for clean
-    // 16-bit loads; padding bytes are undefined but harmless).
+    // Pack aggregate fields directly into return registers using
+    // field-per-slot assignment. Each field maps to a 16-bit register
+    // slot; i8 fields are anyext'd, adjacent i8 pairs are merged.
+    // This avoids unnecessary stack round-trips.
+    //
+    // Mapping (Rust ABI, symmetric with caller's unpack in lowerCall):
+    //   ≤ 1B: Ret_I8
+    //   ≤ 2B: fields merged/copied → Ret_I16
+    //   3-4B: fields assigned to Ret_I32_Lo / Ret_I32_Hi
+    //
+    // Helper: pack a sequence of fields into a single i16 register.
+    // Returns the packed register, or an invalid Register on failure.
+    auto packFieldsIntoWord = [&](ArrayRef<unsigned> FieldIndices) -> Register {
+      if (FieldIndices.size() == 1) {
+        unsigned Idx = FieldIndices[0];
+        unsigned Bits = SplitVTs[Idx].getSizeInBits();
+        if (Bits == 16)
+          return VRegs[Idx];
+        if (Bits == 8) {
+          Register Ext = MRI.createGenericVirtualRegister(LLT::scalar(16));
+          MIRBuilder.buildAnyExt(Ext, VRegs[Idx]);
+          return Ext;
+        }
+        return Register();
+      }
+      if (FieldIndices.size() == 2) {
+        unsigned Idx0 = FieldIndices[0], Idx1 = FieldIndices[1];
+        if (SplitVTs[Idx0].getSizeInBits() == 8 &&
+            SplitVTs[Idx1].getSizeInBits() == 8) {
+          Register Merged = MRI.createGenericVirtualRegister(LLT::scalar(16));
+          MIRBuilder.buildMergeLikeInstr(Merged, {VRegs[Idx0], VRegs[Idx1]});
+          return Merged;
+        }
+        return Register();
+      }
+      return Register();
+    };
+
+    // Validate: all fields must be i8 or i16.
+    bool AllFieldsValid = true;
+    for (unsigned I = 0; I < SplitVTs.size(); ++I) {
+      unsigned Bits = SplitVTs[I].getSizeInBits();
+      if (Bits != 8 && Bits != 16) {
+        AllFieldsValid = false;
+        break;
+      }
+    }
+
+    if (AllFieldsValid) {
+      if (AllocSize <= 1 && SplitVTs.size() == 1 &&
+          SplitVTs[0].getSizeInBits() == 8) {
+        MIRBuilder.buildCopy(Regs.Ret_I8, VRegs[0]);
+        emitRet({{Regs.Ret_I8, RegState::Implicit}});
+        return true;
+      }
+
+      if (AllocSize <= 2) {
+        SmallVector<unsigned, 2> Indices;
+        for (unsigned I = 0; I < SplitVTs.size(); ++I)
+          Indices.push_back(I);
+        Register Word = packFieldsIntoWord(Indices);
+        if (Word) {
+          MIRBuilder.buildCopy(Regs.Ret_I16, Word);
+          emitRet({{Regs.Ret_I16, RegState::Implicit}});
+          return true;
+        }
+      }
+
+      if (AllocSize <= 4) {
+        // Split fields into Lo (first ≤2B) and Hi (remaining) groups.
+        SmallVector<unsigned, 2> LoFields, HiFields;
+        unsigned BytesSoFar = 0;
+        for (unsigned I = 0; I < SplitVTs.size(); ++I) {
+          unsigned FieldBytes = SplitVTs[I].getSizeInBits() / 8;
+          if (BytesSoFar + FieldBytes <= 2)
+            LoFields.push_back(I);
+          else
+            HiFields.push_back(I);
+          BytesSoFar += FieldBytes;
+        }
+
+        if (!LoFields.empty() && !HiFields.empty()) {
+          Register LoWord = packFieldsIntoWord(LoFields);
+          Register HiWord = packFieldsIntoWord(HiFields);
+          if (LoWord && HiWord) {
+            MIRBuilder.buildCopy(Regs.Ret_I32_Lo, LoWord);
+            MIRBuilder.buildCopy(Regs.Ret_I32_Hi, HiWord);
+            emitRet({{Regs.Ret_I32_Lo, RegState::Implicit},
+                     {Regs.Ret_I32_Hi, RegState::Implicit}});
+            return true;
+          }
+        }
+      }
+    }
+
+    // Fallback: pack via temporary stack slot for sub-byte fields
+    // or other layouts that packFieldsIntoWord cannot handle.
     unsigned SlotSize = AllocSize <= 2 ? 2 : 4;
     MachineFrameInfo &MFI = MF.getFrameInfo();
     int FI = MFI.CreateStackObject(SlotSize, Align(1), false);
@@ -883,81 +978,164 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
       insertSRetLoads(MIRBuilder, Info.OrigRet.Ty, Info.OrigRet.Regs,
                       Info.DemoteRegister, Info.DemoteStackIndex);
     } else if (Info.OrigRet.Ty->isAggregateType()) {
-      // Aggregate register return: read return registers into a temporary
-      // stack slot, then extract each field at its DataLayout offset.
       const DataLayout &DL = MF.getDataLayout();
       unsigned AllocSize = DL.getTypeAllocSize(Info.OrigRet.Ty);
-      unsigned SlotSize = AllocSize <= 2 ? 2 : 4;
-      MachineFrameInfo &MFI = MF.getFrameInfo();
-      int FI = MFI.CreateStackObject(SlotSize, Align(1), false);
 
-      // Store return register(s) to the temp stack slot.
-      auto BaseAddr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
-      if (AllocSize <= 1) {
-        Register TmpReg = MRI.createGenericVirtualRegister(LLT::scalar(8));
-        MIRBuilder.buildCopy(TmpReg, Register(Regs.Ret_I8));
-        auto *MMO = MF.getMachineMemOperand(MachinePointerInfo::getStack(MF, 0),
-                                            MachineMemOperand::MOStore,
-                                            LLT::scalar(8), Align(1));
-        MIRBuilder.buildStore(TmpReg, BaseAddr, *MMO);
-      } else if (AllocSize <= 2) {
-        Register TmpReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
-        MIRBuilder.buildCopy(TmpReg, Register(Regs.Ret_I16));
-        auto *MMO = MF.getMachineMemOperand(MachinePointerInfo::getStack(MF, 0),
-                                            MachineMemOperand::MOStore,
-                                            LLT::scalar(16), Align(1));
-        MIRBuilder.buildStore(TmpReg, BaseAddr, *MMO);
-      } else {
-        Register LoReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
-        Register HiReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
-        MIRBuilder.buildCopy(LoReg, Register(Regs.Ret_I32_Lo));
-        MIRBuilder.buildCopy(HiReg, Register(Regs.Ret_I32_Hi));
-        auto *LoMMO = MF.getMachineMemOperand(
-            MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOStore,
-            LLT::scalar(16), Align(1));
-        MIRBuilder.buildStore(LoReg, BaseAddr, *LoMMO);
-        auto HiAddr = MIRBuilder.buildPtrAdd(
-            LLT::pointer(0, 16), BaseAddr,
-            MIRBuilder.buildConstant(LLT::scalar(16), 2));
-        auto *HiMMO = MF.getMachineMemOperand(
-            MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOStore,
-            LLT::scalar(16), Align(1));
-        MIRBuilder.buildStore(HiReg, HiAddr, *HiMMO);
-      }
-
-      // Load each field from the stack at its DataLayout offset.
       SmallVector<EVT, 4> SplitVTs;
       SmallVector<uint64_t, 4> Offsets;
       ComputeValueVTs(*getTLI(), DL, Info.OrigRet.Ty, SplitVTs, nullptr,
                       &Offsets, 0);
 
-      for (unsigned I = 0; I < Info.OrigRet.Regs.size(); ++I) {
-        auto FIAddr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
-        Register Addr;
-        if (Offsets[I] == 0) {
-          Addr = FIAddr.getReg(0);
-        } else {
-          Addr = MIRBuilder
-                     .buildPtrAdd(
-                         LLT::pointer(0, 16), FIAddr,
-                         MIRBuilder.buildConstant(LLT::scalar(16), Offsets[I]))
-                     .getReg(0);
+      // Unpack aggregate return registers into fields using field-per-slot
+      // assignment (symmetric with pack logic in lowerReturn).
+      auto unpackFieldsFromWord = [&](Register Word,
+                                      ArrayRef<unsigned> FieldIndices) -> bool {
+        if (FieldIndices.size() == 1) {
+          unsigned Idx = FieldIndices[0];
+          unsigned Bits = SplitVTs[Idx].getSizeInBits();
+          if (Bits == 16) {
+            MIRBuilder.buildCopy(Info.OrigRet.Regs[Idx], Word);
+            return true;
+          }
+          if (Bits == 8) {
+            MIRBuilder.buildTrunc(Info.OrigRet.Regs[Idx], Word);
+            return true;
+          }
+          return false;
         }
-        unsigned FieldBits = SplitVTs[I].getSizeInBits();
-        LLT LoadTy = FieldBits < 8 ? LLT::scalar(8) : LLT::scalar(FieldBits);
-        if (FieldBits < 8) {
-          // Sub-byte field (e.g., i1): load as i8 then truncate.
-          Register LoadReg = MRI.createGenericVirtualRegister(LLT::scalar(8));
+        if (FieldIndices.size() == 2) {
+          unsigned Idx0 = FieldIndices[0], Idx1 = FieldIndices[1];
+          if (SplitVTs[Idx0].getSizeInBits() == 8 &&
+              SplitVTs[Idx1].getSizeInBits() == 8) {
+            MIRBuilder.buildUnmerge(
+                {Info.OrigRet.Regs[Idx0], Info.OrigRet.Regs[Idx1]}, Word);
+            return true;
+          }
+          return false;
+        }
+        return false;
+      };
+
+      bool AllFieldsValid = true;
+      for (unsigned I = 0; I < SplitVTs.size(); ++I) {
+        unsigned Bits = SplitVTs[I].getSizeInBits();
+        if (Bits != 8 && Bits != 16) {
+          AllFieldsValid = false;
+          break;
+        }
+      }
+
+      bool Unpacked = false;
+      if (AllFieldsValid) {
+        if (AllocSize <= 1 && SplitVTs.size() == 1 &&
+            SplitVTs[0].getSizeInBits() == 8) {
+          MIRBuilder.buildCopy(Info.OrigRet.Regs[0], Register(Regs.Ret_I8));
+          Unpacked = true;
+        } else if (AllocSize <= 2) {
+          if (SplitVTs.size() == 1 && SplitVTs[0].getSizeInBits() == 16) {
+            // Single i16 field: direct copy, no intermediate vreg.
+            MIRBuilder.buildCopy(Info.OrigRet.Regs[0], Register(Regs.Ret_I16));
+            Unpacked = true;
+          } else {
+            Register RetReg =
+                MRI.createGenericVirtualRegister(LLT::scalar(16));
+            MIRBuilder.buildCopy(RetReg, Register(Regs.Ret_I16));
+            SmallVector<unsigned, 2> Indices;
+            for (unsigned I = 0; I < SplitVTs.size(); ++I)
+              Indices.push_back(I);
+            Unpacked = unpackFieldsFromWord(RetReg, Indices);
+          }
+        } else if (AllocSize <= 4) {
+          SmallVector<unsigned, 2> LoFields, HiFields;
+          unsigned BytesSoFar = 0;
+          for (unsigned I = 0; I < SplitVTs.size(); ++I) {
+            unsigned FieldBytes = SplitVTs[I].getSizeInBits() / 8;
+            if (BytesSoFar + FieldBytes <= 2)
+              LoFields.push_back(I);
+            else
+              HiFields.push_back(I);
+            BytesSoFar += FieldBytes;
+          }
+
+          if (!LoFields.empty() && !HiFields.empty()) {
+            Register LoWord = MRI.createGenericVirtualRegister(LLT::scalar(16));
+            Register HiWord = MRI.createGenericVirtualRegister(LLT::scalar(16));
+            MIRBuilder.buildCopy(LoWord, Register(Regs.Ret_I32_Lo));
+            MIRBuilder.buildCopy(HiWord, Register(Regs.Ret_I32_Hi));
+            Unpacked = unpackFieldsFromWord(LoWord, LoFields) &&
+                       unpackFieldsFromWord(HiWord, HiFields);
+          }
+        }
+      }
+
+      if (!Unpacked) {
+        // Fallback: extract via temporary stack slot for irregular layouts.
+        unsigned SlotSize = AllocSize <= 2 ? 2 : 4;
+        MachineFrameInfo &MFI = MF.getFrameInfo();
+        int FI = MFI.CreateStackObject(SlotSize, Align(1), false);
+
+        auto BaseAddr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
+        if (AllocSize <= 1) {
+          Register TmpReg = MRI.createGenericVirtualRegister(LLT::scalar(8));
+          MIRBuilder.buildCopy(TmpReg, Register(Regs.Ret_I8));
           auto *MMO = MF.getMachineMemOperand(
-              MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOLoad,
-              LoadTy, Align(1));
-          MIRBuilder.buildLoad(LoadReg, Addr, *MMO);
-          MIRBuilder.buildTrunc(Info.OrigRet.Regs[I], LoadReg);
+              MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOStore,
+              LLT::scalar(8), Align(1));
+          MIRBuilder.buildStore(TmpReg, BaseAddr, *MMO);
+        } else if (AllocSize <= 2) {
+          Register TmpReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
+          MIRBuilder.buildCopy(TmpReg, Register(Regs.Ret_I16));
+          auto *MMO = MF.getMachineMemOperand(
+              MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOStore,
+              LLT::scalar(16), Align(1));
+          MIRBuilder.buildStore(TmpReg, BaseAddr, *MMO);
         } else {
-          auto *MMO = MF.getMachineMemOperand(
-              MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOLoad,
-              LoadTy, Align(1));
-          MIRBuilder.buildLoad(Info.OrigRet.Regs[I], Addr, *MMO);
+          Register LoReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
+          Register HiReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
+          MIRBuilder.buildCopy(LoReg, Register(Regs.Ret_I32_Lo));
+          MIRBuilder.buildCopy(HiReg, Register(Regs.Ret_I32_Hi));
+          auto *LoMMO = MF.getMachineMemOperand(
+              MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOStore,
+              LLT::scalar(16), Align(1));
+          MIRBuilder.buildStore(LoReg, BaseAddr, *LoMMO);
+          auto HiAddr = MIRBuilder.buildPtrAdd(
+              LLT::pointer(0, 16), BaseAddr,
+              MIRBuilder.buildConstant(LLT::scalar(16), 2));
+          auto *HiMMO = MF.getMachineMemOperand(
+              MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOStore,
+              LLT::scalar(16), Align(1));
+          MIRBuilder.buildStore(HiReg, HiAddr, *HiMMO);
+        }
+
+        for (unsigned I = 0; I < Info.OrigRet.Regs.size(); ++I) {
+          auto FIAddr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
+          Register Addr;
+          if (Offsets[I] == 0) {
+            Addr = FIAddr.getReg(0);
+          } else {
+            Addr =
+                MIRBuilder
+                    .buildPtrAdd(LLT::pointer(0, 16), FIAddr,
+                                 MIRBuilder.buildConstant(LLT::scalar(16),
+                                                          Offsets[I]))
+                    .getReg(0);
+          }
+          unsigned FieldBits = SplitVTs[I].getSizeInBits();
+          LLT LoadTy = FieldBits < 8 ? LLT::scalar(8) : LLT::scalar(FieldBits);
+          if (FieldBits < 8) {
+            Register LoadReg =
+                MRI.createGenericVirtualRegister(LLT::scalar(8));
+            auto *MMO = MF.getMachineMemOperand(
+                MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOLoad,
+                LoadTy, Align(1));
+            MIRBuilder.buildLoad(LoadReg, Addr, *MMO);
+            MIRBuilder.buildTrunc(Info.OrigRet.Regs[I], LoadReg);
+          } else {
+            auto *MMO = MF.getMachineMemOperand(
+                MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOLoad,
+                LoadTy, Align(1));
+            MIRBuilder.buildLoad(Info.OrigRet.Regs[I], Addr, *MMO);
+          }
         }
       }
     } else {
