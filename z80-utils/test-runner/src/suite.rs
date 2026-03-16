@@ -214,6 +214,24 @@ pub fn check_skip_c(
     None
 }
 
+/// Parse EXTRA-FLAGS directive from C source files.
+/// Format: `/* EXTRA-FLAGS: -flag1 -flag2 */`
+/// Returns additional compiler flags specified in the test file.
+pub fn parse_extra_flags_c(source: &str) -> Vec<String> {
+    let mut flags = Vec::new();
+    for line in source.lines() {
+        let lower = line.to_lowercase();
+        if let Some(pos) = lower.find("extra-flags:") {
+            let after = &line[pos + "extra-flags:".len()..];
+            let content = after.split("*/").next().unwrap_or("").trim();
+            for token in content.split_whitespace() {
+                flags.push(token.to_string());
+            }
+        }
+    }
+    flags
+}
+
 /// Parse SKIP-IF directives from LLVM IR source files.
 /// Format: `; SKIP-IF: <token>`
 /// Token can be a target name or opt level.

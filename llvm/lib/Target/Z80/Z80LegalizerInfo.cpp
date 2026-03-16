@@ -465,6 +465,14 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   getActionDefinitionsBuilder({G_FREM, G_FPOW}).libcallFor({S32, S64});
 
+  // Fixed-point arithmetic: custom-lower to integer operations.
+  // MULFIX: widen to double width, multiply, shift right by scale, truncate.
+  // DIVFIX: widen, shift left by scale, divide, truncate.
+  getActionDefinitionsBuilder({G_SMULFIX, G_UMULFIX, G_SMULFIXSAT,
+                               G_UMULFIXSAT, G_SDIVFIX, G_UDIVFIX,
+                               G_SDIVFIXSAT, G_UDIVFIXSAT})
+      .custom();
+
   getActionDefinitionsBuilder({G_FMINNUM, G_FMAXNUM}).libcallFor({S32, S64});
 
   // FP rounding functions — libcalls for both f32 and f64.
@@ -1111,6 +1119,128 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     auto WideShift =
         MIRBuilder.buildInstr(MI.getOpcode(), {WideTy}, {WideSrc, AmtReg});
     MIRBuilder.buildTrunc(DstReg, WideShift);
+    MI.eraseFromParent();
+    return true;
+  }
+  case TargetOpcode::G_SMULFIX:
+  case TargetOpcode::G_UMULFIX:
+  case TargetOpcode::G_SMULFIXSAT:
+  case TargetOpcode::G_UMULFIXSAT: {
+    // Fixed-point multiply: (a * b) >> scale, using double-width multiply.
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    Register RHS = MI.getOperand(2).getReg();
+    unsigned Scale = MI.getOperand(3).getImm();
+    LLT Ty = MRI.getType(Dst);
+    unsigned Width = Ty.getSizeInBits();
+    bool Signed = (MI.getOpcode() == TargetOpcode::G_SMULFIX ||
+                   MI.getOpcode() == TargetOpcode::G_SMULFIXSAT);
+    bool Saturating = (MI.getOpcode() == TargetOpcode::G_SMULFIXSAT ||
+                       MI.getOpcode() == TargetOpcode::G_UMULFIXSAT);
+
+    if (Scale == 0) {
+      if (Saturating) {
+        unsigned MulOpc = Signed ? TargetOpcode::G_SMULO : TargetOpcode::G_UMULO;
+        auto Prod = MIRBuilder.buildInstr(MulOpc, {Ty, LLT::scalar(1)}, {LHS, RHS});
+        if (Signed) {
+          auto Min = MIRBuilder.buildConstant(Ty, APInt::getSignedMinValue(Width));
+          auto Max = MIRBuilder.buildConstant(Ty, APInt::getSignedMaxValue(Width));
+          auto Xor = MIRBuilder.buildXor(Ty, LHS, RHS);
+          auto Zero = MIRBuilder.buildConstant(Ty, 0);
+          auto Neg = MIRBuilder.buildICmp(CmpInst::ICMP_SLT, LLT::scalar(1), Xor, Zero);
+          auto Sat = MIRBuilder.buildSelect(Ty, Neg, Min, Max);
+          MIRBuilder.buildSelect(Dst, Prod.getReg(1), Sat, Prod.getReg(0));
+        } else {
+          auto Max = MIRBuilder.buildConstant(Ty, APInt::getMaxValue(Width));
+          MIRBuilder.buildSelect(Dst, Prod.getReg(1), Max, Prod.getReg(0));
+        }
+      } else {
+        MIRBuilder.buildMul(Dst, LHS, RHS);
+      }
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // Widen to double width, multiply, shift right by scale, truncate.
+    // For i32+ this produces i64 operations (libcall mul + shift chain),
+    // which is verbose but correct. A dedicated runtime function would
+    // be needed to improve i32 fixed-point code quality.
+    LLT WideTy = LLT::scalar(Width * 2);
+    auto ExtOpc = Signed ? TargetOpcode::G_SEXT : TargetOpcode::G_ZEXT;
+    auto WideLHS = MIRBuilder.buildInstr(ExtOpc, {WideTy}, {LHS});
+    auto WideRHS = MIRBuilder.buildInstr(ExtOpc, {WideTy}, {RHS});
+    auto WideProd = MIRBuilder.buildMul(WideTy, WideLHS, WideRHS);
+    auto ShiftAmt = MIRBuilder.buildConstant(WideTy, Scale);
+    auto ShiftOpc = Signed ? TargetOpcode::G_ASHR : TargetOpcode::G_LSHR;
+    auto Shifted = MIRBuilder.buildInstr(ShiftOpc, {WideTy}, {WideProd, ShiftAmt});
+
+    if (Saturating) {
+      APInt MaxVal = Signed ? APInt::getSignedMaxValue(Width)
+                            : APInt::getMaxValue(Width);
+      APInt MinVal = Signed ? APInt::getSignedMinValue(Width)
+                            : APInt(Width, 0);
+      auto WideMax = MIRBuilder.buildConstant(WideTy, MaxVal.sext(Width * 2));
+      auto WideMin = MIRBuilder.buildConstant(WideTy, MinVal.sext(Width * 2));
+      auto CmpHi = Signed ? CmpInst::ICMP_SGT : CmpInst::ICMP_UGT;
+      auto Over = MIRBuilder.buildICmp(CmpHi, LLT::scalar(1), Shifted, WideMax);
+      auto Clamped = MIRBuilder.buildSelect(WideTy, Over, WideMax, Shifted);
+      if (Signed) {
+        auto Under = MIRBuilder.buildICmp(CmpInst::ICMP_SLT, LLT::scalar(1),
+                                          Shifted, WideMin);
+        Clamped = MIRBuilder.buildSelect(WideTy, Under, WideMin, Clamped);
+      }
+      MIRBuilder.buildTrunc(Dst, Clamped);
+    } else {
+      MIRBuilder.buildTrunc(Dst, Shifted);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
+  case TargetOpcode::G_SDIVFIX:
+  case TargetOpcode::G_UDIVFIX:
+  case TargetOpcode::G_SDIVFIXSAT:
+  case TargetOpcode::G_UDIVFIXSAT: {
+    // Fixed-point divide: (a << scale) / b
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    Register RHS = MI.getOperand(2).getReg();
+    unsigned Scale = MI.getOperand(3).getImm();
+    LLT Ty = MRI.getType(Dst);
+    unsigned Width = Ty.getSizeInBits();
+    bool Signed = (MI.getOpcode() == TargetOpcode::G_SDIVFIX ||
+                   MI.getOpcode() == TargetOpcode::G_SDIVFIXSAT);
+    bool Saturating = (MI.getOpcode() == TargetOpcode::G_SDIVFIXSAT ||
+                       MI.getOpcode() == TargetOpcode::G_UDIVFIXSAT);
+
+    LLT WideTy = LLT::scalar(Width * 2);
+    auto ExtOpc = Signed ? TargetOpcode::G_SEXT : TargetOpcode::G_ZEXT;
+    auto WideLHS = MIRBuilder.buildInstr(ExtOpc, {WideTy}, {LHS});
+    auto WideRHS = MIRBuilder.buildInstr(ExtOpc, {WideTy}, {RHS});
+    auto ShiftAmt = MIRBuilder.buildConstant(WideTy, Scale);
+    auto Shifted = MIRBuilder.buildShl(WideTy, WideLHS, ShiftAmt);
+    auto DivOpc = Signed ? TargetOpcode::G_SDIV : TargetOpcode::G_UDIV;
+    auto Quotient = MIRBuilder.buildInstr(DivOpc, {WideTy}, {Shifted, WideRHS});
+
+    if (Saturating) {
+      APInt MaxVal = Signed ? APInt::getSignedMaxValue(Width)
+                            : APInt::getMaxValue(Width);
+      APInt MinVal = Signed ? APInt::getSignedMinValue(Width)
+                            : APInt(Width, 0);
+      auto WideMax = MIRBuilder.buildConstant(WideTy, MaxVal.sext(Width * 2));
+      auto Over = MIRBuilder.buildICmp(
+          Signed ? CmpInst::ICMP_SGT : CmpInst::ICMP_UGT,
+          LLT::scalar(1), Quotient, WideMax);
+      auto Clamped = MIRBuilder.buildSelect(WideTy, Over, WideMax, Quotient);
+      if (Signed) {
+        auto WideMin = MIRBuilder.buildConstant(WideTy, MinVal.sext(Width * 2));
+        auto Under = MIRBuilder.buildICmp(CmpInst::ICMP_SLT, LLT::scalar(1),
+                                          Quotient, WideMin);
+        Clamped = MIRBuilder.buildSelect(WideTy, Under, WideMin, Clamped);
+      }
+      MIRBuilder.buildTrunc(Dst, Clamped);
+    } else {
+      MIRBuilder.buildTrunc(Dst, Quotient);
+    }
     MI.eraseFromParent();
     return true;
   }

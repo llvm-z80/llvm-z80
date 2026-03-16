@@ -78,6 +78,9 @@ pub fn run(paths: &Paths, config: &ClangConfig, on_result: &mut OnResult) -> Sui
 
         let source = std::fs::read_to_string(test_file).unwrap_or_default();
 
+        // Parse per-test EXTRA-FLAGS from source comments.
+        let per_test_flags = parse_extra_flags_c(&source);
+
         for &opt in &config.opt_levels {
             let tag = format!("{name}_{opt}{suffix}");
 
@@ -87,13 +90,18 @@ pub fn run(paths: &Paths, config: &ClangConfig, on_result: &mut OnResult) -> Sui
                 continue;
             }
 
+            let mut flags = config.extra_flags();
+            for f in &per_test_flags {
+                flags.push(f.as_str());
+            }
+
             let r = run_single(
                 &clang,
                 test_file,
                 &tag,
                 config.target,
                 opt,
-                &config.extra_flags(),
+                &flags,
                 &test_dir,
                 &source,
             );
