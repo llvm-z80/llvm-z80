@@ -4142,6 +4142,74 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return selectInline16(MI, Z80::UMOD16);
     return selectRuntimeLibCall16(MI, "__umodhi3");
 
+  case TargetOpcode::G_UDIVREM:
+  case TargetOpcode::G_SDIVREM: {
+    // Fused divrem: one runtime call returns both quotient and remainder.
+    // Z80:  __udivhi3: HL=dividend, DE=divisor → DE=quot, HL=rem
+    // SM83: __udivhi3: DE=dividend, BC=divisor → BC=quot, HL=rem
+    Register QuotReg = MI.getOperand(0).getReg();
+    Register RemReg = MI.getOperand(1).getReg();
+    Register LHSReg = MI.getOperand(2).getReg();
+    Register RHSReg = MI.getOperand(3).getReg();
+
+    if (MRI.getType(QuotReg).getSizeInBits() > 16)
+      return false;
+
+    // If using inline runtime, fall back to separate div+rem (each uses
+    // an inline pseudo). The fused call is only beneficial for external
+    // runtime calls.
+    if (STI.inlineI16Runtime())
+      return false;
+
+    if (!RBI.constrainGenericRegister(QuotReg, Z80::GR16RegClass, MRI) ||
+        !RBI.constrainGenericRegister(RemReg, Z80::GR16RegClass, MRI) ||
+        !RBI.constrainGenericRegister(LHSReg, Z80::GR16RegClass, MRI) ||
+        !RBI.constrainGenericRegister(RHSReg, Z80::GR16RegClass, MRI))
+      return false;
+
+    bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
+    const char *FuncName = IsSigned ? "__divhi3" : "__udivhi3";
+    Module *M = const_cast<Module *>(MF.getFunction().getParent());
+    FunctionCallee Func = M->getOrInsertFunction(
+        FuncName, FunctionType::get(Type::getInt16Ty(M->getContext()),
+                                    {Type::getInt16Ty(M->getContext()),
+                                     Type::getInt16Ty(M->getContext())},
+                                    false));
+    GlobalValue *GV = cast<GlobalValue>(Func.getCallee());
+
+    if (STI.hasSM83()) {
+      // SM83: DE=dividend, BC=divisor → BC=quot, HL=rem
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
+          .addReg(LHSReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::BC)
+          .addReg(RHSReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
+          .addGlobalAddress(GV)
+          .addUse(Z80::DE, RegState::Implicit)
+          .addUse(Z80::BC, RegState::Implicit);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
+          .addReg(Z80::BC);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), RemReg)
+          .addReg(Z80::HL);
+    } else {
+      // Z80: HL=dividend, DE=divisor → DE=quot, HL=rem
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
+          .addReg(LHSReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
+          .addReg(RHSReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
+          .addGlobalAddress(GV)
+          .addUse(Z80::HL, RegState::Implicit)
+          .addUse(Z80::DE, RegState::Implicit);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
+          .addReg(Z80::DE);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), RemReg)
+          .addReg(Z80::HL);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
+
   case TargetOpcode::G_UADDSAT:
   case TargetOpcode::G_USUBSAT:
   case TargetOpcode::G_SADDSAT:
