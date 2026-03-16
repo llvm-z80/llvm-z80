@@ -43,6 +43,7 @@ add_llvm_target(Z80CodeGen
   Z80LegalizerInfo.cpp
   Z80LowerSelect.cpp
   Z80MCInstLower.cpp
+  Z80PostRACompareMerge.cpp
   Z80PostRAScavenging.cpp
   Z80RegisterBankInfo.cpp
   Z80RegisterInfo.cpp

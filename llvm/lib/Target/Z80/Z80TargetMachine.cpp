@@ -42,6 +42,7 @@
 #include "Z80LateOptimization.h"
 #include "Z80LowerSelect.h"
 #include "Z80MachineFunctionInfo.h"
+#include "Z80PostRACompareMerge.h"
 #include "Z80PostRAScavenging.h"
 #include "Z80ShiftRotateChain.h"
 #include "Z80TargetObjectFile.h"
@@ -64,6 +65,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80LowerSelectPass(PR);
   initializeZ80PostRAScavengingPass(PR);
   initializeZ80ShiftRotateChainPass(PR);
+  initializeZ80PostRACompareMergePass(PR);
 }
 
 // Z80 data layout:
@@ -287,6 +289,10 @@ void Z80PassConfig::addPreSched2() {
 
   // This is currently mandatory, since it lowers CMPTermZ.
   addPass(createZ80LateOptimizationPass());
+
+  // Remove redundant OR A / AND A when the Z flag is already valid
+  // from a preceding ALU instruction.
+  addPass(createZ80PostRACompareMerge());
 }
 
 void Z80PassConfig::addPreEmitPass() {
