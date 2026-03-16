@@ -28,6 +28,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/IndVarSimplify.h"
 #include "llvm/Transforms/Utils.h"
 
@@ -202,6 +203,10 @@ TargetPassConfig *Z80TargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 void Z80PassConfig::addIRPasses() {
+  // Z80 is single-threaded: lower all atomic operations to plain
+  // non-atomic load/store/rmw sequences at the IR level.
+  addPass(createLowerAtomicPass());
+
   TargetPassConfig::addIRPasses();
   // Clean up after LSR in particular.
   if (getOptLevel() != CodeGenOptLevel::None)
