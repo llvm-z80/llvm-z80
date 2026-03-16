@@ -619,6 +619,23 @@ def LEA_IX_FI : Z80Pseudo<(outs GR16:$dst), (ins i32imm:$fi)> {
   let mayStore = false;
 }
 
+// 8-bit indirect load/store via any register pair (BC, DE, or HL).
+// Regalloc chooses which pair; expandPostRAPseudo selects the instruction:
+//   BC → LD A,(BC) / LD (BC),A
+//   DE → LD A,(DE) / LD (DE),A
+//   HL → LD A,(HL) / LD (HL),A
+// This avoids forcing the address into HL, reducing register pressure.
+def LOAD8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
+  let Defs = [A];
+  let mayLoad = true;
+  let mayStore = false;
+}
+def STORE8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
+  let Uses = [A];
+  let mayLoad = false;
+  let mayStore = true;
+}
+
 // LD_r8_n: Load 8-bit immediate into any GR8 register.
 // Expanded in expandPostRAPseudo to the concrete LD_r_n opcode.
 def LD_r8_n : Z80Pseudo<(outs GR8:$dst), (ins i8imm:$imm)> {

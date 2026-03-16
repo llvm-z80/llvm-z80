@@ -8,12 +8,12 @@
 define void @isr() #0 {
 ; Z80-LABEL: _isr:
 ; Z80:       push af
-; Z80:       push hl
+; Z80:       push bc
 ; Z80:       reti
 
 ; SM83-LABEL: _isr:
 ; SM83:       push af
-; SM83:       push hl
+; SM83:       push bc
 ; SM83:       reti
   store volatile i8 66, ptr @g
   ret void
@@ -36,12 +36,12 @@ define void @normal() {
 define void @isr_complex() #0 {
 ; Z80-LABEL: _isr_complex:
 ; Z80:       push af
-; Z80:       push hl
+; Z80:       push bc
 ; Z80:       reti
 
 ; SM83-LABEL: _isr_complex:
 ; SM83:       push af
-; SM83:       push hl
+; SM83:       push bc
 ; SM83:       reti
   %a = load volatile i8, ptr @g
   %b = add i8 %a, 1

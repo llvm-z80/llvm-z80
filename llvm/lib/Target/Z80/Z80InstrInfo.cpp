@@ -555,6 +555,32 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   DebugLoc DL = MI.getDebugLoc();
 
   switch (MI.getOpcode()) {
+  case Z80::LOAD8_IND: {
+    // Expand to LD A,(BC), LD A,(DE), or LD A,(HL) based on allocated register.
+    Register Addr = MI.getOperand(0).getReg();
+    unsigned Opc;
+    if (Addr == Z80::BC) Opc = Z80::LD_A_BCind;
+    else if (Addr == Z80::DE) Opc = Z80::LD_A_DEind;
+    else if (Addr == Z80::HL) Opc = Z80::LD_A_HLind;
+    else llvm_unreachable("Invalid register for LOAD8_IND");
+    BuildMI(MBB, MI, DL, get(Opc));
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case Z80::STORE8_IND: {
+    // Expand to LD (BC),A, LD (DE),A, or LD (HL),A based on allocated register.
+    Register Addr = MI.getOperand(0).getReg();
+    unsigned Opc;
+    if (Addr == Z80::BC) Opc = Z80::LD_BCind_A;
+    else if (Addr == Z80::DE) Opc = Z80::LD_DEind_A;
+    else if (Addr == Z80::HL) Opc = Z80::LD_HLind_A;
+    else llvm_unreachable("Invalid register for STORE8_IND");
+    BuildMI(MBB, MI, DL, get(Opc));
+    MI.eraseFromParent();
+    return true;
+  }
+
   case Z80::LD_r8_n: {
     // LD_r8_n dst, imm -> LD_A_n/LD_B_n/etc. based on dst register
     Register DstReg = MI.getOperand(0).getReg();
@@ -925,6 +951,23 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return true;
   }
 
+  case Z80::SM83_CMP_ZERO16: {
+    // Lightweight 16-bit zero test: LD A,lo; OR hi — sets Z if reg==0.
+    // Only clobbers A (not B), saving register pressure in loops.
+    Register SrcReg = MI.getOperand(0).getReg();
+    Register Lo = TRI->getSubReg(SrcReg, Z80::sub_lo);
+    Register Hi = TRI->getSubReg(SrcReg, Z80::sub_hi);
+
+    static const unsigned OrOpcodes[] = {Z80::OR_A, Z80::OR_B, Z80::OR_C,
+                                         Z80::OR_D, Z80::OR_E, Z80::OR_H,
+                                         Z80::OR_L};
+
+    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, Lo)));
+    BuildMI(MBB, MI, DL, get(OrOpcodes[Z80::gr8RegToIndex(Hi)]));
+
+    MI.eraseFromParent();
+    return true;
+  }
   case Z80::SM83_CMP_Z16:
   case Z80::XOR_CMP_Z16: {
     // 16-bit XOR-based equality comparison — sets Z flag directly.
@@ -1826,6 +1869,10 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
                              // A,hi(1) = 4
     return 4;
 
+  case Z80::LOAD8_IND:  // LD A,(rr) = 1
+  case Z80::STORE8_IND: // LD (rr),A = 1
+    return 1;
+
   case Z80::ADD_HL_rr_CO: // ADD HL,rr(1) + SBC A,A(1) + AND n(2) = 4
     return 4;
 
@@ -1844,6 +1891,10 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::SBC_HL_rr_BIO: // LD A,r(1) + RRCA(1) + SBC HL,rr(2) + SBC A,A(1) +
                            // AND n(2) = 7
     return 7;
+
+  // Zero test pseudo
+  case Z80::SM83_CMP_ZERO16: // LD A,lo + OR hi = 2
+    return 2;
 
   // XOR-based comparison pseudos
   case Z80::SM83_CMP_Z16: // LD+XOR+LD B,A+LD+XOR+OR B = 6

@@ -113,6 +113,14 @@ def SM83_CMP_Z16 : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
   let mayStore = false;
 }
 
+// Lightweight 16-bit zero test: LD A,lo; OR hi — sets Z if reg==0.
+// Only clobbers A (not B), reducing register pressure in loops.
+def SM83_CMP_ZERO16 : Z80Pseudo<(outs), (ins GR16:$src)> {
+  let Defs = [A, FLAGS];
+  let mayLoad = false;
+  let mayStore = false;
+}
+
 // SM83 signed 16-bit add with overflow detection.
 // HL = HL + rr, A = overflow (0 or 1).
 // SM83 has no P/V flag, so overflow is computed via sign bit comparison:
