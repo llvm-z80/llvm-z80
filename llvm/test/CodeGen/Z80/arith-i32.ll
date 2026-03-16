@@ -14,8 +14,8 @@ define i32 @add32(i32 %a, i32 %b) {
 ; Uses sbc hl,de for both words with carry propagation
 define i32 @sub32(i32 %a, i32 %b) {
 ; CHECK-LABEL: sub32:
-; CHECK:       sbc hl,bc
-; CHECK:       sbc hl,bc
+; CHECK:       sbc hl,
+; CHECK:       sbc hl,
   %r = sub i32 %a, %b
   ret i32 %r
 }

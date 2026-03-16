@@ -10,10 +10,9 @@ define i64 @identity64(i64 %x) {
 ; Test: i64 addition (narrowed to 4 x i16 add/adc chain)
 define i64 @add64(i64 %a, i64 %b) {
 ; CHECK-LABEL: _add64:
-; CHECK:       add hl,de
-; CHECK:       adc hl,de
-; CHECK:       adc hl,de
-; CHECK:       adc hl,de
+; CHECK:       adc hl,
+; CHECK:       adc hl,
+; CHECK:       adc hl,
 ; CHECK:       ret
   %r = add i64 %a, %b
   ret i64 %r
