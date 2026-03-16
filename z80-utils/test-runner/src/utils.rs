@@ -310,11 +310,13 @@ fn run_rel2elf(input: &Path, output: &Path) -> Result<(), String> {
 
 fn clang_to_elf(
     clang: &Path, src: &Path, out: &Path, target: Target, opt: OptLevel,
+    extra_flags: &[String],
 ) -> Result<(), String> {
     let mut cmd = Command::new(clang);
     cmd.arg(format!("--target={}", target.triple()));
     cmd.arg(format!("-{}", opt.clang_flag()));
     cmd.args(["-c"]);
+    for flag in extra_flags { cmd.arg(flag); }
     cmd.arg(src).arg("-o").arg(out);
     match run_cmd_timeout(&mut cmd, COMPILE_TIMEOUT) {
         Err(e) => Err(format!("clang -c: {e}")),
@@ -463,11 +465,13 @@ fn run_ihx_binary(ihx: &Path, source: &str, target: Target, tag: &str) -> TestRe
 
 fn clang_to_rel(
     clang: &Path, src: &Path, _asm_out: &Path, rel_out: &Path, target: Target, opt: OptLevel, _tag: &str,
+    extra_flags: &[String],
 ) -> Result<(), String> {
     let mut cmd = Command::new(clang);
     cmd.arg(format!("--target={}", target.sdcc_triple()));
     cmd.arg(format!("-{}", opt.clang_flag()));
     cmd.arg("-c");
+    for flag in extra_flags { cmd.arg(flag); }
     cmd.arg(src).arg("-o").arg(rel_out);
     match run_cmd_timeout(&mut cmd, COMPILE_TIMEOUT) {
         Err(e) => return Err(format!("clang -c: {e}")),
@@ -518,7 +522,8 @@ fn test_elf_roundtrip(
     let _ = std::fs::create_dir_all(&tmp);
 
     let elf_o = tmp.join(format!("{tag}.o"));
-    if let Err(e) = clang_to_elf(clang, src, &elf_o, target, opt) {
+    let extra_flags = parse_extra_flags_c(source);
+    if let Err(e) = clang_to_elf(clang, src, &elf_o, target, opt, &extra_flags) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, e);
     }
 
@@ -584,7 +589,8 @@ fn test_rel_roundtrip(
 
     let asm = tmp.join(format!("{tag}.s"));
     let rel = tmp.join(format!("{tag}.rel"));
-    if let Err(e) = clang_to_rel(clang, src, &asm, &rel, target, opt, tag) {
+    let extra_flags = parse_extra_flags_c(source);
+    if let Err(e) = clang_to_rel(clang, src, &asm, &rel, target, opt, tag, &extra_flags) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, e);
     }
 
@@ -655,7 +661,9 @@ fn test_elf_crosslink(
     }
 
     let clang_elf = tmp.join(format!("{tag}_clang.o"));
-    if let Err(e) = clang_to_elf(clang, clang_src, &clang_elf, target, opt) {
+    let clang_source = std::fs::read_to_string(clang_src).unwrap_or_default();
+    let clang_extra = parse_extra_flags_c(&clang_source);
+    if let Err(e) = clang_to_elf(clang, clang_src, &clang_elf, target, opt, &clang_extra) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, e);
     }
     let clang_rel = tmp.join(format!("{tag}_clang.rel"));
@@ -723,7 +731,9 @@ fn test_rel_crosslink(
     let _ = std::fs::create_dir_all(&tmp);
 
     let clang_o = tmp.join(format!("{tag}_clang.o"));
-    if let Err(e) = clang_to_elf(clang, clang_src, &clang_o, target, opt) {
+    let clang_source = std::fs::read_to_string(clang_src).unwrap_or_default();
+    let clang_extra = parse_extra_flags_c(&clang_source);
+    if let Err(e) = clang_to_elf(clang, clang_src, &clang_o, target, opt, &clang_extra) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, e);
     }
 
@@ -866,7 +876,8 @@ fn test_elf_ar_roundtrip(
     let _ = std::fs::create_dir_all(&tmp);
 
     let elf_o = tmp.join(format!("{tag}.o"));
-    if let Err(e) = clang_to_elf(clang, src, &elf_o, target, opt) {
+    let extra_flags = parse_extra_flags_c(source);
+    if let Err(e) = clang_to_elf(clang, src, &elf_o, target, opt, &extra_flags) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, e);
     }
 
@@ -967,7 +978,8 @@ fn test_rel_ar_roundtrip(
     // Compile to .rel via clang + sdasz80
     let asm = tmp.join(format!("{tag}.s"));
     let rel = tmp.join(format!("{tag}.rel"));
-    if let Err(e) = clang_to_rel(clang, src, &asm, &rel, target, opt, tag) {
+    let extra_flags = parse_extra_flags_c(source);
+    if let Err(e) = clang_to_rel(clang, src, &asm, &rel, target, opt, tag, &extra_flags) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, e);
     }
 
