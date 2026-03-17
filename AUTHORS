@@ -15,4 +15,9 @@ Piotr Fusik (piotr@fusion-lang.org)
 Mikael Lund (Mlund@mac.com)
 Mariusz Kryński (mrk@sed.pl)
 
+Also, LLVM-Z80 project adopted some optimization pass from GB-LLVM project
+(https://github.com/DaveDuck321/gb-llvm), whose contributors include:
+
+Tom Grant (thomas.grant.duck321@gmail.com)
+
 Built, of course, upon the amazing work of the LLVM Project Authors!
