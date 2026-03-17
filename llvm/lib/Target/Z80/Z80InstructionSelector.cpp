@@ -781,13 +781,28 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
           BuildMI(MBB, MI, DL, TII.get(Z80::SUB_n)).addImm(ConstVal);
         BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(Z80::H);
       } else if (STI.hasSM83()) {
-        // SM83: XOR-based comparison sets Z flag correctly for 16-bit EQ/NE.
-        if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
-            !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
-          return false;
-        BuildMI(MBB, MI, DL, TII.get(Z80::SM83_CMP_Z16))
-            .addReg(LHS)
-            .addReg(RHS);
+        // Check if RHS is constant 0 — use lightweight OR-based zero test.
+        bool RHSIsZero = false;
+        MachineInstr *RHSDef = MRI.getVRegDef(RHS);
+        if (RHSDef && RHSDef->getOpcode() == TargetOpcode::G_CONSTANT) {
+          auto *CI = RHSDef->getOperand(1).getCImm();
+          RHSIsZero = CI && CI->isZero();
+        }
+
+        if (RHSIsZero) {
+          if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI))
+            return false;
+          BuildMI(MBB, MI, DL, TII.get(Z80::SM83_CMP_ZERO16))
+              .addReg(LHS);
+        } else {
+          // SM83: XOR-based comparison sets Z flag correctly for 16-bit EQ/NE.
+          if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
+              !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
+            return false;
+          BuildMI(MBB, MI, DL, TII.get(Z80::SM83_CMP_Z16))
+              .addReg(LHS)
+              .addReg(RHS);
+        }
       } else {
         // Z80: XOR-based 16-bit EQ/NE — avoids clobbering HL and doesn't
         // need BC/DE for constants, reducing register pressure.
@@ -1794,16 +1809,16 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       }
     }
 
-    // Fallback: HL-indirect addressing
+    // Fallback: indirect addressing via BC, DE, or HL.
+    // LOAD8_IND accepts any GR16 register, so regalloc can choose BC/DE/HL
+    // freely. This avoids forcing the address into HL, reducing register
+    // pressure (LD A,(BC) and LD A,(DE) are valid Z80/SM83 instructions).
     if (DstTy.getSizeInBits() <= 8) {
-      // 8-bit load via HL indirection
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(AddrReg, Z80::GR16RegClass, MRI))
         return false;
 
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
-          .addReg(AddrReg);
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_HLind));
+      BuildMI(MBB, MI, DL, TII.get(Z80::LOAD8_IND)).addReg(AddrReg);
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::A);
       MI.eraseFromParent();
       return true;
@@ -1902,15 +1917,13 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     }
 
     if (SrcTy.getSizeInBits() <= 8) {
-      // 8-bit store via HL indirection
+      // 8-bit store via indirect addressing (BC, DE, or HL).
       if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(AddrReg, Z80::GR16RegClass, MRI))
         return false;
 
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
-          .addReg(AddrReg);
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(SrcReg);
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_A));
+      BuildMI(MBB, MI, DL, TII.get(Z80::STORE8_IND)).addReg(AddrReg);
       MI.eraseFromParent();
       return true;
     }
@@ -2446,6 +2459,25 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, DL, TII.get(Z80::XOR_A));
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
+      } else if (ShiftAmt >= 4 && STI.hasSM83()) {
+        // SM83: SWAP A (nibble swap) + AND 0xF0 + remaining ADD A,A
+        //   SHL 4: SWAP+AND = 3B vs ADD×4 = 4B
+        //   SHL 5: SWAP+AND+ADD = 4B vs ADD×5 = 5B
+        //   SHL 6: SWAP+AND+ADD×2 = 5B vs ADD×6 = 6B
+        //   SHL 7: RRCA+AND = 3B (bit0→bit7, even better)
+        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
+            .addReg(SrcReg);
+        if (ShiftAmt == 7) {
+          BuildMI(MBB, MI, DL, TII.get(Z80::RRCA));
+          BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(0x80);
+        } else {
+          BuildMI(MBB, MI, DL, TII.get(Z80::SWAP_A));
+          BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(0xF0);
+          for (int64_t i = 4; i < ShiftAmt; i++)
+            BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_A));
+        }
+        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
+            .addReg(Z80::A);
       } else if (ShiftAmt > 0) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(SrcReg);
@@ -2835,6 +2867,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     if (Amt == 0) {
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(SrcReg);
+    } else if (Amt == 4 && STI.hasSM83()) {
+      // SM83: SWAP A is a single-instruction nibble swap (rotate by 4).
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(SrcReg);
+      BuildMI(MBB, MI, DL, TII.get(Z80::SWAP_A));
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::A);
     } else if (Amt > 0) {
       // For amounts > 4, rotate the other direction (fewer instructions).
       // E.g. ROTL by 6 = ROTR by 2 (2 instructions instead of 6).
@@ -3180,6 +3217,27 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       const auto &STI = MF.getSubtarget<Z80Subtarget>();
       if (Opcode == Z80::G_Z80_CMP_BR_EQ || Opcode == Z80::G_Z80_CMP_BR_NE) {
         if (STI.hasSM83()) {
+          // Check if RHS is constant 0 — use lightweight OR-based zero test
+          // (LD A,lo; OR hi) which only clobbers A, not A+B.
+          // This avoids spilling loop-carried values around the comparison.
+          bool RHSIsZero = false;
+          MachineInstr *RHSDef = MRI.getVRegDef(RHS);
+          if (RHSDef && RHSDef->getOpcode() == TargetOpcode::G_CONSTANT) {
+            auto *CI = RHSDef->getOperand(1).getCImm();
+            RHSIsZero = CI && CI->isZero();
+          }
+
+          if (RHSIsZero) {
+            // LHS == 0: LD A,lo; OR hi — sets Z if LHS is zero.
+            // Only clobbers A (not B), reducing register pressure.
+            if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI))
+              return false;
+            // Emit: LD A, LHS_lo; OR LHS_hi
+            // The actual sub-register extraction happens in expandPostRAPseudo
+            // via a new pseudo SM83_CMP_ZERO16.
+            BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SM83_CMP_ZERO16))
+                .addReg(LHS);
+          } else {
           // SM83: XOR-based comparison sets Z flag correctly for 16-bit EQ/NE.
           if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
               !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
@@ -3187,6 +3245,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SM83_CMP_Z16))
               .addReg(LHS)
               .addReg(RHS);
+          }
         } else {
           // Z80: AND A; SBC HL,rr sets Z flag correctly for 16-bit EQ/NE.
           if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
@@ -4082,6 +4141,74 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     if (STI.inlineI16Runtime())
       return selectInline16(MI, Z80::UMOD16);
     return selectRuntimeLibCall16(MI, "__umodhi3");
+
+  case TargetOpcode::G_UDIVREM:
+  case TargetOpcode::G_SDIVREM: {
+    // Fused divrem: one runtime call returns both quotient and remainder.
+    // Z80:  __udivhi3: HL=dividend, DE=divisor → DE=quot, HL=rem
+    // SM83: __udivhi3: DE=dividend, BC=divisor → BC=quot, HL=rem
+    Register QuotReg = MI.getOperand(0).getReg();
+    Register RemReg = MI.getOperand(1).getReg();
+    Register LHSReg = MI.getOperand(2).getReg();
+    Register RHSReg = MI.getOperand(3).getReg();
+
+    if (MRI.getType(QuotReg).getSizeInBits() > 16)
+      return false;
+
+    // If using inline runtime, fall back to separate div+rem (each uses
+    // an inline pseudo). The fused call is only beneficial for external
+    // runtime calls.
+    if (STI.inlineI16Runtime())
+      return false;
+
+    if (!RBI.constrainGenericRegister(QuotReg, Z80::GR16RegClass, MRI) ||
+        !RBI.constrainGenericRegister(RemReg, Z80::GR16RegClass, MRI) ||
+        !RBI.constrainGenericRegister(LHSReg, Z80::GR16RegClass, MRI) ||
+        !RBI.constrainGenericRegister(RHSReg, Z80::GR16RegClass, MRI))
+      return false;
+
+    bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
+    const char *FuncName = IsSigned ? "__divhi3" : "__udivhi3";
+    Module *M = const_cast<Module *>(MF.getFunction().getParent());
+    FunctionCallee Func = M->getOrInsertFunction(
+        FuncName, FunctionType::get(Type::getInt16Ty(M->getContext()),
+                                    {Type::getInt16Ty(M->getContext()),
+                                     Type::getInt16Ty(M->getContext())},
+                                    false));
+    GlobalValue *GV = cast<GlobalValue>(Func.getCallee());
+
+    if (STI.hasSM83()) {
+      // SM83: DE=dividend, BC=divisor → BC=quot, HL=rem
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
+          .addReg(LHSReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::BC)
+          .addReg(RHSReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
+          .addGlobalAddress(GV)
+          .addUse(Z80::DE, RegState::Implicit)
+          .addUse(Z80::BC, RegState::Implicit);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
+          .addReg(Z80::BC);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), RemReg)
+          .addReg(Z80::HL);
+    } else {
+      // Z80: HL=dividend, DE=divisor → DE=quot, HL=rem
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
+          .addReg(LHSReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
+          .addReg(RHSReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
+          .addGlobalAddress(GV)
+          .addUse(Z80::HL, RegState::Implicit)
+          .addUse(Z80::DE, RegState::Implicit);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
+          .addReg(Z80::DE);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), RemReg)
+          .addReg(Z80::HL);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
 
   case TargetOpcode::G_UADDSAT:
   case TargetOpcode::G_USUBSAT:

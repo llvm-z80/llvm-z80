@@ -577,6 +577,10 @@ def SPILL_GR16 : Z80Pseudo<(outs), (ins GR16:$src, i32imm:$fi, i32imm:$offset)> 
 def RELOAD_GR16 : Z80Pseudo<(outs GR16:$dst), (ins i32imm:$fi, i32imm:$offset)> {
   let mayLoad = true;
   let mayStore = false;
+  // Allow rematerialization for loads from immutable stack slots (e.g. incoming
+  // arguments). isReMaterializableImpl checks isImmutableObjectIndex, so only
+  // fixed-stack args are actually rematerialized — spill slot reloads are not.
+  let isReMaterializable = true;
 }
 
 // 16-bit add/sub from frame slot via 8-bit IX-indexed ALU.
@@ -608,6 +612,7 @@ def SPILL_IMM8 : Z80Pseudo<(outs), (ins i8imm:$val, i32imm:$fi, i32imm:$offset)>
 def RELOAD_GR8 : Z80Pseudo<(outs GR8:$dst), (ins i32imm:$fi, i32imm:$offset)> {
   let mayLoad = true;
   let mayStore = false;
+  let isReMaterializable = true;
 }
 
 // LEA_IX_FI: Compute the effective address of a frame index into a GR16.
@@ -617,6 +622,23 @@ def RELOAD_GR8 : Z80Pseudo<(outs GR8:$dst), (ins i32imm:$fi, i32imm:$offset)> {
 def LEA_IX_FI : Z80Pseudo<(outs GR16:$dst), (ins i32imm:$fi)> {
   let mayLoad = false;
   let mayStore = false;
+}
+
+// 8-bit indirect load/store via any register pair (BC, DE, or HL).
+// Regalloc chooses which pair; expandPostRAPseudo selects the instruction:
+//   BC → LD A,(BC) / LD (BC),A
+//   DE → LD A,(DE) / LD (DE),A
+//   HL → LD A,(HL) / LD (HL),A
+// This avoids forcing the address into HL, reducing register pressure.
+def LOAD8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
+  let Defs = [A];
+  let mayLoad = true;
+  let mayStore = false;
+}
+def STORE8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
+  let Uses = [A];
+  let mayLoad = false;
+  let mayStore = true;
 }
 
 // LD_r8_n: Load 8-bit immediate into any GR8 register.

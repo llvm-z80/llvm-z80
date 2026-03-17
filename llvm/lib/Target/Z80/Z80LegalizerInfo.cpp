@@ -223,8 +223,14 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .clampScalar(0, S8, S128);
 
   // Combined div+rem: lower back to separate G_UDIV/G_UREM (or G_SDIV/G_SREM).
-  // The div_rem_to_divrem combine creates these, but Z80 has no fused divrem.
-  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM}).lower();
+  // Z80's division runtime returns both quotient and remainder in one call:
+  //   Z80:  __udivhi3: HL÷DE → DE=quot, HL=rem
+  //   SM83: __udivhi3: DE÷BC → BC=quot, HL=rem
+  // Custom-lower i16 G_UDIVREM/G_SDIVREM to a single runtime call.
+  // i8 and others fall back to separate div+rem.
+  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM})
+      .customFor({S16})
+      .lower();
 
   // Comparisons
   // G_ICMP produces a boolean result - we widen it to S8 since Z80 has
@@ -612,6 +618,11 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     MI.eraseFromParent();
     return true;
   }
+
+  case TargetOpcode::G_UDIVREM:
+  case TargetOpcode::G_SDIVREM:
+    // Pass through to ISel — the runtime call returns both quot and rem.
+    return true;
 
   case TargetOpcode::G_VASTART: {
     // Store the address of the first vararg into the va_list pointer.
