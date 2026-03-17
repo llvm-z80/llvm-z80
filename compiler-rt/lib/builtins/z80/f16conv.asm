@@ -1,3 +1,4 @@
+; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___extendhfsf2
 	.globl __h2f_exp_zero

@@ -1,3 +1,4 @@
+; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl __udiv64_setup
 	.globl __udiv64_core

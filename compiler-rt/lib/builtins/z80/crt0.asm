@@ -1,3 +1,4 @@
+; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 ;===-- crt0.asm - Z80 C Runtime Startup ------------------------------------===;
 ;
 ; Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
