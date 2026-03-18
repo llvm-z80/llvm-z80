@@ -40,6 +40,7 @@ const R_Z80_PCREL_16: u32 = 12;
 const R_Z80_FK_DATA_4: u32 = 13;
 const R_Z80_FK_DATA_8: u32 = 14;
 const R_Z80_IMM16: u32 = 16;
+const R_SM83_LDH8: u32 = 19;
 
 // ASxxxx relocation mode bits
 const R_BYTE: u8 = 0x01;
@@ -429,7 +430,7 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
 
             let (size, mut mode) = match r_type {
                 R_Z80_ADDR16 | R_Z80_IMM16 => (2, 0u8),
-                R_Z80_ADDR8 | R_Z80_IMM8 => (1, R_BYTE),
+                R_Z80_ADDR8 | R_Z80_IMM8 | R_SM83_LDH8 => (1, R_BYTE),
                 R_Z80_PCREL_8 => (1, R_BYTE | R_PCR),
                 R_Z80_PCREL_16 => (2, R_PCR),
                 R_Z80_ADDR16_LO => (1, R_BYTE),

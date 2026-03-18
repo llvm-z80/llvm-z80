@@ -80,6 +80,7 @@ MCFixupKindInfo Z80AsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"PCRel16", 0, 16, 0},
       {"AddrAsciz", 0, 16, 0},
       {"Disp8", 0, 8, 0}, // 8-bit signed displacement for indexed addressing
+      {"LDH8", 0, 8, 0},  // SM83 LDH operand: 8-bit offset from 0xFF00
   };
 
   if (Kind < FirstTargetFixupKind)
@@ -103,6 +104,10 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   if (Fixup.isPCRel())
     Value -= 1;
 
+  // SM83 LDH: subtract 0xFF00 base to get the 8-bit offset
+  if (Fixup.getKind() == Z80::LDH8)
+    Value -= 0xFF00;
+
   maybeAddReloc(F, Fixup, Target, Value, IsResolved);
 
   unsigned Kind = Fixup.getKind();
@@ -121,6 +126,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   case Z80::Addr24_Segment_High:
   case Z80::PCRel8:
   case Z80::Disp8: // 8-bit signed displacement for indexed addressing
+  case Z80::LDH8: // SM83 LDH operand: 8-bit offset from 0xFF00
     NumBytes = 1;
     break;
   case FK_Data_2:
