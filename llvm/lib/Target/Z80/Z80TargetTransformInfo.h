@@ -61,12 +61,13 @@ public:
     return true;
   }
 
-  // Z80 has only 3 GP register pairs (BC, DE, HL). Inlining any non-trivial
-  // function causes massive register spilling that dwarfs the benefit.
-  // Block all non-always_inline inlining (matches SDCC behavior).
+  // Z80 has only 3 GP register pairs (BC, DE, HL). Inlining large functions
+  // causes massive register spilling that dwarfs the benefit.
+  // Allow inlining for functions marked inlinehint (e.g. Rust iterators)
+  // to preserve zero-cost abstractions.
   bool areInlineCompatible(const Function *Caller,
                            const Function *Callee) const override {
-    return false;
+    return Callee->hasFnAttribute(Attribute::InlineHint);
   }
 
 };
