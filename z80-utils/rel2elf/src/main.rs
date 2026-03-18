@@ -55,6 +55,24 @@ const R_MSB: u8 = 0x80;
 const AREA_FLAG_ABS: u32 = 0x08;
 const AR_MAGIC: &[u8; 8] = b"!<arch>\n";
 
+// Symbols from SDCC libraries that conflict with Rust's compiler_builtins.
+// Renamed with __sdcc suffix so GBDK internally links its own versions
+// while Rust runtime links the compiler_builtins versions.
+// See z80-utils/rel2elf/README.md for details.
+const CONFLICTING_SYMBOLS: &[&str] = &[
+    "_memcpy", "_memmove", "_memset",
+    "_strlen", "_strcmp",
+];
+
+fn mangle_symbol(name: &str) -> String {
+    for &conflict in CONFLICTING_SYMBOLS {
+        if name == conflict {
+            return format!("{}__sdcc", name);
+        }
+    }
+    name.to_string()
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 // Phase 1 output
@@ -670,7 +688,7 @@ fn transform(raw: &mut RawModule) -> ElfModule {
         };
 
         symbols.push(ElfSymbol {
-            name: sym.name.clone(),
+            name: mangle_symbol(&sym.name),
             value: if sym.is_defined { sym.value } else { 0 },
             section_idx: shndx,
             binding: STB_GLOBAL,
