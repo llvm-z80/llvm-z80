@@ -47,12 +47,12 @@ bool Z80AsmBackend::fixupNeedsRelaxationAdvanced(const MCFragment &F,
                                                  const MCValue &Target,
                                                  uint64_t Value,
                                                  bool Resolved) const {
-  // Z80 branches are limited to signed 8-bit offset for JR
-  // If we can't resolve the value, we might need to relax
+  // Primary JR→JP relaxation is handled by BranchRelaxation + Z80BranchCleanup
+  // at the MachineFunction level. This check serves as a safety net for cases
+  // that bypass BranchRelaxation (inline assembly, late pseudo expansion).
   if (!Resolved)
     return true;
 
-  // For PC-relative fixups, check if the offset fits in signed 8 bits
   if (Fixup.getKind() == (MCFixupKind)Z80::PCRel8) {
     int64_t SignedValue = static_cast<int64_t>(Value);
     return SignedValue < -128 || SignedValue > 127;
@@ -161,15 +161,39 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
 bool Z80AsmBackend::mayNeedRelaxation(unsigned Opcode,
                                       ArrayRef<MCOperand> Operands,
                                       const MCSubtargetInfo &STI) const {
-  // Z80 JR instructions might need relaxation to JP
-  // TODO: Implement proper relaxation when needed
-  return false;
+  // Primary JR→JP relaxation is handled at the MachineFunction level by
+  // BranchRelaxation + Z80BranchCleanup (see Z80BranchCleanup.cpp).
+  // This AsmBackend implementation serves as a safety net for edge cases
+  // that bypass BranchRelaxation (e.g. inline assembly, post-relaxation
+  // pseudo expansion).
+  switch (Opcode) {
+  case Z80::JR_e:
+  case Z80::JR_Z_e:
+  case Z80::JR_NZ_e:
+  case Z80::JR_C_e:
+  case Z80::JR_NC_e:
+    return true;
+  default:
+    return false;
+  }
 }
 
 void Z80AsmBackend::relaxInstruction(MCInst &Inst,
                                      const MCSubtargetInfo &STI) const {
-  // TODO: Implement JR -> JP relaxation if needed
-  llvm_unreachable("Z80AsmBackend::relaxInstruction not implemented");
+  // Relax JR (2 bytes, PC-relative) → JP (3 bytes, absolute).
+  // Normally BranchRelaxation handles this at the MachineFunction level,
+  // but this fallback catches edge cases (inline asm, late expansions).
+  unsigned NewOpcode;
+  switch (Inst.getOpcode()) {
+  case Z80::JR_e:    NewOpcode = Z80::JP_nn; break;
+  case Z80::JR_Z_e:  NewOpcode = Z80::JP_Z_nn; break;
+  case Z80::JR_NZ_e: NewOpcode = Z80::JP_NZ_nn; break;
+  case Z80::JR_C_e:  NewOpcode = Z80::JP_C_nn; break;
+  case Z80::JR_NC_e: NewOpcode = Z80::JP_NC_nn; break;
+  default:
+    llvm_unreachable("Unexpected instruction to relax");
+  }
+  Inst.setOpcode(NewOpcode);
 }
 
 unsigned Z80AsmBackend::relaxInstructionTo(unsigned Opcode,
