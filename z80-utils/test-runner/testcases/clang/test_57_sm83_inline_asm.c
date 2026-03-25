@@ -50,10 +50,11 @@ uint8_t test_swap(void) {
 uint8_t test_hl_indirect_load(void) {
     volatile uint8_t val = 0xCD;
     uint8_t result;
+    register uint8_t *ptr asm("hl") = (uint8_t *)&val;
     asm volatile(
         "ld a, (hl)\n\t"
         : "=a"(result)
-        : "r"(&val)
+        : "r"(ptr)
         : "memory"
     );
     return result;
@@ -62,11 +63,12 @@ uint8_t test_hl_indirect_load(void) {
 /* Bit 4: (hl) indirect store */
 uint8_t test_hl_indirect_store(void) {
     volatile uint8_t val = 0;
+    register uint8_t *ptr asm("hl") = (uint8_t *)&val;
     asm volatile(
         "ld a, #0x77\n\t"
         "ld (hl), a\n\t"
         :
-        : "r"(&val)
+        : "r"(ptr)
         : "a", "memory"
     );
     return val;

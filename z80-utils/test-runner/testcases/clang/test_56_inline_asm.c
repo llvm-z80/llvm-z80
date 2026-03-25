@@ -73,12 +73,13 @@ uint16_t test_mem16(void) {
 /* Bit 5: register indirect (hl) load and store */
 uint8_t test_hl_indirect(void) {
     volatile uint8_t val = 0x77;
+    register uint8_t *ptr asm("hl") = (uint8_t *)&val;
     asm volatile(
         "ld a, #0x00\n\t"
         "ld a, (hl)\n\t"
         "ld (_g_byte), a\n\t"
         :
-        : "r"(&val)
+        : "r"(ptr)
         : "a", "memory"
     );
     return g_byte;
