@@ -143,4 +143,51 @@ def SM83_SSUBO_HL_rr : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs)> {
   let mayStore = false;
 }
 
+//===----------------------------------------------------------------------===//
+//  LDH Instructions (0xFF00 + 8-bit offset)
+//===----------------------------------------------------------------------===//
+
+// LDH (n),A - Store A to high page address 0xFF00+n (opcode 0xE0)
+let mayLoad = false, mayStore = true, hasSideEffects = true in
+def SM83_LDH_nind_A : Z80Inst<"ldh"> {
+  let Size = 2;
+  bits<8> port;
+  bits<16> Inst;
+  let Inst{7-0} = 0xE0;
+  let Inst{15-8} = port;
+  let InOperandList = (ins port8:$port);
+  let AsmString = "ldh ( $port ), a";
+  let Uses = [A];
+}
+
+// LDH A,(n) - Load A from high page address 0xFF00+n (opcode 0xF0)
+let mayLoad = true, mayStore = false, hasSideEffects = true in
+def SM83_LDH_A_nind : Z80Inst<"ldh a,"> {
+  let Size = 2;
+  bits<8> port;
+  bits<16> Inst;
+  let Inst{7-0} = 0xF0;
+  let Inst{15-8} = port;
+  let InOperandList = (ins port8:$port);
+  let AsmString = "ldh a, ( $port )";
+  let Defs = [A];
+}
+
+// LDH (C),A - Store A to address 0xFF00+C (opcode 0xE2)
+def SM83_LDH_Cind_A : Inst8<"ldh (c), a", 0xE2> {
+  let Uses = [A, C];
+  let mayLoad = false;
+  let mayStore = true;
+  let hasSideEffects = true;
+}
+
+// LDH A,(C) - Load from address 0xFF00+C to A (opcode 0xF2)
+def SM83_LDH_A_Cind : Inst8<"ldh a, (c)", 0xF2> {
+  let Uses = [C];
+  let Defs = [A];
+  let mayLoad = true;
+  let mayStore = false;
+  let hasSideEffects = true;
+}
+
 } // Predicates = [HasSM83]

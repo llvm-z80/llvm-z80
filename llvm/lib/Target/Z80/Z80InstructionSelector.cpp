@@ -4155,11 +4155,35 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     if (MRI.getType(QuotReg).getSizeInBits() > 16)
       return false;
 
-    // If using inline runtime, fall back to separate div+rem (each uses
-    // an inline pseudo). The fused call is only beneficial for external
-    // runtime calls.
-    if (STI.inlineI16Runtime())
-      return false;
+    // Inline runtime has no fused divrem pseudo — expand to separate ops.
+    if (STI.inlineI16Runtime()) {
+      bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
+      unsigned DivOpc = IsSigned ? Z80::SDIV16 : Z80::UDIV16;
+      unsigned ModOpc = IsSigned ? Z80::SMOD16 : Z80::UMOD16;
+
+      if (!RBI.constrainGenericRegister(QuotReg, Z80::GR16RegClass, MRI) ||
+          !RBI.constrainGenericRegister(RemReg, Z80::GR16RegClass, MRI) ||
+          !RBI.constrainGenericRegister(LHSReg, Z80::GR16RegClass, MRI) ||
+          !RBI.constrainGenericRegister(RHSReg, Z80::GR16RegClass, MRI))
+        return false;
+
+      const DebugLoc &DL = MI.getDebugLoc();
+
+      // Quotient
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHSReg);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(RHSReg);
+      BuildMI(MBB, MI, DL, TII.get(DivOpc));
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), QuotReg).addReg(Z80::DE);
+
+      // Remainder
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHSReg);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(RHSReg);
+      BuildMI(MBB, MI, DL, TII.get(ModOpc));
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), RemReg).addReg(Z80::DE);
+
+      MI.eraseFromParent();
+      return true;
+    }
 
     if (!RBI.constrainGenericRegister(QuotReg, Z80::GR16RegClass, MRI) ||
         !RBI.constrainGenericRegister(RemReg, Z80::GR16RegClass, MRI) ||

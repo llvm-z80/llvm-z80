@@ -39,6 +39,7 @@ enum Fixups {
   PCRel16,             // A 16-bit PC relative value.
   AddrAsciz,           // Address encoded as a decimal ASCII string.
   Disp8,               // An 8-bit signed displacement for indexed addressing.
+  LDH8,                // SM83 LDH operand: 8-bit offset from 0xFF00.
   LastTargetFixupKind,
   NumTargetFixupKinds = LastTargetFixupKind - FirstTargetFixupKind
 };

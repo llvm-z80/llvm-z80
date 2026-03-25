@@ -66,3 +66,7 @@ ELF_RELOC(R_Z80_ADDR13,                17)
 
 // An 8-bit signed displacement for indexed addressing (IX+d, IY+d).
 ELF_RELOC(R_Z80_DISP8,                 18)
+
+// SM83 LDH instruction operand: 8-bit offset from 0xFF00.
+// The linker computes (S + A - 0xFF00) and stores the low byte.
+ELF_RELOC(R_SM83_LDH8,                 19)

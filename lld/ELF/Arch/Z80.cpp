@@ -116,6 +116,13 @@ void Z80::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     *loc = sval;
     break;
   }
+  case R_SM83_LDH8: {
+    // SM83 LDH instruction: operand is (address - 0xFF00).
+    int64_t offset = (int64_t)val - 0xFF00;
+    checkUInt(ctx, loc, offset, 8, rel);
+    *loc = offset;
+    break;
+  }
   case R_Z80_FK_DATA_4:
     write32le(loc, val);
     break;
