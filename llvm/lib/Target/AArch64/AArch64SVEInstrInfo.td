@@ -3466,6 +3466,38 @@ let Predicates = [HasSVE_or_SME] in {
   def : Pat<(nxv2f64 (vector_insert nxv2f64:$vec, (f64 FPR64:$src), 0)),
             (SEL_ZPZZ_D (PTRUE_D 1), (INSERT_SUBREG (IMPLICIT_DEF), FPR64:$src, dsub), ZPR:$vec)>;
 
+  // Prefer FMOV when the vector is zero.
+  let Predicates = [HasFullFP16] in {
+    def : Pat<(nxv8i16 (vector_insert (SVEDup0), (i32 GPR32:$src), 0)),
+              (SUBREG_TO_REG (FMOVWHr GPR32:$src), hsub)>;
+
+    def : Pat<(nxv8f16 (vector_insert (SVEDup0), (f16 FPR16:$src), 0)),
+              (SUBREG_TO_REG (FMOVHr FPR16:$src), hsub)>;
+    def : Pat<(nxv4f16 (vector_insert (SVEDup0), (f16 FPR16:$src), 0)),
+              (SUBREG_TO_REG (FMOVHr FPR16:$src), hsub)>;
+    def : Pat<(nxv2f16 (vector_insert (SVEDup0), (f16 FPR16:$src), 0)),
+              (SUBREG_TO_REG (FMOVHr FPR16:$src), hsub)>;
+    def : Pat<(nxv8bf16 (vector_insert (SVEDup0), (bf16 FPR16:$src), 0)),
+              (SUBREG_TO_REG (FMOVHr FPR16:$src), hsub)>;
+    def : Pat<(nxv4bf16 (vector_insert (SVEDup0), (bf16 FPR16:$src), 0)),
+              (SUBREG_TO_REG (FMOVHr FPR16:$src), hsub)>;
+    def : Pat<(nxv2bf16 (vector_insert (SVEDup0), (bf16 FPR16:$src), 0)),
+              (SUBREG_TO_REG (FMOVHr FPR16:$src), hsub)>;
+  }
+  let Predicates = [HasFPARMv8] in {
+    def : Pat<(nxv4i32 (vector_insert (SVEDup0), (i32 GPR32:$src), 0)),
+              (SUBREG_TO_REG (FMOVWSr GPR32:$src), ssub)>;
+    def : Pat<(nxv2i64 (vector_insert (SVEDup0), (i64 GPR64:$src), 0)),
+              (SUBREG_TO_REG (FMOVXDr GPR64:$src), dsub)>;
+
+    def : Pat<(nxv4f32 (vector_insert (SVEDup0), (f32 FPR32:$src), 0)),
+              (SUBREG_TO_REG (FMOVSr FPR32:$src), ssub)>;
+    def : Pat<(nxv2f32 (vector_insert (SVEDup0), (f32 FPR32:$src), 0)),
+              (SUBREG_TO_REG (FMOVSr FPR32:$src), ssub)>;
+    def : Pat<(nxv2f64 (vector_insert (SVEDup0), (f64 FPR64:$src), 0)),
+              (SUBREG_TO_REG (FMOVDr FPR64:$src), dsub)>;
+  }
+
   // Insert scalar into vector with scalar index
   def : Pat<(nxv16i8 (vector_insert nxv16i8:$vec, GPR32:$src, GPR64:$index)),
             (CPY_ZPmR_B ZPR:$vec,
@@ -4162,6 +4194,24 @@ let Predicates = [HasSVE2_or_SME] in {
   defm BSL2N_ZZZZ : sve2_int_bitwise_ternary_op<0b101, "bsl2n", AArch64bsl2n>;
   defm NBSL_ZZZZ  : sve2_int_bitwise_ternary_op<0b111, "nbsl",  AArch64nbsl>;
 
+  def : Pat<(nxv4f32 (partial_reduce_fmla nxv4f32:$acc, nxv8f16:$LHS, nxv8f16:$RHS)),
+            (FMLALT_ZZZ_SHH (FMLALB_ZZZ_SHH nxv4f32:$acc, ZPR:$LHS, ZPR:$RHS),
+                ZPR:$LHS, ZPR:$RHS)>;
+
+  // Pseudos for commutable operations that expand to NBSL or BSL2N. These can
+  // avoid a COPY if one of the source registers can be clobbered, or otherwise
+  // use a MOVPRFX.
+  let isCommutable = 1, hasSideEffects = 0 in {
+    // EON (a, b) = BSL2N (a, a, b) = BSL2N (b, b, a)
+    def EON_ZZZ : Pseudo<(outs ZPR64:$Zd), (ins ZPR64:$Zn, ZPR64:$Zm), []>;
+
+    // NAND (a, b) = NBSL (a, b, b) = NBSL (b, a, a)
+    def NAND_ZZZ : Pseudo<(outs ZPR64:$Zd), (ins ZPR64:$Zn, ZPR64:$Zm), []>;
+
+    // NOR (a, b) = NBSL (a, b, a) = NBSL (b, a, b)
+    def NOR_ZZZ : Pseudo<(outs ZPR64:$Zd), (ins ZPR64:$Zn, ZPR64:$Zm), []>;
+  }
+
   multiclass binary_bitwise<ValueType VT, SDPatternOperator InOp, SDPatternOperator OutOp> {
     def : Pat<(InOp VT:$op1, VT:$op2), (OutOp $op1, $op2)>;
 
@@ -4175,17 +4225,14 @@ let Predicates = [HasSVE2_or_SME] in {
   }
 
   foreach VT = [nxv16i8, nxv8i16, nxv4i32, nxv2i64] in {
-    // EON (a, b) = BSL2N (a, a, b) = BSL2N (b, b, a)
     defm : binary_bitwise<VT, PatFrag<(ops node:$op1, node:$op2), (vnot (xor node:$op1, node:$op2))>,
-                              OutPatFrag<(ops node:$op1, node:$op2), (BSL2N_ZZZZ $op1, $op1, $op2)>>;
+                              OutPatFrag<(ops node:$op1, node:$op2), (EON_ZZZ $op1, $op2)>>;
 
-    // NAND (a, b) = NBSL (a, b, b) = NBSL (b, a, a)
     defm : binary_bitwise<VT, PatFrag<(ops node:$op1, node:$op2), (vnot (and node:$op1, node:$op2))>,
-                              OutPatFrag<(ops node:$op1, node:$op2), (NBSL_ZZZZ $op2, $op1, $op1)>>;
+                              OutPatFrag<(ops node:$op1, node:$op2), (NAND_ZZZ $op1, $op2)>>;
 
-    // NOR (a, b) = NBSL (a, b, a) = NBSL (b, a, b)
     defm : binary_bitwise<VT, PatFrag<(ops node:$op1, node:$op2), (vnot (or node:$op1, node:$op2))>,
-                              OutPatFrag<(ops node:$op1, node:$op2), (NBSL_ZZZZ $op2, $op1, $op2)>>;
+                              OutPatFrag<(ops node:$op1, node:$op2), (NOR_ZZZ $op1, $op2)>>;
 
     // ORN (a, b) = BSL2N (a, b, a)
     defm : binary_bitwise<VT, PatFrag<(ops node:$op1, node:$op2), (or node:$op1, (vnot node:$op2))>,
@@ -4759,6 +4806,11 @@ let Predicates = [HasSVE2p3_or_SME2p3] in {
   // SVE2 integer dot product
   def SDOT_ZZZ_BtoH : sve_intx_dot<0b01, 0b00000, 0b0, "sdot", ZPR16, ZPR8>;
   def UDOT_ZZZ_BtoH : sve_intx_dot<0b01, 0b00000, 0b1, "udot", ZPR16, ZPR8>;
+
+  def : Pat<(nxv8i16 (partial_reduce_umla nxv8i16:$Acc, nxv16i8:$MulLHS, nxv16i8:$MulRHS)),
+            (UDOT_ZZZ_BtoH $Acc, $MulLHS, $MulRHS)>;
+  def : Pat<(nxv8i16 (partial_reduce_smla nxv8i16:$Acc, nxv16i8:$MulLHS, nxv16i8:$MulRHS)),
+            (SDOT_ZZZ_BtoH $Acc, $MulLHS, $MulRHS)>;
 
   // SVE2 integer indexed dot product
   def SDOT_ZZZI_BtoH : sve_intx_dot_by_indexed_elem_x<0b0, "sdot">;

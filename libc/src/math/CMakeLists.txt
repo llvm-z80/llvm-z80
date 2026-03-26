@@ -63,11 +63,13 @@ add_math_entrypoint_object(asinpif)
 add_math_entrypoint_object(asinpif16)
 
 add_math_entrypoint_object(atan)
+add_math_entrypoint_object(atanbf16)
 add_math_entrypoint_object(atanf)
 add_math_entrypoint_object(atanf16)
 
 add_math_entrypoint_object(atan2)
 add_math_entrypoint_object(atan2f)
+add_math_entrypoint_object(atan2f16)
 add_math_entrypoint_object(atan2l)
 add_math_entrypoint_object(atan2f128)
 
@@ -138,6 +140,7 @@ add_math_entrypoint_object(dsubf128)
 
 add_math_entrypoint_object(erf)
 add_math_entrypoint_object(erff)
+add_math_entrypoint_object(erff16)
 
 add_math_entrypoint_object(exp)
 add_math_entrypoint_object(expf)
@@ -347,6 +350,7 @@ add_math_entrypoint_object(getpayloadf128)
 add_math_entrypoint_object(getpayloadbf16)
 
 add_math_entrypoint_object(hypot)
+add_math_entrypoint_object(hypotbf16)
 add_math_entrypoint_object(hypotf)
 add_math_entrypoint_object(hypotf16)
 
