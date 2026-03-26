@@ -72,7 +72,7 @@ PreservedAnalyses Z80IndexIV::run(Loop &L, LoopAnalysisManager &AM,
 
       // If the step doesn't fit in 8 bits, incrementing the index requires a
       // 16-bit add, so there's no point to the optimization.
-      const auto *Step = R->getStepRecurrence(SE);
+      const auto Step = R->getStepRecurrence(SE);
       const auto StepRange = SE.getSignedRange(Step);
       if (!InRange(StepRange)) {
         LLVM_DEBUG(dbgs() << "Step range does not fit in 8 bits\n");

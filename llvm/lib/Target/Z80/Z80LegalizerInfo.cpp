@@ -289,8 +289,12 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .legalFor({{S16, P0}})
       .clampScalar(0, S16, S16);
 
-  // Bitcast - no-op reinterpretation between same-size types
-  getActionDefinitionsBuilder(G_BITCAST).legalFor({{S16, P0}, {P0, S16}});
+  // Bitcast - no-op reinterpretation between same-size types.
+  // Vector bitcasts (e.g. <4 x s8> → s32 from SROA) are lowered to
+  // scalar operations since Z80 has no vector support.
+  getActionDefinitionsBuilder(G_BITCAST)
+      .legalFor({{S16, P0}, {P0, S16}})
+      .lower();
 
   // Branches
   // G_BRCOND takes a boolean condition - we use S8 since Z80 has no 1-bit regs.
