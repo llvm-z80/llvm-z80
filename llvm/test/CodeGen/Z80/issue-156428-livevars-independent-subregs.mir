@@ -1,0 +1,63 @@
+# RUN: llc -mtriple=z80 -run-pass=livevars %s -o - | FileCheck %s
+# XFAIL: *
+#
+# DEMONSTRATION TEST (llvm/llvm-project#156428) — expected to FAIL on current
+# upstream; the CHECK lines assert the POST-FIX behavior.  Remove the `XFAIL`
+# line once the LiveVariables fix lands.
+#
+# Marking an instruction that defines ONE sub-register as implicitly defining
+# the whole super-register is valid only when the partial defs together COVER
+# the super-register (every leaf sub-register defined) -- a universal rule that
+# LiveVariables' own comment asserts ("All of the sub-registers must have been
+# defined before the use of Reg!").  HandlePhysRegUse does not check it: it
+# takes the last partial def (FindLastPartialDef) and adds `implicit-def Reg`
+# unconditionally.  Introduced by llvm/llvm-project#119446 (e8e3e6e).
+#
+# x86 does not break because its only such pattern (AH then AL -> implicit-def
+# EAX) is the case where BOTH halves are defined, so coverage holds.  The bug
+# fires on targets where a pair is used while only ONE INDEPENDENT half was
+# defined -- the out-of-tree DSP `ACC = AH:AL` of #156428, and Z80 `HL = H:L`
+# (writing L never touches H).  There the lone-half def is wrongly credited
+# with the whole pair, marking the other half's prior value dead, so
+# MachineCopyPropagation deletes a still-live copy (seen suite-wide as 275 $de
+# + 19 $hl miscompiles).  The fix adds the missing coverage check.
+
+--- |
+  target triple = "z80"
+  define void @only_l() { ret void }
+  define void @both_halves() { ret void }
+...
+---
+# Only $l is defined before $hl is used.  $h is NOT defined, so the lone $l def
+# must NOT be turned into an implicit def of the whole pair.
+name:            only_l
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $c
+    LD_L_C implicit-def $l, implicit $c
+    RET implicit $hl
+...
+---
+# Both halves are defined separately before $hl is used, so the pair really is
+# fully defined: the later half-def legitimately gains implicit-def $hl
+# (original behavior preserved).
+name:            both_halves
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $c, $b
+    LD_L_C implicit-def $l, implicit $c
+    LD_H_B implicit-def $h, implicit $b
+    RET implicit $hl
+...
+
+# CHECK-LABEL: name: only_l
+# CHECK:     LD_L_C implicit-def $l, implicit killed $c
+# CHECK-NOT: implicit-def $hl
+# CHECK:     RET implicit killed $hl
+
+# CHECK-LABEL: name: both_halves
+# CHECK:     LD_L_C implicit-def $l, implicit killed $c
+# CHECK:     LD_H_B implicit-def $h, implicit killed $b, implicit-def $hl
+# CHECK:     RET implicit killed $hl
