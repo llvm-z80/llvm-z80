@@ -16,6 +16,11 @@ pub enum TestOutcome {
 pub struct TestResult {
     pub tag: String,
     pub outcome: TestOutcome,
+    /// Optional diagnostic text printed under the result line (e.g. the
+    /// captured port-1 `FAIL @<line>` strings for a failing multi-CHECK
+    /// fixture — ravn/llvm-z80#137).  Sibling to `outcome` so existing
+    /// `match &outcome` sites are unaffected.
+    pub note: Option<String>,
 }
 
 impl TestResult {
@@ -23,6 +28,7 @@ impl TestResult {
         TestResult {
             tag: tag.into(),
             outcome: TestOutcome::Pass { reg_value: reg_value.into() },
+            note: None,
         }
     }
 
@@ -30,6 +36,7 @@ impl TestResult {
         TestResult {
             tag: tag.into(),
             outcome: TestOutcome::Fail { got: got.into(), expected: expected.into() },
+            note: None,
         }
     }
 
@@ -37,6 +44,7 @@ impl TestResult {
         TestResult {
             tag: tag.into(),
             outcome: TestOutcome::Fatal { reason: reason.into() },
+            note: None,
         }
     }
 
@@ -44,7 +52,18 @@ impl TestResult {
         TestResult {
             tag: tag.into(),
             outcome: TestOutcome::Skip { reason: reason.into() },
+            note: None,
         }
+    }
+
+    /// Attach diagnostic text rendered under the result line.
+    pub fn with_note(mut self, note: Option<String>) -> Self {
+        self.note = note;
+        self
+    }
+
+    pub fn is_pass(&self) -> bool {
+        matches!(self.outcome, TestOutcome::Pass { .. })
     }
 }
 
@@ -159,12 +178,16 @@ pub fn extract_error(stderr: &str) -> String {
 
 /// Parse SKIP-IF directives from C source files.
 /// Format: `/* SKIP-IF: <conditions> */`
-/// Conditions: flags (-ffast-math, -fomit-frame-pointer) and/or target (sm83, z80)
+/// Conditions: flags (-ffast-math, -fomit-frame-pointer), target (sm83, z80),
+/// and/or opt levels (O0, O1, O2, O3, Os, Oz).
 pub fn check_skip_c(
     source: &str,
     target: Target,
     active_flags: &[&str],
+    opt_tag: &str,
 ) -> Option<String> {
+    let opt_levels = ["O0", "O1", "O2", "O3", "Os", "Oz"];
+
     for line in source.lines() {
         let lower = line.to_lowercase();
         if let Some(pos) = lower.find("skip-if:") {
@@ -180,7 +203,17 @@ pub fn check_skip_c(
             let mut target_filter = None;
 
             for token in &tokens {
-                if token.starts_with('-') {
+                // Check opt level match (e.g. "O0")
+                if opt_levels.iter().any(|o| o.eq_ignore_ascii_case(token)) {
+                    if token.eq_ignore_ascii_case(opt_tag) {
+                        return Some(conditions.to_string());
+                    }
+                    continue;
+                }
+                // `-flag` and `+feature` (e.g. +static-stack) both name a
+                // compiler flag matched against active_flags; anything else is
+                // a target triple filter.
+                if token.starts_with('-') || token.starts_with('+') {
                     flag = Some(*token);
                 } else {
                     target_filter = Some(*token);
