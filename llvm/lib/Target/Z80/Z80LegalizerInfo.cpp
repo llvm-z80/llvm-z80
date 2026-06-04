@@ -347,7 +347,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   getActionDefinitionsBuilder(G_BSWAP).customFor({S16}).lower();
   getActionDefinitionsBuilder({G_BITREVERSE, G_CTPOP}).lower();
   getActionDefinitionsBuilder(
-      {G_CTLZ, G_CTLZ_ZERO_UNDEF, G_CTTZ, G_CTTZ_ZERO_UNDEF})
+      {G_CTLZ, G_CTLZ_ZERO_POISON, G_CTTZ, G_CTTZ_ZERO_POISON})
       .lower();
 
   // Extending loads - custom lower to load + extend.

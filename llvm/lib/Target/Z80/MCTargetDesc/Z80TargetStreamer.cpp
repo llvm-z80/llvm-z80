@@ -30,8 +30,8 @@ Z80TargetStreamer::Z80TargetStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
 void Z80TargetStreamer::finish() {
   // In SDCC mode (AssemblerDialect == 1), skip CRT symbol references.
   // SDCC has its own CRT initialization mechanism.
-  const MCAsmInfo *MAI = Streamer.getContext().getAsmInfo();
-  if (MAI && MAI->getAssemblerDialect() == 1)
+  const MCAsmInfo &MAI = Streamer.getContext().getAsmInfo();
+  if (MAI.getAssemblerDialect() == 1)
     return;
   if (hasBSS())
     stronglyReference("__do_zero_bss",

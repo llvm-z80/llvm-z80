@@ -200,7 +200,7 @@ static int isRepeatedNonZeroByte(const Constant *C, const DataLayout &DL) {
 }
 
 void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
-  if (MAI->getAssemblerDialect() == 1) { // sdasz80 format
+  if (MAI.getAssemblerDialect() == 1) { // sdasz80 format
     // Case 1: BSS locals - sdasz80 doesn't support .local/.comm directives.
     // Handle zero-initialized variables by emitting in _DATA with explicit
     // zero bytes. (.ds in sdasz80 reserves space but does NOT zero-initialize.)

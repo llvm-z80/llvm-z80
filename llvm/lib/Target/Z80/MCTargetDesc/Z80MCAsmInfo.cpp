@@ -43,7 +43,8 @@ static const MCAsmInfo::AtSpecifier AtSpecifiers[] = {
     {Z80MCExpr::VK_ADDR13, "z80_13"},
 };
 
-Z80MCAsmInfo::Z80MCAsmInfo(const Triple &TT, const MCTargetOptions &Options) {
+Z80MCAsmInfo::Z80MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
+    : MCAsmInfoELF(Options) {
   // While the platform uses 2-byte pointers, the ELF files use 4-byte pointers
   // to convey banking information; this field is used, among others, by the
   // DWARF debug structures.
@@ -76,7 +77,8 @@ unsigned Z80MCAsmInfo::getMaxInstLength(const MCSubtargetInfo *STI) const {
 //===----------------------------------------------------------------------===//
 
 Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
-                                   const MCTargetOptions &Options) {
+                                   const MCTargetOptions &Options)
+    : MCAsmInfo(Options) {
   CodePointerSize = 2;
   CalleeSaveStackSlotSize = 0;
   SeparatorString = "\n";
@@ -109,7 +111,7 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
 
   // Labels
   GlobalDirective = "\t.globl\t";
-  PrivateLabelPrefix = ".L";
+  InternalSymbolPrefix = ".L";
 
   initializeAtSpecifiers(AtSpecifiers);
 }
