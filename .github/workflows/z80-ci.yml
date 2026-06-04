@@ -45,7 +45,7 @@ jobs:
           python3 --version
 
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
         with:
           key: z80-ci-${{ runner.os }}
           max-size: "2G"
@@ -115,7 +115,7 @@ jobs:
           command -v z88dk-ticks
 
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
         with:
           key: z80-ci-${{ runner.os }}   # shared with build-and-lit
           max-size: "2G"
