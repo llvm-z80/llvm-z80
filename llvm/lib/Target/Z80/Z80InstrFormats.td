@@ -151,6 +151,17 @@ def port8 : Operand<i32> {
   let Type = i8;
 }
 
+/// SM83 LDH port: an 8-bit offset from 0xFF00. A symbol operand is resolved to
+/// (address - 0xFF00) at link time via the LDH8 fixup.
+def hram8 : Operand<i32> {
+  let ParserMatchClass = ImmediateAsmOperand<"Port8">;
+  let EncoderMethod = "encodeImm<Z80::LDH8, 1>";
+  let DecoderMethod = "decodeUImmOperand<8>";
+  let OperandType = "OPERAND_PORT8";
+  let OperandNamespace = "Z80Op";
+  let Type = i8;
+}
+
 //===----------------------------------------------------------------------===//
 //  Base instruction class
 //===----------------------------------------------------------------------===//
