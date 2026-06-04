@@ -500,7 +500,7 @@ fn run_group_elf_roundtrip(
         }
 
         let source = std::fs::read_to_string(test_file).unwrap_or_default();
-        if let Some(reason) = check_skip_c(&source, target, &[]) {
+        if let Some(reason) = check_skip_c(&source, target, &[], "") {
             let tag = format!("{name}_elf_rt");
             result.add(TestResult::skip(&tag, &reason), cb, reg_name);
             continue;
@@ -566,7 +566,7 @@ fn run_group_rel_roundtrip(
         }
 
         let source = std::fs::read_to_string(test_file).unwrap_or_default();
-        if let Some(reason) = check_skip_c(&source, target, &["-fno-integrated-as"]) {
+        if let Some(reason) = check_skip_c(&source, target, &["-fno-integrated-as"], "") {
             let tag = format!("{name}_rel_rt");
             result.add(TestResult::skip(&tag, &reason), cb, reg_name);
             continue;
@@ -850,7 +850,7 @@ fn run_group_elf_ar_roundtrip(
         }
 
         let source = std::fs::read_to_string(test_file).unwrap_or_default();
-        if let Some(reason) = check_skip_c(&source, target, &[]) {
+        if let Some(reason) = check_skip_c(&source, target, &[], "") {
             let tag = format!("{name}_elf_ar");
             result.add(TestResult::skip(&tag, &reason), cb, reg_name);
             continue;
@@ -950,7 +950,7 @@ fn run_group_rel_ar_roundtrip(
         }
 
         let source = std::fs::read_to_string(test_file).unwrap_or_default();
-        if let Some(reason) = check_skip_c(&source, target, &["-fno-integrated-as"]) {
+        if let Some(reason) = check_skip_c(&source, target, &["-fno-integrated-as"], "") {
             let tag = format!("{name}_rel_ar");
             result.add(TestResult::skip(&tag, &reason), cb, reg_name);
             continue;

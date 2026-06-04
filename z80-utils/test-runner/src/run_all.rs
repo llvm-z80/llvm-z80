@@ -166,6 +166,7 @@ pub fn run(mode: Mode, paths: &Paths) -> bool {
                     match &t.outcome {
                         crate::suite::TestOutcome::Fail { got, expected } => {
                             println!("  FAIL  {}  (got {got}, expected {expected})", t.tag);
+                            crate::display::print_note(t.note.as_deref());
                         }
                         crate::suite::TestOutcome::Fatal { reason } => {
                             println!("  FATAL {}  ({reason})", t.tag);
@@ -335,7 +336,7 @@ fn add_clang_filtered(
     suites.push(SuiteDef {
         label: label.clone(),
         runner: Box::new(move |paths, state, idx| {
-            let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, pattern };
+            let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, static_stack: false, verify: false, diff_opt: false, native_oracle: false, pattern };
             // Pre-count tests for progress display
             let test_dir = paths.clang_test_dir();
             let tests = crate::suite::discover_tests(&test_dir, "test_", "c");
@@ -366,7 +367,7 @@ fn add_clang_inline_rt(
         runner: Box::new(move |paths, state, idx| {
             let config = ClangConfig {
                 target, opt_levels: opts, fast_math: false, omit_fp: false,
-                inline_runtime: true, pattern: None,
+                inline_runtime: true, static_stack: false, verify: false, diff_opt: false, native_oracle: false, pattern: None,
             };
             let test_dir = paths.clang_test_dir();
             let tests = crate::suite::discover_tests(&test_dir, "test_", "c");

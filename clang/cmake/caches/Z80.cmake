@@ -6,7 +6,7 @@
 
 set(LLVM_TARGETS_TO_BUILD "" CACHE STRING "")
 set(LLVM_EXPERIMENTAL_TARGETS_TO_BUILD "Z80" CACHE STRING "")
-set(LLVM_ENABLE_PROJECTS "clang" CACHE STRING "")
+set(LLVM_ENABLE_PROJECTS "clang;lld" CACHE STRING "")
 
 # Disable optional dependencies (not needed for Z80 cross-compiler)
 set(LLVM_ENABLE_LIBXML2 OFF CACHE BOOL "")

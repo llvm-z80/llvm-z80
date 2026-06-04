@@ -194,6 +194,33 @@ impl Paths {
         let t = target.triple();
         self.build_dir.join(format!("lib/{t}/{t}_rt.lib"))
     }
+
+    /// Source directory for ELF compiler-rt builtins (e.g. compiler-rt/lib/builtins/z80/).
+    pub fn elf_builtins_src(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.project_dir
+            .join("..")
+            .join("..")
+            .join("compiler-rt/lib/builtins")
+            .join(t)
+    }
+
+    /// Linker script bundled alongside the ELF builtins.
+    pub fn elf_linker_script(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.elf_builtins_src(target).join(format!("{t}.ld"))
+    }
+
+    /// crt0.asm source path.
+    pub fn elf_crt0_src(&self, target: Target) -> PathBuf {
+        self.elf_builtins_src(target).join("crt0.asm")
+    }
+
+    /// Staging directory for assembled crt0.o + builtin .o files.
+    pub fn elf_runtime_stage(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.build_dir.join(format!("lib/{t}/elf-runtime"))
+    }
 }
 
 fn find_project_dir() -> Option<PathBuf> {

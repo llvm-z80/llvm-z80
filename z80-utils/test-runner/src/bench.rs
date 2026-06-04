@@ -7,6 +7,7 @@ use std::thread;
 
 use crate::config::{self, OptLevel, Paths, Target};
 use crate::emulator;
+use crate::runtime::{self, ElfRuntime};
 use crate::suite;
 
 const COMPILE_TIMEOUT: u64 = 30;
@@ -38,6 +39,16 @@ struct CompilerResult {
 pub fn run(paths: &Paths, config: &BenchConfig) {
     let bench_dir = paths.project_dir.join("benchmark");
     let clang = paths.clang();
+
+    // Stage crt0 + ELF compiler-rt builtins so the per-bench link can
+    // resolve _halt and the runtime calls (ravn/llvm-z80#106; mirrors clang.rs).
+    let elf_rt = match runtime::ensure_elf(paths, config.target, &clang) {
+        Ok(rt) => Arc::new(rt),
+        Err(e) => {
+            eprintln!("ELF runtime stage failed: {e}");
+            return;
+        }
+    };
 
     // Discover benchmarks
     let mut bench_files: Vec<PathBuf> = std::fs::read_dir(&bench_dir)
@@ -103,10 +114,12 @@ pub fn run(paths: &Paths, config: &BenchConfig) {
                 let sdcc_lib = sdcc_lib.clone();
                 let results = Arc::clone(&results);
                 let done = Arc::clone(&done);
+                let elf_rt = Arc::clone(&elf_rt);
 
                 thread::spawn(move || {
                     let r = run_single_bench(
                         &bench_file, &clang, &paths, target, opt, sdcc_lib.as_ref(),
+                        &elf_rt,
                     );
                     results.lock().unwrap().push(r);
                     let n = done.fetch_add(1, Ordering::Relaxed) + 1;
@@ -149,6 +162,7 @@ fn run_single_bench(
     target: Target,
     opt: OptLevel,
     sdcc_lib: Option<&PathBuf>,
+    elf_rt: &Arc<ElfRuntime>,
 ) -> BenchResult {
     let name = bench_file
         .file_stem()
@@ -170,9 +184,12 @@ fn run_single_bench(
         let expected = expected.clone();
         let target_copy = target;
         let bench_file = bench_file.to_path_buf();
+        let elf_rt = Arc::clone(elf_rt);
 
         thread::spawn(move || {
-            compile_and_measure_clang(&clang, &bench_file, &tmp, &name, target_copy, opt, &expected)
+            compile_and_measure_clang(
+                &clang, &bench_file, &tmp, &name, target_copy, opt, &expected, &elf_rt,
+            )
         })
     };
 
@@ -217,20 +234,46 @@ fn compile_and_measure_clang(
     target: Target,
     opt: OptLevel,
     expected: &str,
+    elf_rt: &ElfRuntime,
 ) -> Option<CompilerResult> {
     let tag = format!("{name}_clang_{opt}");
+    let test_obj = tmp_dir.join(format!("{tag}.o"));
     let elf = tmp_dir.join(format!("{tag}.elf"));
     let bin = tmp_dir.join(format!("{tag}.bin"));
 
-    // Compile + link via ELF toolchain (integrated assembler + lld)
+    // Compile to object only — link below injects crt0 + builtins +
+    // linker script explicitly so _halt resolves and ___mulhi3 / etc.
+    // are linked in (ravn/llvm-z80#106).
     let mut cmd = Command::new(clang);
     cmd.arg(format!("--target={}", target.triple()));
     cmd.arg(format!("-{}", opt.clang_flag()));
+    cmd.arg("-c");
+    cmd.arg("-nostdlib");
+    cmd.arg("-ffreestanding");
     cmd.arg(src);
     cmd.arg("-o");
-    cmd.arg(&elf);
+    cmd.arg(&test_obj);
 
     match suite::run_cmd_timeout(&mut cmd, COMPILE_TIMEOUT) {
+        Err(_) => return None,
+        Ok((code, _, _)) if code != 0 => return None,
+        _ => {}
+    }
+
+    let lld = clang.parent().unwrap().join("ld.lld");
+    let mut link = Command::new(lld);
+    link.arg("--gc-sections");
+    link.arg("-T");
+    link.arg(&elf_rt.linker_script);
+    link.arg(&elf_rt.crt0_obj);
+    link.arg(&test_obj);
+    for obj in &elf_rt.builtin_objs {
+        link.arg(obj);
+    }
+    link.arg("-o");
+    link.arg(&elf);
+
+    match suite::run_cmd_timeout(&mut link, COMPILE_TIMEOUT) {
         Err(_) => return None,
         Ok((code, _, _)) if code != 0 => return None,
         _ => {}

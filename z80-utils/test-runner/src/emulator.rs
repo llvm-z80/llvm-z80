@@ -170,6 +170,101 @@ fn drain_for_register(
     last_value
 }
 
+/// Re-run the binary capturing port-1 console output for failure diagnosis
+/// (ravn/llvm-z80#137).  The auto-generated `test_90_edge_*` / `test_91_*`
+/// fixtures emit per-CHECK diagnostics (`FAIL @<line> got=.. exp=..`) via
+/// `out (0x01),a`; z88dk-ticks routes that port to stdout when given
+/// `-iochar <port>`.  We run WITHOUT `-trace` so stdout is exactly the
+/// printed text (the `-trace` register/disasm firehose would otherwise
+/// glue the chars into ~30k disassembly lines).
+///
+/// Best-effort: returns the captured text (trailing cycle-count line
+/// stripped) or None if nothing was printed / the run failed.  Intended to
+/// be called only on a failing test, so the extra emulation cost is rare.
+pub fn capture_port_output(bin: &Path, target: Target, halt_addr: &str, port: u8) -> Option<String> {
+    let timeout = Duration::from_secs(target.emu_timeout_secs());
+
+    let mut cmd = Command::new("z88dk-ticks");
+    for flag in target.emu_flags() {
+        cmd.arg(flag);
+    }
+    // No -trace: stdout is just the port-1 bytes + the final cycle count.
+    cmd.args(["-iochar", &port.to_string(), "-end", halt_addr]);
+    cmd.arg(bin);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::null());
+
+    let mut child = cmd.spawn().ok()?;
+    let stdout = child.stdout.take().unwrap();
+    let killed = Arc::new(AtomicBool::new(false));
+    let killed2 = Arc::clone(&killed);
+
+    // Drain in a thread (cap at 64 KB to bound a runaway fixture).
+    let reader = std::thread::spawn(move || {
+        let mut buf_reader = std::io::BufReader::with_capacity(64 * 1024, stdout);
+        let mut out = String::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            if killed2.load(Ordering::Relaxed) || out.len() >= 64 * 1024 {
+                break;
+            }
+            match buf_reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => out.push_str(&String::from_utf8_lossy(&chunk[..n])),
+                Err(_) => break,
+            }
+        }
+        out
+    });
+
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    killed.store(true, Ordering::Relaxed);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(_) => break,
+        }
+    }
+
+    let raw = reader.join().ok()?;
+    let text = strip_trailing_cycle_count(&raw);
+    if text.trim().is_empty() { None } else { Some(text) }
+}
+
+/// Drop the trailing cycle-count line z88dk-ticks prints at `-end`
+/// (`printf("%llu\n", st)`): the last non-empty line if it is all digits.
+/// The fixtures always end their diagnostic stream with '\n', so the cycle
+/// count lands on its own line.
+fn strip_trailing_cycle_count(raw: &str) -> String {
+    let trimmed = raw.trim_end_matches(['\n', '\r', ' ', '\t']);
+    match trimmed.rfind('\n') {
+        Some(nl) => {
+            let last = &trimmed[nl + 1..];
+            if !last.is_empty() && last.bytes().all(|b| b.is_ascii_digit()) {
+                trimmed[..nl].to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        None => {
+            // Single line: strip it only if it is purely the cycle count.
+            if !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit()) {
+                String::new()
+            } else {
+                trimmed.to_string()
+            }
+        }
+    }
+}
+
 /// Parse expected value from test source file.
 /// Looks for "expect 0xXXXX" comment, defaults to 0x000F.
 pub fn parse_expected(source: &str) -> String {

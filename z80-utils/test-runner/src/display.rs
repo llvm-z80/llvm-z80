@@ -19,7 +19,7 @@ unsafe extern "C" {
 }
 
 /// Print a single test result line (for individual suite mode).
-pub fn print_test_result(outcome: &TestOutcome, tag: &str, reg_name: &str) {
+pub fn print_test_result(outcome: &TestOutcome, tag: &str, reg_name: &str, note: Option<&str>) {
     let tty = is_tty();
     match outcome {
         TestOutcome::Pass { reg_value } => {
@@ -51,7 +51,17 @@ pub fn print_test_result(outcome: &TestOutcome, tag: &str, reg_name: &str) {
             }
         }
     }
+    print_note(note);
     let _ = io::stdout().flush();
+}
+
+/// Print captured diagnostic text indented under a result line.
+pub fn print_note(note: Option<&str>) {
+    if let Some(text) = note {
+        for line in text.lines() {
+            println!("          | {line}");
+        }
+    }
 }
 
 pub fn print_summary(total: u32, pass: u32, fail: u32, fatal: u32, skip: u32, all_ok: bool) {
