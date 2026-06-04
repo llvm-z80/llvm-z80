@@ -1,7 +1,8 @@
 /* Test 48: Dynamic stack allocation (alloca / VLA) */
 /* Tests that dynamic alloca works correctly with frame pointer */
 /* SKIP-IF: sm83 */
-#include <alloca.h>
+/* Freestanding Z80 has no libc <alloca.h> (#35); alloca is a compiler builtin. */
+#define alloca __builtin_alloca
 typedef unsigned char u8;
 typedef unsigned short u16;
 

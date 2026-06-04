@@ -6,6 +6,7 @@ mod display;
 mod emulator;
 mod llc;
 mod run_all;
+mod runtime;
 mod sdcc;
 mod suite;
 mod utils;
@@ -55,7 +56,7 @@ fn main() -> ExitCode {
 /// Create a callback that prints each test result immediately to stdout.
 fn print_callback() -> OnResult {
     Box::new(|result, reg_name| {
-        display::print_test_result(&result.outcome, &result.tag, reg_name);
+        display::print_test_result(&result.outcome, &result.tag, reg_name, result.note.as_deref());
     })
 }
 
@@ -85,6 +86,17 @@ Suite options:
 Clang-specific:
   -fast-math           Enable -ffast-math
   -omit-frame-pointer  Enable -fomit-frame-pointer
+  -static-stack        Enable +static-stack (BSS locals)
+  -verify              Add -mllvm -verify-machineinstrs (fail on invalid MIR;
+                       catches the peephole-liveness family, e.g. ravn/llvm-z80#199).
+                       Use BUILD_DIR=<assertions build> to add internal asserts.
+  -diff-opt            Cross-opt-level differential: flag any test whose value
+                       differs across opt levels (a miscompile regardless of the
+                       `expect` directive). Strongest with -full. Caught ravn/llvm-z80#202.
+  -native-oracle       Differential vs the host C compiler (env CC, else
+                       cc/clang/gcc): flag any test whose Z80 result disagrees
+                       with the host's computed value (catches consistently-wrong
+                       values; reference is computed, not a hand-written expect).
 
 Environment:
   BUILD_DIR            Build directory (default: ../build)"
@@ -146,6 +158,10 @@ fn cmd_clang(args: &[String]) -> ExitCode {
     let mut opt_filter = "all".to_string();
     let mut fast_math = false;
     let mut omit_fp = false;
+    let mut static_stack = false;
+    let mut verify = false;
+    let mut diff_opt = false;
+    let mut native_oracle = false;
     let mut pattern = None;
 
     let mut i = 0;
@@ -160,6 +176,10 @@ fn cmd_clang(args: &[String]) -> ExitCode {
             }
             "-fast-math" => fast_math = true,
             "-omit-frame-pointer" => omit_fp = true,
+            "-static-stack" => static_stack = true,
+            "-verify" => verify = true,
+            "-diff-opt" => diff_opt = true,
+            "-native-oracle" => native_oracle = true,
             s if !s.starts_with('-') => pattern = Some(s.to_string()),
             _ => {}
         }
@@ -175,6 +195,10 @@ fn cmd_clang(args: &[String]) -> ExitCode {
         fast_math,
         omit_fp,
         inline_runtime: false,
+        static_stack,
+        verify,
+        diff_opt,
+        native_oracle,
         pattern,
     };
 
@@ -189,6 +213,15 @@ fn cmd_clang(args: &[String]) -> ExitCode {
     }
     if omit_fp {
         println!("Flags:  -fomit-frame-pointer");
+    }
+    if verify {
+        println!("Flags:  -verify-machineinstrs");
+    }
+    if diff_opt {
+        println!("Flags:  -diff-opt (cross-opt-level differential)");
+    }
+    if native_oracle {
+        println!("Flags:  -native-oracle (host C reference differential)");
     }
     println!();
 
