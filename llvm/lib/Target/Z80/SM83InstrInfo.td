@@ -155,7 +155,7 @@ def SM83_LDH_nind_A : Z80Inst<"ldh"> {
   bits<16> Inst;
   let Inst{7-0} = 0xE0;
   let Inst{15-8} = port;
-  let InOperandList = (ins port8:$port);
+  let InOperandList = (ins hram8:$port);
   let AsmString = "ldh ( $port ), a";
   let Uses = [A];
 }
@@ -168,7 +168,7 @@ def SM83_LDH_A_nind : Z80Inst<"ldh a,"> {
   bits<16> Inst;
   let Inst{7-0} = 0xF0;
   let Inst{15-8} = port;
-  let InOperandList = (ins port8:$port);
+  let InOperandList = (ins hram8:$port);
   let AsmString = "ldh a, ( $port )";
   let Defs = [A];
 }
