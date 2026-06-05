@@ -884,6 +884,11 @@ set(ve_SOURCES
 
 set(m68k_SOURCES ${GENERIC_SOURCES})
 
+# Z80/SM83 builtins are built by llvm/lib/Target/Z80/CMakeLists.txt
+# (via the Z80Runtime target) rather than the standard compiler-rt pipeline,
+# because they use hand-written SDCC-dialect assembly requiring llvm-mc or
+# external sdasz80/sdasgb.
+
 add_custom_target(builtins)
 set_target_properties(builtins PROPERTIES FOLDER "Compiler-RT/Metatargets")
 
