@@ -3063,6 +3063,20 @@ does not insert a SEI instruction.
   }];
 }
 
+def Z80InterruptDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "interrupt (Z80)";
+  let Content = [{
+Clang supports the GNU style ``__attribute__((interrupt))`` attribute on
+Z80 and SM83 targets. This attribute may be attached to a function definition and
+instructs the backend to generate appropriate function entry/exit code so that it
+can be used directly as an interrupt service routine.
+
+The function must take no arguments and return void. All registers are saved on
+entry and restored on exit. The function returns with ``reti`` instead of ``ret``.
+  }];
+}
+
 def AVRSignalDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
@@ -6507,6 +6521,16 @@ declared with this attribute will utilize the standard fixed-length vector
 calling convention variant instead of the default calling convention defined by
 the ABI. This variant aims to pass fixed-length vectors via vector registers,
 if possible, rather than through general-purpose registers.}];
+}
+
+def SDCCCallDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Heading = "clang::sdcccall";
+  let Content = [{
+The ``sdcccall`` attribute specifies the SDCC calling convention variant for
+Z80/SM83 targets. ``sdcccall(0)`` passes all parameters on the stack with
+caller cleanup. ``sdcccall(1)`` (the default) uses register-based parameter
+passing per the SDCC ``__sdcccall(1)`` convention.}];
 }
 
 def PreferredNameDocs : Documentation {

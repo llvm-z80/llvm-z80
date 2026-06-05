@@ -5266,6 +5266,14 @@ static void handleCallConvAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     D->addAttr(::new (S.Context) RISCVVLSCCAttr(S.Context, AL, VectorLength));
     return;
   }
+  case ParsedAttr::AT_SDCCCall: {
+    unsigned ABI = 1; // default is sdcccall(1)
+    if (AL.getNumArgs() &&
+        !S.checkUInt32Argument(AL, AL.getArgAsExpr(0), ABI))
+      return;
+    D->addAttr(::new (S.Context) SDCCCallAttr(S.Context, AL, ABI));
+    return;
+  }
   default:
     llvm_unreachable("unexpected attribute kind");
   }
@@ -5423,8 +5431,9 @@ bool Sema::CheckCallingConvAttr(const ParsedAttr &Attrs, CallingConv &CC,
     return false;
   }
 
-  if (Attrs.getKind() == ParsedAttr::AT_RISCVVLSCC) {
-    // riscv_vls_cc only accepts 0 or 1 argument.
+  if (Attrs.getKind() == ParsedAttr::AT_RISCVVLSCC ||
+      Attrs.getKind() == ParsedAttr::AT_SDCCCall) {
+    // These attributes accept 0 or 1 argument.
     if (!Attrs.checkAtLeastNumArgs(*this, 0) ||
         !Attrs.checkAtMostNumArgs(*this, 1)) {
       Attrs.setInvalid();
@@ -5540,6 +5549,21 @@ bool Sema::CheckCallingConvAttr(const ParsedAttr &Attrs, CallingConv &CC,
     }
     CC = static_cast<CallingConv>(CallingConv::CC_RISCVVLSCall_32 +
                                   llvm::Log2_64(ABIVLen) - 5);
+    break;
+  }
+  case ParsedAttr::AT_SDCCCall: {
+    unsigned ABI = 1; // default is sdcccall(1)
+    if (Attrs.getNumArgs() &&
+        !checkUInt32Argument(Attrs, Attrs.getArgAsExpr(0), ABI)) {
+      Attrs.setInvalid();
+      return true;
+    }
+    if (ABI > 1) {
+      Attrs.setInvalid();
+      Diag(Attrs.getLoc(), diag::err_argument_invalid_range) << ABI << 0 << 1;
+      return true;
+    }
+    CC = (ABI == 0) ? CC_Z80SDCCCall0 : CC_C;
     break;
   }
   case ParsedAttr::AT_DeviceKernel: {
@@ -6282,6 +6306,20 @@ static void handleInterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     break;
   case llvm::Triple::avr:
     S.AVR().handleInterruptAttr(D, AL);
+    break;
+  case llvm::Triple::z80:
+  case llvm::Triple::sm83:
+    if (hasFunctionProto(D) && getFunctionOrMethodNumParams(D) != 0) {
+      S.Diag(D->getLocation(), diag::warn_interrupt_signal_attribute_invalid)
+          << /*Z80*/ 4 << /*interrupt*/ 0 << 0;
+      break;
+    }
+    if (!getFunctionOrMethodResultType(D)->isVoidType()) {
+      S.Diag(D->getLocation(), diag::warn_interrupt_signal_attribute_invalid)
+          << /*Z80*/ 4 << /*interrupt*/ 0 << 1;
+      break;
+    }
+    handleSimpleAttribute<Z80InterruptAttr>(S, D, AL);
     break;
   case llvm::Triple::riscv32:
   case llvm::Triple::riscv64:
@@ -7694,6 +7732,7 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
   case ParsedAttr::AT_PreserveNone:
   case ParsedAttr::AT_RISCVVectorCC:
   case ParsedAttr::AT_RISCVVLSCC:
+  case ParsedAttr::AT_SDCCCall:
     handleCallConvAttr(S, D, AL);
     break;
   case ParsedAttr::AT_DeviceKernel:

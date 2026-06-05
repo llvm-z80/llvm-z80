@@ -117,6 +117,8 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
     CC_VLS_CASE(32768)
     CC_VLS_CASE(65536)
 #undef CC_VLS_CASE
+  case CC_Z80SDCCCall0:
+    return llvm::CallingConv::Z80_SDCCCall0;
   }
 }
 
@@ -332,6 +334,9 @@ static CallingConv getCallingConventionForDecl(const ObjCMethodDecl *D,
 #undef CC_VLS_CASE
     }
   }
+
+  if (SDCCCallAttr *SCC = D->getAttr<SDCCCallAttr>())
+    return SCC->getABI() == 0 ? CC_Z80SDCCCall0 : CC_C;
 
   return CC_C;
 }
