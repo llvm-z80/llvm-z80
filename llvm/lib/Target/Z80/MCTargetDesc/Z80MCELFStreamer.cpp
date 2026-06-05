@@ -20,7 +20,7 @@ using namespace llvm;
 
 namespace llvm {
 
-void Z80MCELFStreamer::initSections(const MCSubtargetInfo &STI) {
+void Z80MCELFStreamer::initSections(bool NoExecStack, const MCSubtargetInfo &STI) {
   MCContext &Ctx = getContext();
   switchSection(Ctx.getObjectFileInfo()->getTextSection());
   emitCodeAlignment(Align(1), &STI);

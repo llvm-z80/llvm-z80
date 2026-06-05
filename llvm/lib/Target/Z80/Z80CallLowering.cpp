@@ -193,7 +193,7 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
   // Helper to emit either RET, RET_CLEANUP, or RETI with optional implicit
   // uses.
   auto emitRet =
-      [&](ArrayRef<std::pair<Register, RegState>> ImplicitUses = {}) {
+      [&](ArrayRef<std::pair<Register, unsigned>> ImplicitUses = {}) {
         MachineInstrBuilder RetMI;
         if (IsInterrupt) {
           const auto &STI = MF.getSubtarget<Z80Subtarget>();

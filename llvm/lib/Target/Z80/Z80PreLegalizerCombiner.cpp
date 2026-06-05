@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/GlobalISel/GISelValueTracking.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
@@ -47,8 +48,8 @@ protected:
 
 public:
   Z80PreLegalizerCombinerImpl(
-      MachineFunction &MF, CombinerInfo &CInfo, GISelValueTracking &VT,
-      GISelCSEInfo *CSEInfo,
+      MachineFunction &MF, CombinerInfo &CInfo, const TargetPassConfig *TPC,
+      GISelValueTracking &VT, GISelCSEInfo *CSEInfo,
       const Z80PreLegalizerCombinerImplRuleConfig &RuleConfig,
       const Z80Subtarget &STI, MachineDominatorTree *MDT,
       const LegalizerInfo *LI);
@@ -68,11 +69,11 @@ private:
 #undef GET_GICOMBINER_IMPL
 
 Z80PreLegalizerCombinerImpl::Z80PreLegalizerCombinerImpl(
-    MachineFunction &MF, CombinerInfo &CInfo, GISelValueTracking &VT,
-    GISelCSEInfo *CSEInfo,
+    MachineFunction &MF, CombinerInfo &CInfo, const TargetPassConfig *TPC,
+    GISelValueTracking &VT, GISelCSEInfo *CSEInfo,
     const Z80PreLegalizerCombinerImplRuleConfig &RuleConfig,
     const Z80Subtarget &STI, MachineDominatorTree *MDT, const LegalizerInfo *LI)
-    : Combiner(MF, CInfo, &VT, CSEInfo),
+    : Combiner(MF, CInfo, TPC, &VT, CSEInfo),
       Helper(Observer, B, /*IsPreLegalize*/ true, &VT, MDT, LI),
       RuleConfig(RuleConfig), STI(STI),
 #define GET_GICOMBINER_CONSTRUCTOR_INITS
@@ -101,6 +102,7 @@ private:
 void Z80PreLegalizerCombiner::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
   getSelectionDAGFallbackAnalysisUsage(AU);
+  AU.addRequired<TargetPassConfig>();
   AU.addRequired<GISelValueTrackingAnalysisLegacy>();
   AU.addPreserved<GISelValueTrackingAnalysisLegacy>();
   AU.addRequired<MachineDominatorTreeWrapperPass>();
@@ -130,6 +132,7 @@ bool Z80PreLegalizerCombiner::runOnMachineFunction(MachineFunction &MF) {
   const Function &F = MF.getFunction();
   bool EnableOpt =
       MF.getTarget().getOptLevel() != CodeGenOptLevel::None && !skipFunction(F);
+  const TargetPassConfig *TPC = &getAnalysis<TargetPassConfig>();
   GISelValueTracking *VT =
       &getAnalysis<GISelValueTrackingAnalysisLegacy>().get(MF);
   MachineDominatorTree *MDT =
@@ -140,8 +143,8 @@ bool Z80PreLegalizerCombiner::runOnMachineFunction(MachineFunction &MF) {
   CInfo.MaxIterations = 1;
   CInfo.ObserverLvl = CombinerInfo::ObserverLevel::SinglePass;
   CInfo.EnableFullDCE = true;
-  Z80PreLegalizerCombinerImpl Impl(MF, CInfo, *VT, CSEInfo, RuleConfig, ST, MDT,
-                                   LI);
+  Z80PreLegalizerCombinerImpl Impl(MF, CInfo, TPC, *VT, CSEInfo, RuleConfig, ST,
+                                   MDT, LI);
   return Impl.combineMachineInstrs();
 }
 
@@ -149,6 +152,7 @@ char Z80PreLegalizerCombiner::ID = 0;
 INITIALIZE_PASS_BEGIN(Z80PreLegalizerCombiner, DEBUG_TYPE,
                       "Combine Z80 machine instrs before legalization", false,
                       false)
+INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
 INITIALIZE_PASS_DEPENDENCY(GISelValueTrackingAnalysisLegacy)
 INITIALIZE_PASS_DEPENDENCY(GISelCSEAnalysisWrapperPass)
 INITIALIZE_PASS_END(Z80PreLegalizerCombiner, DEBUG_TYPE,

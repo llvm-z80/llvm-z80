@@ -587,10 +587,10 @@ void Z80InstructionSelector::emitSigned16BitCompare(MachineBasicBlock &MBB,
   // Extract high bytes into virtual registers (before SUB_HL_rr destroys HL)
   Register LhsHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), LhsHi)
-      .addReg(LHS, RegState{}, Z80::sub_hi);
+      .addReg(LHS, 0, Z80::sub_hi);
   Register RhsHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), RhsHi)
-      .addReg(RHS, RegState{}, Z80::sub_hi);
+      .addReg(RHS, 0, Z80::sub_hi);
 
   // sign_diff_mask: (LhsHi ^ RhsHi) bit7 → expand to 0xFF/0x00
   // RLCA rotates bit7 into carry; SBC A,A expands CF to 0xFF/0x00.
@@ -824,14 +824,14 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
           uint8_t Hi = (CVal >> 8) & 0xFF;
           // High byte: LD A, lhs_hi; XOR #Hi
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-              .addReg(LHS, RegState{}, Z80::sub_hi);
+              .addReg(LHS, 0, Z80::sub_hi);
           if (Hi)
             BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(Hi);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), TmpReg)
               .addReg(Z80::A);
           // Low byte: LD A, lhs_lo; XOR #Lo; OR tmp
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-              .addReg(LHS, RegState{}, Z80::sub_lo);
+              .addReg(LHS, 0, Z80::sub_lo);
           if (Lo)
             BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(Lo);
           BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(TmpReg);
@@ -842,18 +842,18 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
           Register RhsHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
           Register RhsLo = MRI.createVirtualRegister(&Z80::GR8RegClass);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), RhsHi)
-              .addReg(RHS, RegState{}, Z80::sub_hi);
+              .addReg(RHS, 0, Z80::sub_hi);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), RhsLo)
-              .addReg(RHS, RegState{}, Z80::sub_lo);
+              .addReg(RHS, 0, Z80::sub_lo);
           // High byte
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-              .addReg(LHS, RegState{}, Z80::sub_hi);
+              .addReg(LHS, 0, Z80::sub_hi);
           BuildMI(MBB, MI, DL, TII.get(Z80::XOR_r)).addReg(RhsHi);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), TmpReg)
               .addReg(Z80::A);
           // Low byte
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-              .addReg(LHS, RegState{}, Z80::sub_lo);
+              .addReg(LHS, 0, Z80::sub_lo);
           BuildMI(MBB, MI, DL, TII.get(Z80::XOR_r)).addReg(RhsLo);
           BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(TmpReg);
         }
@@ -873,7 +873,7 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
           return false;
         Register HiByte = MRI.createVirtualRegister(&Z80::GR8RegClass);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), HiByte)
-            .addReg(LHS, RegState{}, Z80::sub_hi);
+            .addReg(LHS, 0, Z80::sub_hi);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(HiByte);
         // ADD A,A shifts bit 7 into carry
@@ -995,10 +995,10 @@ bool Z80InstructionSelector::emit32CompareFlags(
 
     Register LhsHiHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), LhsHiHi)
-        .addReg(LhsHi, RegState{}, Z80::sub_hi);
+        .addReg(LhsHi, 0, Z80::sub_hi);
     Register LhsHiLo = MRI.createVirtualRegister(&Z80::GR8RegClass);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), LhsHiLo)
-        .addReg(LhsHi, RegState{}, Z80::sub_lo);
+        .addReg(LhsHi, 0, Z80::sub_lo);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Z80::A)
         .addReg(LhsHiHi);
     BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_n)).addImm(0x80);
@@ -1014,10 +1014,10 @@ bool Z80InstructionSelector::emit32CompareFlags(
 
     Register RhsHiHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), RhsHiHi)
-        .addReg(RhsHi, RegState{}, Z80::sub_hi);
+        .addReg(RhsHi, 0, Z80::sub_hi);
     Register RhsHiLo = MRI.createVirtualRegister(&Z80::GR8RegClass);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), RhsHiLo)
-        .addReg(RhsHi, RegState{}, Z80::sub_lo);
+        .addReg(RhsHi, 0, Z80::sub_lo);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Z80::A)
         .addReg(RhsHiHi);
     BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_n)).addImm(0x80);
@@ -1187,10 +1187,10 @@ bool Z80InstructionSelector::emit64CompareFlags(
     // XOR 0x80 on LhsW3 high byte.
     Register LhsW3Hi = MRI.createVirtualRegister(&Z80::GR8RegClass);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), LhsW3Hi)
-        .addReg(LhsW3, RegState{}, Z80::sub_hi);
+        .addReg(LhsW3, 0, Z80::sub_hi);
     Register LhsW3Lo = MRI.createVirtualRegister(&Z80::GR8RegClass);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), LhsW3Lo)
-        .addReg(LhsW3, RegState{}, Z80::sub_lo);
+        .addReg(LhsW3, 0, Z80::sub_lo);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Z80::A)
         .addReg(LhsW3Hi);
     BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_n)).addImm(0x80);
@@ -1207,10 +1207,10 @@ bool Z80InstructionSelector::emit64CompareFlags(
     // XOR 0x80 on RhsW3 high byte.
     Register RhsW3Hi = MRI.createVirtualRegister(&Z80::GR8RegClass);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), RhsW3Hi)
-        .addReg(RhsW3, RegState{}, Z80::sub_hi);
+        .addReg(RhsW3, 0, Z80::sub_hi);
     Register RhsW3Lo = MRI.createVirtualRegister(&Z80::GR8RegClass);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), RhsW3Lo)
-        .addReg(RhsW3, RegState{}, Z80::sub_lo);
+        .addReg(RhsW3, 0, Z80::sub_lo);
     BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Z80::A)
         .addReg(RhsW3Hi);
     BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_n)).addImm(0x80);
@@ -1570,7 +1570,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         return false;
       // Extract low byte from source
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), LowReg)
-          .addReg(SrcReg, RegState{}, Z80::sub_lo);
+          .addReg(SrcReg, 0, Z80::sub_lo);
       // Sign-extend to 16-bit
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SEXT_GR8_GR16), DstReg)
           .addReg(LowReg);
@@ -2515,7 +2515,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // E.g. SHL 15: RRCA puts bit 0 at bit 7, AND 0x80 keeps it
         Register LoByte = MRI.createVirtualRegister(&Z80::GR8RegClass);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), LoByte)
-            .addReg(SrcReg, RegState{}, Z80::sub_lo);
+            .addReg(SrcReg, 0, Z80::sub_lo);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(LoByte);
         for (int64_t i = 0; i < 16 - ShiftAmt; i++)
@@ -2542,7 +2542,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           // Extract low byte directly to H, avoiding dead load of high byte
           Register LoByte = MRI.createVirtualRegister(&Z80::GR8RegClass);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), LoByte)
-              .addReg(SrcReg, RegState{}, Z80::sub_lo);
+              .addReg(SrcReg, 0, Z80::sub_lo);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::H)
               .addReg(LoByte);
         }
@@ -2659,7 +2659,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // E.g. LSHR 15: RLCA puts bit 7 at bit 0, AND 0x01 keeps it
         Register HiByte = MRI.createVirtualRegister(&Z80::GR8RegClass);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), HiByte)
-            .addReg(SrcReg, RegState{}, Z80::sub_hi);
+            .addReg(SrcReg, 0, Z80::sub_hi);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(HiByte);
         for (int64_t i = 0; i < 16 - ShiftAmt; i++)
@@ -2675,7 +2675,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // Extract high byte directly to L, avoiding dead load of low byte
         Register HiByte = MRI.createVirtualRegister(&Z80::GR8RegClass);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), HiByte)
-            .addReg(SrcReg, RegState{}, Z80::sub_hi);
+            .addReg(SrcReg, 0, Z80::sub_hi);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::L)
             .addReg(HiByte);
         BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_n)).addImm(0);
@@ -2782,7 +2782,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             if (!RBI.constrainGenericRegister(OrigReg, Z80::GR16RegClass, MRI))
               return false;
             BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), LowReg)
-                .addReg(OrigReg, RegState{}, Z80::sub_lo);
+                .addReg(OrigReg, 0, Z80::sub_lo);
             BuildMI(MBB, MI, DL, TII.get(Z80::SEXT_GR8_GR16), DstReg)
                 .addReg(LowReg);
             MI.eraseFromParent();
@@ -3092,7 +3092,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           // Extract high byte and test sign bit: RLCA shifts bit 7 into bit 0
           Register HiByte = MRI.createVirtualRegister(&Z80::GR8RegClass);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), HiByte)
-              .addReg(SignTestReg, RegState{}, Z80::sub_hi);
+              .addReg(SignTestReg, 0, Z80::sub_hi);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
               .addReg(HiByte);
           BuildMI(MBB, MI, DL, TII.get(Z80::RLCA));
@@ -3797,9 +3797,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return false;
 
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), LoReg)
-        .addReg(SrcReg, RegState{}, Z80::sub_lo);
+        .addReg(SrcReg, 0, Z80::sub_lo);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), HiReg)
-        .addReg(SrcReg, RegState{}, Z80::sub_hi);
+        .addReg(SrcReg, 0, Z80::sub_hi);
     MI.eraseFromParent();
     return true;
   }

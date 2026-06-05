@@ -2377,7 +2377,7 @@ MCRegister RAGreedy::tryAssignCSRFirstTime(
     // We choose spill over using the CSR for the first time if the spill cost
     // is lower than CSRCost.
     SA->analyze(&VirtReg);
-    if (calcSpillCost(VirtReg) < CSRCost) {
+    if (calcSpillCost() < CSRCost) {
       // Set CostPerUseLimit to 1 to make sure that
       // we will not use a callee-saved register in tryEvict.
       CostPerUseLimit = 1;
