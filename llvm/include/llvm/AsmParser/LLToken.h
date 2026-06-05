@@ -190,6 +190,7 @@ enum Kind {
   kw_cheriot_compartmentcallcc,
   kw_cheriot_compartmentcalleecc,
   kw_cheriot_librarycallcc,
+  kw_z80_sdcccall0,
 
   // Attributes:
   kw_attributes,

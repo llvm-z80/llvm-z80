@@ -69,6 +69,8 @@ public:
     mips64,      // MIPS64: mips64, mips64r6, mipsn32, mipsn32r6
     mips64el,    // MIPS64EL: mips64el, mips64r6el, mipsn32el, mipsn32r6el
     msp430,      // MSP430: msp430
+    z80,          // Z80: Zilog Z80 and variants
+    sm83,         // SM83: Sharp SM83 (Game Boy CPU)
     ppc,         // PPC: powerpc
     ppcle,       // PPCLE: powerpc (little endian)
     ppc64,       // PPC64: powerpc64, ppu
@@ -318,7 +320,8 @@ public:
 
     PAuthTest,
     MTIA,
-    LastEnvironmentType = MTIA
+    SDCC,
+    LastEnvironmentType = SDCC
   };
   enum ObjectFormatType {
     UnknownObjectFormat,
@@ -1175,6 +1178,21 @@ public:
   bool isX32() const {
     EnvironmentType Env = getEnvironment();
     return Env == Triple::GNUX32 || Env == Triple::MuslX32;
+  }
+
+  /// Tests whether the target is Z80.
+  bool isZ80() const {
+    return getArch() == Triple::z80;
+  }
+
+  /// Tests whether the target is SM83.
+  bool isSM83() const {
+    return getArch() == Triple::sm83;
+  }
+
+  /// Tests whether the target is Z80 family (Z80 or SM83).
+  bool isZ80Family() const {
+    return getArch() == Triple::z80 || getArch() == Triple::sm83;
   }
 
   /// Tests whether the target is eBPF.

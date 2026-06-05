@@ -1,0 +1,72 @@
+
+#ifndef ELF_RELOC
+#error "ELF_RELOC must be defined"
+#endif
+
+// The following are relocation types defined for the Z80 series of processors.
+// Other ELF readers and writers are welcome to use this information to
+// further understand Z80-compatible ELF files.
+
+// No relocation type.  Should not be emitted by the writer.  Readers should
+// recognize this as an error in the ELF file.
+ELF_RELOC(R_Z80_NONE,                  0)
+
+// An 8-bit immediate value.
+ELF_RELOC(R_Z80_IMM8,                  1)
+
+// An 8-bit address (for port operations).
+ELF_RELOC(R_Z80_ADDR8,                 2)
+
+// A 16-bit address.  Standard for Z80 processors.
+ELF_RELOC(R_Z80_ADDR16,                3)
+
+// The least significant byte of a 16-bit address.  Z80 is little endian,
+// so this is the first byte in a 16-bit address.
+ELF_RELOC(R_Z80_ADDR16_LO,             4)
+
+// The most significant byte of a 16-bit address.
+ELF_RELOC(R_Z80_ADDR16_HI,             5)
+
+// A PC-relative jump value.  Used for JR and DJNZ instructions.
+ELF_RELOC(R_Z80_PCREL_8,               6)
+
+// The following relocation types have meaning for extended Z80 variants
+// like eZ80 which use 24-bit addresses.
+
+// A 24-bit address.
+ELF_RELOC(R_Z80_ADDR24,                7)
+
+// The 8-bit bank value from a 24-bit address.  The most significant byte.
+ELF_RELOC(R_Z80_ADDR24_BANK,           8)
+
+// The 16-bit segment value from a 24-bit address.
+ELF_RELOC(R_Z80_ADDR24_SEGMENT,        9)
+
+// The low byte from the segment value in a 24-bit address.
+ELF_RELOC(R_Z80_ADDR24_SEGMENT_LO,     10)
+
+// The high byte from the segment value in a 24-bit address.
+ELF_RELOC(R_Z80_ADDR24_SEGMENT_HI,     11)
+
+// A 16-bit PC-relative jump value.
+ELF_RELOC(R_Z80_PCREL_16,              12)
+
+// Relocations for DWARF.
+ELF_RELOC(R_Z80_FK_DATA_4,             13)
+ELF_RELOC(R_Z80_FK_DATA_8,             14)
+
+// Decimal ASCII address encoding.
+ELF_RELOC(R_Z80_ADDR_ASCIZ,            15)
+
+// A 16-bit immediate value.
+ELF_RELOC(R_Z80_IMM16,                 16)
+
+// A 13-bit address.  Reserved for future use.
+ELF_RELOC(R_Z80_ADDR13,                17)
+
+// An 8-bit signed displacement for indexed addressing (IX+d, IY+d).
+ELF_RELOC(R_Z80_DISP8,                 18)
+
+// SM83 LDH instruction operand: 8-bit offset from 0xFF00.
+// The linker computes (S + A - 0xFF00) and stores the low byte.
+ELF_RELOC(R_SM83_LDH8,                 19)
