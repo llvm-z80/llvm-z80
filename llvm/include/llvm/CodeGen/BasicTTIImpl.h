@@ -546,6 +546,14 @@ public:
     return getTLI()->isTruncateFree(Ty1, Ty2);
   }
 
+  bool isZExtFree(Type *Ty1, Type *Ty2) const override {
+    return getTLI()->isZExtFree(Ty1, Ty2);
+  }
+
+  bool preferNarrowTypes() const override {
+    return getTLI()->preferNarrowTypes();
+  }
+
   bool isProfitableToHoist(Instruction *I) const override {
     return getTLI()->isProfitableToHoist(I);
   }

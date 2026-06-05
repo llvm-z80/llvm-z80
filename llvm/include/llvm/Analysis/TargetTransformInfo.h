@@ -450,6 +450,9 @@ public:
   /// scientific. A target may has no bonus on vector instructions.
   LLVM_ABI int getInlinerVectorBonusPercent() const;
 
+  /// \returns Whether inlining costs should be boosted or taken as law.
+  ///
+  /// Some targets typically have extreme size constraints; in such cases,
   /// \return the expected cost of a memcpy, which could e.g. depend on the
   /// source/destination type and alignment and the number of bytes copied.
   LLVM_ABI InstructionCost getMemcpyCost(const Instruction *I) const;
@@ -979,6 +982,14 @@ public:
   /// Ty2. e.g. On x86 it's free to truncate a i32 value in register EAX to i16
   /// by referencing its sub-register AX.
   LLVM_ABI bool isTruncateFree(Type *Ty1, Type *Ty2) const;
+
+  /// Return true if it's free to zero extend a value of type Ty1 to type
+  /// Ty2.
+  bool isZExtFree(Type *Ty1, Type *Ty2) const;
+
+  /// Return true if a operations on narrow types are generally cheaper than
+  /// operations on wide types.
+  bool preferNarrowTypes() const;
 
   /// Return true if it is profitable to hoist instruction in the
   /// then/else to before if.

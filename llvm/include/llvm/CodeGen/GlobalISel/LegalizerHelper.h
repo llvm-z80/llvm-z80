@@ -17,6 +17,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+
 #ifndef LLVM_CODEGEN_GLOBALISEL_LEGALIZERHELPER_H
 #define LLVM_CODEGEN_GLOBALISEL_LEGALIZERHELPER_H
 
@@ -177,6 +178,41 @@ public:
   /// Legalize a single operand \p OpIdx of the machine instruction \p MI as a
   /// def by inserting a G_BITCAST from \p CastTy
   LLVM_ABI void bitcastDst(MachineInstr &MI, LLT CastTy, unsigned OpIdx);
+
+  // Useful for libcalls where all operands have the same type.
+  LLVM_ABI LegalizeResult
+  simpleLibcall(MachineInstr &MI, MachineIRBuilder &MIRBuilder, unsigned Size,
+                Type *OpType, LostDebugLocObserver &LocObserver) const;
+
+  /// Helper function that creates a libcall to the given \p Name using the
+  /// given calling convention \p CC.
+  LLVM_ABI LegalizeResult createLibcall(const char *Name,
+                                        const CallLowering::ArgInfo &Result,
+                                        ArrayRef<CallLowering::ArgInfo> Args,
+                                        CallingConv::ID CC,
+                                        LostDebugLocObserver &LocObserver,
+                                        MachineInstr *MI = nullptr) const;
+
+  /// Helper function that creates the given libcall.
+  LLVM_ABI LegalizeResult createLibcall(RTLIB::Libcall Libcall,
+                                        const CallLowering::ArgInfo &Result,
+                                        ArrayRef<CallLowering::ArgInfo> Args,
+                                        LostDebugLocObserver &LocObserver,
+                                        MachineInstr *MI = nullptr) const;
+
+  LLVM_ABI LegalizeResult conversionLibcall(MachineInstr &MI, Type *ToType,
+                                            Type *FromType,
+                                            LostDebugLocObserver &LocObserver,
+                                            bool IsSigned = false) const;
+  LegalizerHelper::LegalizeResult createAtomicLibcall(MachineInstr &MI) const;
+
+  /// Create a libcall to memcpy et al.
+  LLVM_ABI LegalizeResult
+  createMemLibcall(MachineRegisterInfo &MRI, MachineInstr &MI,
+                   LostDebugLocObserver &LocObserver) const;
+
+  /// Return the libcall corresponding to a given opcode and size.
+  RTLIB::Libcall getRTLibDesc(unsigned Opcode, unsigned Size) const;
 
 private:
   LegalizeResult

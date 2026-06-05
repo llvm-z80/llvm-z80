@@ -11,6 +11,7 @@
 // at the end of the legalization.
 //===----------------------------------------------------------------------===//
 
+
 #ifndef LLVM_CODEGEN_GLOBALISEL_LEGALIZATIONARTIFACTCOMBINER_H
 #define LLVM_CODEGEN_GLOBALISEL_LEGALIZATIONARTIFACTCOMBINER_H
 
@@ -285,6 +286,13 @@ public:
     if (auto *SrcMerge = dyn_cast<GMerge>(SrcMI)) {
       const Register MergeSrcReg = SrcMerge->getSourceReg(0);
       const LLT MergeSrcTy = MRI.getType(MergeSrcReg);
+      const LLT SrcTy = MRI.getType(SrcReg);
+
+      // Don't discount one of these combines if the source instruction is also
+      // unsupported. A sequence of combines may eventually lower it to
+      // something supported.
+      bool IsSupported =
+          !isInstUnsupported({TargetOpcode::G_TRUNC, {DstTy, SrcTy}});
 
       // We can only fold if the types are scalar
       const unsigned DstSize = DstTy.getSizeInBits();
@@ -295,7 +303,8 @@ public:
       if (DstSize < MergeSrcSize) {
         // When the merge source is larger than the destination, we can just
         // truncate the merge source directly
-        if (isInstUnsupported({TargetOpcode::G_TRUNC, {DstTy, MergeSrcTy}}))
+        if (IsSupported &&
+            isInstUnsupported({TargetOpcode::G_TRUNC, {DstTy, MergeSrcTy}}))
           return false;
 
         LLVM_DEBUG(dbgs() << "Combining G_TRUNC(G_MERGE_VALUES) to G_TRUNC: "
@@ -313,8 +322,8 @@ public:
       } else if (DstSize % MergeSrcSize == 0) {
         // If the trunc size is a multiple of the merge source size we can use
         // a smaller merge instead
-        if (isInstUnsupported(
-                {TargetOpcode::G_MERGE_VALUES, {DstTy, MergeSrcTy}}))
+        if (IsSupported && isInstUnsupported({TargetOpcode::G_MERGE_VALUES,
+                                              {DstTy, MergeSrcTy}}))
           return false;
 
         LLVM_DEBUG(
@@ -435,8 +444,16 @@ public:
 
     const unsigned CastSrcSize = CastSrcTy.getSizeInBits();
     const unsigned DestSize = DestTy.getSizeInBits();
+    const unsigned SrcSize = SrcTy.getSizeInBits();
 
-    if (CastOpc == TargetOpcode::G_TRUNC) {
+    // Don't discount one of these combines if the source instruction is also
+    // unsupported. A sequence of combines may eventually lower it to
+    // something supported.
+    bool IsSupported =
+        !isInstUnsupported({TargetOpcode::G_UNMERGE_VALUES, {DestTy, SrcTy}});
+
+    switch (CastOpc) {
+    case TargetOpcode::G_TRUNC: {
       if (SrcTy.isVector() && SrcTy.getScalarType() == DestTy.getScalarType()) {
         //  %1:_(<4 x s8>) = G_TRUNC %0(<4 x s32>)
         //  %2:_(s8), %3:_(s8), %4:_(s8), %5:_(s8) = G_UNMERGE_VALUES %1
@@ -454,10 +471,11 @@ public:
         LLT SrcWideTy =
             SrcTy.changeElementCount(ElementCount::getFixed(UnmergeNumElts));
 
-        if (isInstUnsupported(
-                {TargetOpcode::G_UNMERGE_VALUES, {UnmergeTy, CastSrcTy}}) ||
-            LI.getAction({TargetOpcode::G_TRUNC, {SrcWideTy, UnmergeTy}})
-                    .Action == LegalizeActions::MoreElements)
+        if (IsSupported &&
+            (isInstUnsupported(
+                 {TargetOpcode::G_UNMERGE_VALUES, {UnmergeTy, CastSrcTy}}) ||
+             LI.getAction({TargetOpcode::G_TRUNC, {SrcWideTy, UnmergeTy}})
+                     .Action == LegalizeActions::MoreElements))
           return false;
 
         Builder.setInstr(MI);
@@ -485,7 +503,7 @@ public:
           return false;
 
         // Check if the new unmerge is supported
-        if (isInstUnsupported(
+        if (IsSupported && isInstUnsupported(
                 {TargetOpcode::G_UNMERGE_VALUES, {DestTy, CastSrcTy}}))
           return false;
 
@@ -507,14 +525,65 @@ public:
         markInstAndDefDead(MI, CastMI, DeadInsts);
         return true;
       }
+      return false;
     }
+    case TargetOpcode::G_ANYEXT: {
+      if (CastSrcTy.isScalar() && SrcTy.isScalar() && !DestTy.isVector()) {
+        //  %1:_(s32) = G_ANYEXT %0(s16)
+        //  %2:_(s8), %3:_(s8), %4:_(s8), %5:_(s8) = G_UNMERGE_VALUES %1
+        // =>
+        //  %2:_(s8), %3:_(s8) = G_UNMERGE_VALUES %0
+        //  %4:_(s8) = G_IMPLICIT_DEF
+        //  %5:_(s8) = G_IMPLICIT_DEF
 
-    // TODO: support combines with other casts as well
-    return false;
+        // Unmerge(anyext) can be combined if the anyext source size is a
+        // multiple of the unmerge destination size
+        if (CastSrcSize % DestSize != 0)
+          return false;
+
+        // Check if the new unmerge is supported (just COPY if DestSize ==
+        // CastSrcSize).
+        if (IsSupported && CastSrcSize != DestSize &&
+            isInstUnsupported(
+                {TargetOpcode::G_UNMERGE_VALUES, {DestTy, CastSrcTy}}))
+          return false;
+
+        // Check if implicit def is supported.
+        if (isInstUnsupported({TargetOpcode::G_IMPLICIT_DEF, {DestTy}}))
+          return false;
+
+        // Gather the original destination registers that will participate in
+        // the new unmerge.
+        const unsigned NumDefs = CastSrcSize / DestSize;
+        SmallVector<Register, 8> DstRegs(NumDefs);
+        for (unsigned Idx = 0; Idx < NumDefs; ++Idx)
+          DstRegs[Idx] = MI.getOperand(Idx).getReg();
+
+        // Build new unmerge
+        Builder.setInstr(MI);
+        if (DstRegs.size() == 1)
+          Builder.buildCopy(DstRegs[0], CastSrcReg);
+        else
+          Builder.buildUnmerge(DstRegs, CastSrcReg);
+        UpdatedDefs.append(DstRegs.begin(), DstRegs.end());
+
+        // Build implicit defs for all remaining destination registers.
+        for (unsigned Idx = NumDefs, End = SrcSize / DestSize; Idx < End; ++Idx)
+          Builder.buildUndef(MI.getOperand(Idx));
+
+        markInstAndDefDead(MI, CastMI, DeadInsts);
+        return true;
+      }
+      return false;
+    }
+    default:
+      // TODO: support combines with other casts as well
+      return false;
+    }
   }
 
-  static bool canFoldMergeOpcode(unsigned MergeOp, unsigned ConvertOp,
-                                 LLT OpTy, LLT DestTy) {
+  static bool canFoldMergeOpcode(unsigned MergeOp, unsigned ConvertOp, LLT OpTy,
+                                 LLT DestTy) {
     // Check if we found a definition that is like G_MERGE_VALUES.
     switch (MergeOp) {
     default:
@@ -1152,8 +1221,8 @@ public:
       MergeI = getDefIgnoringCopies(SrcDef->getOperand(1).getReg(), MRI);
     }
 
-    if (!MergeI || !canFoldMergeOpcode(MergeI->getOpcode(),
-                                       ConvertOp, OpTy, DestTy)) {
+    if (!MergeI ||
+        !canFoldMergeOpcode(MergeI->getOpcode(), ConvertOp, OpTy, DestTy)) {
       // We might have a chance to combine later by trying to combine
       // unmerge(cast) first
       return tryFoldUnmergeCast(MI, *SrcDef, DeadInsts, UpdatedDefs);
