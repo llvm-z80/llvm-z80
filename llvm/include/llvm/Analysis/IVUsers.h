@@ -156,6 +156,7 @@ public:
 
   /// dump - This method is used for debugging.
   void dump() const;
+
 };
 
 Pass *createIVUsersPass();

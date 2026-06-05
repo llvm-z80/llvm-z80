@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+
 #include "llvm/CodeGen/GlobalISel/LegalizerHelper.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/GISelChangeObserver.h"
@@ -378,10 +379,15 @@ void LegalizerHelper::buildWidenedRemergeToDst(Register DstReg, LLT LCMTy,
   llvm_unreachable("unhandled case");
 }
 
-static RTLIB::Libcall getRTLibDesc(unsigned Opcode, unsigned Size) {
+RTLIB::Libcall LegalizerHelper::getRTLibDesc(unsigned Opcode,
+                                             unsigned Size) const {
 #define RTLIBCASE_INT(LibcallPrefix)                                           \
   do {                                                                         \
     switch (Size) {                                                            \
+    case 8:                                                                    \
+      return RTLIB::LibcallPrefix##8;                                          \
+    case 16:                                                                   \
+      return RTLIB::LibcallPrefix##16;                                         \
     case 32:                                                                   \
       return RTLIB::LibcallPrefix##32;                                         \
     case 64:                                                                   \
@@ -424,8 +430,24 @@ static RTLIB::Libcall getRTLibDesc(unsigned Opcode, unsigned Size) {
     RTLIBCASE_INT(SREM_I);
   case TargetOpcode::G_UREM:
     RTLIBCASE_INT(UREM_I);
+  case TargetOpcode::G_SDIVREM:
+    RTLIBCASE_INT(SDIVREM_I);
+  case TargetOpcode::G_UDIVREM:
+    RTLIBCASE_INT(UDIVREM_I);
   case TargetOpcode::G_CTLZ_ZERO_UNDEF:
     RTLIBCASE_INT(CTLZ_I);
+  case TargetOpcode::G_LSHR:
+    RTLIBCASE_INT(SRL_I);
+  case TargetOpcode::G_ASHR:
+    RTLIBCASE_INT(SRA_I);
+  case TargetOpcode::G_SHL:
+    RTLIBCASE_INT(SHL_I);
+  case TargetOpcode::G_ROTL:
+    RTLIBCASE_INT(ROTL_I);
+  case TargetOpcode::G_ROTR:
+    RTLIBCASE_INT(ROTR_I);
+   case TargetOpcode::G_BSWAP:
+    RTLIBCASE_INT(BSWAP_I);
   case TargetOpcode::G_FADD:
     RTLIBCASE(ADD_F);
   case TargetOpcode::G_FSUB:
@@ -1316,6 +1338,7 @@ LegalizerHelper::libcall(MachineInstr &MI, LostDebugLocObserver &LocObserver) {
   case TargetOpcode::G_UDIV:
   case TargetOpcode::G_SREM:
   case TargetOpcode::G_UREM:
+  case TargetOpcode::G_BSWAP:
   case TargetOpcode::G_CTLZ_ZERO_UNDEF: {
     LLT LLTy = MRI.getType(MI.getOperand(0).getReg());
     unsigned Size = LLTy.getSizeInBits();
@@ -8023,7 +8046,9 @@ LegalizerHelper::LegalizeResult LegalizerHelper::lowerRotate(MachineInstr &MI) {
 
   // If a rotate in the other direction is supported, use it.
   unsigned RevRot = IsLeft ? TargetOpcode::G_ROTR : TargetOpcode::G_ROTL;
-  if (LI.isLegalOrCustom({RevRot, {DstTy, SrcTy}}) &&
+  if ((LI.isLegal({RevRot, {DstTy, SrcTy}}) ||
+       (LI.isLegalOrCustom({RevRot, {DstTy, SrcTy}}) &&
+        !LI.isLegalOrCustom({MI.getOpcode(), {DstTy, SrcTy}}))) &&
       isPowerOf2_32(EltSizeInBits))
     return lowerRotateWithReverseRotate(MI);
 

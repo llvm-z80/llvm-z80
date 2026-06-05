@@ -30,6 +30,7 @@ class LiveRegMatrix;
 class MachineFunction;
 class MachineRegisterInfo;
 class RegisterClassInfo;
+class TargetInstrInfo;
 class TargetRegisterInfo;
 class VirtRegMap;
 
@@ -62,6 +63,10 @@ enum LiveRangeStage {
   /// progress.  This is used for split products that may not be making
   /// progress.
   RS_Split2,
+
+  /// Attempt to spill to a wider register class to hopefully avoid spilling
+  /// to the stack.
+  RS_LightSpill,
 
   /// Live range will be spilled.  No more splitting will be attempted.
   RS_Spill,
@@ -143,6 +148,7 @@ protected:
   LiveIntervals *const LIS;
   VirtRegMap *const VRM;
   MachineRegisterInfo *const MRI;
+  const TargetInstrInfo *const TII;
   const TargetRegisterInfo *const TRI;
   const RegisterClassInfo &RegClassInfo;
   const ArrayRef<uint8_t> RegCosts;

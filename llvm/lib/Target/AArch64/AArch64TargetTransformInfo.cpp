@@ -6388,10 +6388,9 @@ bool AArch64TTIImpl::preferPredicateOverEpilogue(TailFoldingInfo *TFI) const {
   return NumInsns >= SVETailFoldInsnThreshold;
 }
 
-InstructionCost
-AArch64TTIImpl::getScalingFactorCost(Type *Ty, GlobalValue *BaseGV,
-                                     StackOffset BaseOffset, bool HasBaseReg,
-                                     int64_t Scale, unsigned AddrSpace) const {
+InstructionCost AArch64TTIImpl::getScalingFactorCost(
+    Type *Ty, GlobalValue *BaseGV, StackOffset BaseOffset, bool HasBaseReg,
+    int64_t Scale, unsigned AddrSpace) const {
   // Scaling factors are not free at all.
   // Operands                     | Rt Latency
   // -------------------------------------------
