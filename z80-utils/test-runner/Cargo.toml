@@ -1,0 +1,6 @@
+[package]
+name = "z80-test-runner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
