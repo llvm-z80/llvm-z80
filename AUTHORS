@@ -1,0 +1,23 @@
+The following people have contributed to LLVM-Z80:
+
+Chanung Park (Kiroo, @zlfn) (ung@zlfn.space) — Z80/SM83 backend, runtime libraries
+Alex Jokela (alex@camulus.com) — Initial Z80 backend port
+
+The LLVM-Z80 project incorporates code from the LLVM-MOS project
+(https://github.com/llvm-mos/llvm-mos), whose contributors include:
+
+Daniel Thornburgh (mysterymath@gmail.com)
+Jack Andersen (jackoalan@gmail.com)
+John Byrd (jbyrd@giganticsoftware.com)
+Adrian Siekierka (kontakt@asie.pl)
+Nolan Check (beholdnec@gmail.com)
+Piotr Fusik (piotr@fusion-lang.org)
+Mikael Lund (Mlund@mac.com)
+Mariusz Kryński (mrk@sed.pl)
+
+Also, LLVM-Z80 project adopted some optimization pass from GB-LLVM project
+(https://github.com/DaveDuck321/gb-llvm), whose contributors include:
+
+Tom Grant (thomas.grant.duck321@gmail.com)
+
+Built, of course, upon the amazing work of the LLVM Project Authors!

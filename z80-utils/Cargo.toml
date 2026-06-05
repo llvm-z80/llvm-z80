@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "test-runner",
+    "elf2rel",
+    "rel2elf",
+]
+default-members = ["test-runner"]
+resolver = "3"

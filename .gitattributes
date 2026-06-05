@@ -1,3 +1,7 @@
+# Exclude all files from language statistics except the Z80 backend
+* linguist-vendored
+llvm/lib/Target/Z80/** -linguist-vendored
+
 clang/bindings/python/.git_archival.txt  export-subst
 
 libcxx/src/**/*.cpp     merge=libcxx-reformat
