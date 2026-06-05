@@ -731,7 +731,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       llvm_unreachable("unexpected opcode");
     }
 
-    auto Status = Helper.createLibcall(FuncName, {Dst, F32Ty, 0},
+    auto Status = createLibcall(Helper.MIRBuilder,FuncName, {Dst, F32Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
                                        CallingConv::C, LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
@@ -936,7 +936,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
         return true;
       }
       Register UnordResult = MRI.createGenericVirtualRegister(S16);
-      auto Status = Helper.createLibcall("__unordsf2", {UnordResult, I16Ty, 0},
+      auto Status = createLibcall(Helper.MIRBuilder,"__unordsf2", {UnordResult, I16Ty, 0},
                                          {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
                                          CallingConv::C, LocObserver, &MI);
       if (Status != LegalizerHelper::Legalized)
@@ -993,7 +993,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     }
 
     Register CmpResult = MRI.createGenericVirtualRegister(S16);
-    auto Status = Helper.createLibcall(LibcallName, {CmpResult, I16Ty, 0},
+    auto Status = createLibcall(Helper.MIRBuilder,LibcallName, {CmpResult, I16Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
                                        CallingConv::C, LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
@@ -1006,7 +1006,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     } else {
       // Need __unordsf2 call for NaN handling.
       Register UnordResult = MRI.createGenericVirtualRegister(S16);
-      auto UStatus = Helper.createLibcall("__unordsf2", {UnordResult, I16Ty, 0},
+      auto UStatus = createLibcall(Helper.MIRBuilder,"__unordsf2", {UnordResult, I16Ty, 0},
                                           {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
                                           CallingConv::C, LocObserver, &MI);
       if (UStatus != LegalizerHelper::Legalized)
@@ -1046,7 +1046,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       MI.getOperand(1).setReg(ZExt.getReg(0));
     }
 
-    auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
+    auto Result = createMemLibcall(Helper.MIRBuilder, MRI, MI, LocObserver);
     if (Result != LegalizerHelper::Legalized)
       return false;
     MI.eraseFromParent();

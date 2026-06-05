@@ -379,8 +379,7 @@ void LegalizerHelper::buildWidenedRemergeToDst(Register DstReg, LLT LCMTy,
   llvm_unreachable("unhandled case");
 }
 
-RTLIB::Libcall LegalizerHelper::getRTLibDesc(unsigned Opcode,
-                                             unsigned Size) const {
+static RTLIB::Libcall getRTLibDesc(unsigned Opcode, unsigned Size) {
 #define RTLIBCASE_INT(LibcallPrefix)                                           \
   do {                                                                         \
     switch (Size) {                                                            \
