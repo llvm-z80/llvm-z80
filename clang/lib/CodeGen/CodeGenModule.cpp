@@ -129,6 +129,10 @@ createTargetCodeGenInfo(CodeGenModule &CGM) {
   case llvm::Triple::mips64el:
     return createMIPSTargetCodeGenInfo(CGM, /*IsOS32=*/false);
 
+  case llvm::Triple::z80:
+  case llvm::Triple::sm83:
+    return createZ80TargetCodeGenInfo(CGM);
+
   case llvm::Triple::avr: {
     // For passing parameters, R8~R25 are used on avr, and R18~R25 are used
     // on avrtiny. For passing return value, R18~R25 are used on avr, and

@@ -143,7 +143,8 @@ static void diagnoseBadTypeAttribute(Sema &S, const ParsedAttr &attr,
   case ParsedAttr::AT_M68kRTD:                                                 \
   case ParsedAttr::AT_PreserveNone:                                            \
   case ParsedAttr::AT_RISCVVectorCC:                                           \
-  case ParsedAttr::AT_RISCVVLSCC
+  case ParsedAttr::AT_RISCVVLSCC:                                             \
+  case ParsedAttr::AT_SDCCCall
 
 // Function type attributes.
 #define FUNCTION_TYPE_ATTRS_CASELIST                                           \
@@ -7629,6 +7630,17 @@ static Attr *getCCTypeAttr(ASTContext &Ctx, ParsedAttr &Attr) {
     }
 
     return ::new (Ctx) RISCVVLSCCAttr(Ctx, Attr, ABIVLen);
+  }
+  case ParsedAttr::AT_SDCCCall: {
+    unsigned ABI = 1;
+    if (Attr.getNumArgs()) {
+      std::optional<llvm::APSInt> MaybeABI =
+          Attr.getArgAsExpr(0)->getIntegerConstantExpr(Ctx);
+      if (!MaybeABI)
+        llvm_unreachable("Invalid SDCC ABI number");
+      ABI = MaybeABI->getZExtValue();
+    }
+    return ::new (Ctx) SDCCCallAttr(Ctx, Attr, ABI);
   }
   }
   llvm_unreachable("unexpected attribute kind!");

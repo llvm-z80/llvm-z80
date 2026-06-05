@@ -477,6 +477,7 @@ def TargetAnyMips : TargetArch<["mips", "mipsel", "mips64", "mips64el"]>;
 def TargetMSP430 : TargetArch<["msp430"]>;
 def TargetM68k : TargetArch<["m68k"]>;
 def TargetRISCV : TargetArch<["riscv32", "riscv64"]>;
+def TargetZ80 : TargetArch<["z80", "sm83"]>;
 def TargetX86 : TargetArch<["x86"]>;
 def TargetX86_64 : TargetArch<["x86_64"]>;
 def TargetAnyX86 : TargetArch<["x86", "x86_64"]>;
@@ -1064,6 +1065,13 @@ def AVRInterrupt : InheritableAttr, TargetSpecificAttr<TargetAVR> {
   let Subjects = SubjectList<[Function]>;
   let ParseKind = "Interrupt";
   let Documentation = [AVRInterruptDocs];
+}
+
+def Z80Interrupt : InheritableAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [GCC<"interrupt">];
+  let Subjects = SubjectList<[Function]>;
+  let ParseKind = "Interrupt";
+  let Documentation = [Z80InterruptDocs];
 }
 
 def AVRSignal : InheritableAttr, TargetSpecificAttr<TargetAVR> {
@@ -3509,6 +3517,12 @@ def RISCVVLSCC: DeclOrTypeAttr, TargetSpecificAttr<TargetRISCV> {
                   Clang<"riscv_vls_cc">];
  let Args = [UnsignedArgument<"VectorWidth", /*opt*/1>];
  let Documentation = [RISCVVLSCCDocs];
+}
+
+def SDCCCall : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [Clang<"sdcccall">];
+  let Args = [UnsignedArgument<"ABI", /*opt*/1>];
+  let Documentation = [SDCCCallDocs];
 }
 
 def Target : InheritableAttr {

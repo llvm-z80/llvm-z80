@@ -3202,6 +3202,9 @@ void MicrosoftCXXNameMangler::mangleCallingConvention(CallingConv CC,
       else
         Out << "w";
       return;
+    case CC_Z80SDCCCall0:
+      Out << 'A'; // Z80 doesn't use MSVC mangling; use default
+      return;
   }
 
   Error(Range.getBegin(), "calling convention") << Range;
