@@ -52,6 +52,8 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case mips:           return "mips";
   case mipsel:         return "mipsel";
   case msp430:         return "msp430";
+  case z80:            return "z80";
+  case sm83:           return "sm83";
   case nvptx64:        return "nvptx64";
   case nvptx:          return "nvptx";
   case ppc64:          return "powerpc64";
@@ -256,6 +258,9 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case loongarch32:
   case loongarch64: return "loongarch";
 
+  case z80:
+  case sm83:        return "z80";
+
   case dxil:        return "dx";
 
   case xtensa:      return "xtensa";
@@ -414,6 +419,8 @@ StringRef Triple::getEnvironmentTypeName(EnvironmentType Kind) {
     return "llvm";
   case Mlibc:
     return "mlibc";
+  case SDCC:
+    return "sdcc";
   }
 
   llvm_unreachable("Invalid EnvironmentType!");
@@ -516,6 +523,8 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
       .Case("csky", csky)
       .Case("loongarch32", loongarch32)
       .Case("loongarch64", loongarch64)
+      .Case("z80", z80)
+      .Case("sm83", sm83)
       .Case("dxil", dxil)
       .Case("xtensa", xtensa)
       .Default(UnknownArch);
@@ -614,6 +623,8 @@ static Triple::ArchType parseArch(StringRef ArchName) {
           .Case("thumbeb", Triple::thumbeb)
           .Case("avr", Triple::avr)
           .Case("m68k", Triple::m68k)
+          .Case("z80", Triple::z80)
+          .Case("sm83", Triple::sm83)
           .Case("msp430", Triple::msp430)
           .Cases({"mips", "mipseb", "mipsallegrex", "mipsisa32r6", "mipsr6"},
                  Triple::mips)
@@ -813,6 +824,7 @@ static Triple::EnvironmentType parseEnvironment(StringRef EnvironmentName) {
       .StartsWith("llvm", Triple::LLVM)
       .StartsWith("mlibc", Triple::Mlibc)
       .StartsWith("mtia", Triple::MTIA)
+      .StartsWith("sdcc", Triple::SDCC)
       .Default(Triple::UnknownEnvironment);
 }
 
@@ -1004,6 +1016,8 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::mips64:
   case Triple::mips64el:
   case Triple::mips:
+  case Triple::z80:
+  case Triple::sm83:
   case Triple::msp430:
   case Triple::nvptx64:
   case Triple::nvptx:
@@ -1716,6 +1730,8 @@ unsigned Triple::getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
     return 0;
 
   case llvm::Triple::avr:
+  case llvm::Triple::z80:
+  case llvm::Triple::sm83:
   case llvm::Triple::msp430:
     return 16;
 
@@ -1823,6 +1839,8 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::avr:
   case Triple::bpfeb:
   case Triple::bpfel:
+  case Triple::z80:
+  case Triple::sm83:
   case Triple::msp430:
   case Triple::systemz:
   case Triple::ve:
@@ -1910,6 +1928,8 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::kalimba:
   case Triple::lanai:
   case Triple::m68k:
+  case Triple::z80:
+  case Triple::sm83:
   case Triple::msp430:
   case Triple::r600:
   case Triple::shave:
@@ -1999,6 +2019,8 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::kalimba:
   case Triple::loongarch32:
   case Triple::loongarch64:
+  case Triple::z80:
+  case Triple::sm83:
   case Triple::msp430:
   case Triple::nvptx64:
   case Triple::nvptx:
@@ -2114,6 +2136,8 @@ bool Triple::isLittleEndian() const {
   case Triple::loongarch64:
   case Triple::mips64el:
   case Triple::mipsel:
+  case Triple::z80:
+  case Triple::sm83:
   case Triple::msp430:
   case Triple::nvptx64:
   case Triple::nvptx:

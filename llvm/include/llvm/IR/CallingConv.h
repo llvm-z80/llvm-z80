@@ -297,6 +297,10 @@ namespace CallingConv {
     /// stateless compartment.
     CHERIoT_LibraryCall = 127,
 
+    /// Z80 SDCC __sdcccall(0) - all parameters on stack, caller cleanup.
+    /// Return: Z80 i8->L, i16->HL, i32->DEHL; SM83 i8->E, i16->DE, i32->HLDE.
+    Z80_SDCCCall0 = 128,
+
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023
   };
