@@ -29,7 +29,6 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IntrinsicsZ80.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/WithColor.h"
 
 using namespace llvm;
 
@@ -41,31 +40,7 @@ static bool hasAllFastFlags(const MachineInstr &MI,
   bool NoNans = MI.getFlag(MachineInstr::FmNoNans);
   bool NoInfs = MI.getFlag(MachineInstr::FmNoInfs);
   bool Nsz = MI.getFlag(MachineInstr::FmNsz);
-  if (NoNans && NoInfs && Nsz)
-    return true;
-  if (NoNans || NoInfs || Nsz) {
-    static bool Warned = false;
-    if (!Warned) {
-      Warned = true;
-      WithColor::warning() << "partial fast-math flags (have:";
-      auto &OS = errs();
-      if (NoNans)
-        OS << " nnan";
-      if (NoInfs)
-        OS << " ninf";
-      if (Nsz)
-        OS << " nsz";
-      OS << ", missing:";
-      if (!NoNans)
-        OS << " nnan";
-      if (!NoInfs)
-        OS << " ninf";
-      if (!Nsz)
-        OS << " nsz";
-      OS << ") - need all three for fast soft-float path\n";
-    }
-  }
-  return false;
+  return NoNans && NoInfs && Nsz;
 }
 
 Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
