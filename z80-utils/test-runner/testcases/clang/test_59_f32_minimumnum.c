@@ -4,7 +4,6 @@
    (-0 < +0). Under -ffast-math these collapse to fminf/fmaxf, where the
    signed-zero result is unspecified, so skip there. */
 /* SKIP-IF: -ffast-math */
-typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned long uint32_t;
 

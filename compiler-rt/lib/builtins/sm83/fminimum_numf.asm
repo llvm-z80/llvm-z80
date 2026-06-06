@@ -10,8 +10,7 @@
 ;         If one is NaN, return the other. For equal values honors signed-zero
 ;         order (-0 < +0): if either operand is -0 the result is -0.
 ;
-; Differs from fminf (minNum) only in that signed-zero handling. With
-; -ffast-math (nsz) the backend uses fminf instead.
+; Differs from fminf (minNum) only in signed-zero handling.
 ;
 ; SM83 stack frame (no IX): saved_a(4) + ret_addr(2) + b(4).
 ;===------------------------------------------------------------------------===;

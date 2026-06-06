@@ -11,8 +11,7 @@
 ;         For equal values it honors signed-zero order (-0 < +0): if either
 ;         operand is -0, the result is -0.
 ;
-; Differs from fminf (minNum) only in that signed-zero handling. With
-; -ffast-math (nsz) the backend uses fminf instead.
+; Differs from fminf (minNum) only in signed-zero handling.
 ;
 ; Uses ___cmpsf2 (callee-cleanup, returns DE: -1/0/+1).
 ;===------------------------------------------------------------------------===;

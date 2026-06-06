@@ -11,8 +11,7 @@
 ;         For equal values it honors signed-zero order (-0 < +0): the result
 ;         is +0 unless both operands are -0.
 ;
-; Differs from fmaxf (maxNum) only in that signed-zero handling. With
-; -ffast-math (nsz) the backend uses fmaxf instead.
+; Differs from fmaxf (maxNum) only in signed-zero handling.
 ;
 ; Uses ___cmpsf2 (callee-cleanup, returns DE: -1/0/+1).
 ;===------------------------------------------------------------------------===;
