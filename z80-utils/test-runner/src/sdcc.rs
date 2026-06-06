@@ -164,7 +164,7 @@ fn run_single(
     let out_base = tmp_dir.join(tag);
     {
         let crt0 = paths.crt0(target);
-        let rt = paths.rt_rel(target);
+        let rt = paths.rt_lib(target);
 
         let mut cmd = Command::new(linker);
         cmd.args(["-m", "-i"]);

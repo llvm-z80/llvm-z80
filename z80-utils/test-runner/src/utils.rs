@@ -997,7 +997,7 @@ fn test_rel_ar_roundtrip(
 
 // ── Shared utilities ────────────────────────────────────────────────────────
 
-fn discover_sdcc_test_names(test_dir: &Path) -> Vec<String> {
+pub(crate) fn discover_sdcc_test_names(test_dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(test_dir)
         .into_iter()
         .flatten()

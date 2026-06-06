@@ -29,7 +29,6 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IntrinsicsZ80.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/WithColor.h"
 
 using namespace llvm;
 
@@ -41,31 +40,7 @@ static bool hasAllFastFlags(const MachineInstr &MI,
   bool NoNans = MI.getFlag(MachineInstr::FmNoNans);
   bool NoInfs = MI.getFlag(MachineInstr::FmNoInfs);
   bool Nsz = MI.getFlag(MachineInstr::FmNsz);
-  if (NoNans && NoInfs && Nsz)
-    return true;
-  if (NoNans || NoInfs || Nsz) {
-    static bool Warned = false;
-    if (!Warned) {
-      Warned = true;
-      WithColor::warning() << "partial fast-math flags (have:";
-      auto &OS = errs();
-      if (NoNans)
-        OS << " nnan";
-      if (NoInfs)
-        OS << " ninf";
-      if (Nsz)
-        OS << " nsz";
-      OS << ", missing:";
-      if (!NoNans)
-        OS << " nnan";
-      if (!NoInfs)
-        OS << " ninf";
-      if (!Nsz)
-        OS << " nsz";
-      OS << ") - need all three for fast soft-float path\n";
-    }
-  }
-  return false;
+  return NoNans && NoInfs && Nsz;
 }
 
 Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
@@ -489,6 +464,15 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   getActionDefinitionsBuilder({G_FMINNUM, G_FMAXNUM}).libcallFor({S32, S64});
 
+  // minimumNumber/maximumNumber (IEEE-754 2019). For f32, custom-legalize so
+  // that with -ffast-math (nsz) we drop to the cheaper minnum/maxnum (fminf/
+  // fmaxf, which ignore -0/+0 ordering), and otherwise call the precise
+  // fminimum_numf/fmaximum_numf. f64 has no soft-float runtime here, so it
+  // libcalls fminimum_num/fmaximum_num (provided externally, like f64 fmin).
+  getActionDefinitionsBuilder({G_FMINIMUMNUM, G_FMAXIMUMNUM})
+      .customFor({S32})
+      .libcallFor({S64});
+
   // FP rounding functions — libcalls for both f32 and f64.
   getActionDefinitionsBuilder({G_FFLOOR, G_FCEIL, G_FRINT, G_FNEARBYINT,
                                G_INTRINSIC_TRUNC, G_INTRINSIC_ROUND,
@@ -734,6 +718,37 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     auto Status = createLibcall(Helper.MIRBuilder,FuncName, {Dst, F32Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
                                        CallingConv::C, LocObserver, &MI);
+    if (Status != LegalizerHelper::Legalized)
+      return false;
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case TargetOpcode::G_FMINIMUMNUM:
+  case TargetOpcode::G_FMAXIMUMNUM: {
+    bool IsMin = MI.getOpcode() == TargetOpcode::G_FMINIMUMNUM;
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    Register RHS = MI.getOperand(2).getReg();
+
+    if (MI.getFlag(MachineInstr::FmNsz)) {
+      // -ffast-math (no signed zeros): minimumNumber/maximumNumber collapse to
+      // the cheaper minnum/maxnum (fminf/fmaxf), which ignore -0/+0 ordering.
+      MIRBuilder.buildInstr(IsMin ? TargetOpcode::G_FMINNUM
+                                  : TargetOpcode::G_FMAXNUM,
+                            {Dst}, {LHS, RHS}, MI.getFlags());
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // Precise IEEE-754 2019 minimumNumber/maximumNumber libcall.
+    MachineFunction &MF = MIRBuilder.getMF();
+    auto &Ctx = MF.getFunction().getContext();
+    Type *F32Ty = Type::getFloatTy(Ctx);
+    const char *FuncName = IsMin ? "fminimum_numf" : "fmaximum_numf";
+    auto Status = createLibcall(Helper.MIRBuilder, FuncName, {Dst, F32Ty, 0},
+                                {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
+                                CallingConv::C, LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
       return false;
     MI.eraseFromParent();
