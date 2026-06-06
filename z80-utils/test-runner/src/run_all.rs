@@ -485,10 +485,13 @@ fn add_utils(
     suites.push(SuiteDef {
         label: label.clone(),
         runner: Box::new(move |paths, state, idx| {
-            // Pre-count: 6 groups × number of clang test files
-            let test_dir = paths.clang_test_dir();
-            let test_count = crate::suite::discover_tests(&test_dir, "test_", "c").len() as u32;
-            state.lock().unwrap()[idx].total = test_count * 6;
+            // Pre-count: 4 groups iterate the clang tests; the 2 crosslink
+            // groups iterate the (smaller) sdcc cross-validation test set.
+            let clang_count =
+                crate::suite::discover_tests(&paths.clang_test_dir(), "test_", "c").len() as u32;
+            let sdcc_count =
+                crate::utils::discover_sdcc_test_names(&paths.sdcc_test_dir()).len() as u32;
+            state.lock().unwrap()[idx].total = clang_count * 4 + sdcc_count * 2;
 
             let config = UtilsConfig { target, opt: OptLevel::O1, pattern: None };
             let mut cb = progress_callback(state.clone(), idx);
