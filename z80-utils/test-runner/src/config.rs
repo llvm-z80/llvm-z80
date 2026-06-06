@@ -185,11 +185,6 @@ impl Paths {
         self.build_dir.join(format!("lib/{t}/{t}_crt0.rel"))
     }
 
-    pub fn rt_rel(&self, target: Target) -> PathBuf {
-        let t = target.triple();
-        self.build_dir.join(format!("lib/{t}/{t}_rt.rel"))
-    }
-
     pub fn rt_lib(&self, target: Target) -> PathBuf {
         let t = target.triple();
         self.build_dir.join(format!("lib/{t}/{t}_rt.lib"))
