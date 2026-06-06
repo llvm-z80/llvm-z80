@@ -188,14 +188,32 @@ fn write_ar(members: &[ArMember]) -> Vec<u8> {
         0
     };
 
+    // Build the GNU extended-name table for members whose "<name>/" does not
+    // fit in the 16-byte name field (name longer than 15 bytes). Each long name
+    // is stored as "<name>/\n" in a "//" member; the member's own name field
+    // then becomes "/<byte-offset-into-the-table>".
+    let mut ext_table: Vec<u8> = Vec::new();
+    let mut ext_offset: Vec<Option<usize>> = Vec::with_capacity(members.len());
+    for member in members {
+        if member.name.len() + 1 > 16 {
+            ext_offset.push(Some(ext_table.len()));
+            ext_table.extend_from_slice(member.name.as_bytes());
+            ext_table.extend_from_slice(b"/\n");
+        } else {
+            ext_offset.push(None);
+        }
+    }
+    let ext_total = if ext_table.is_empty() {
+        0
+    } else {
+        60 + ext_table.len() + (ext_table.len() % 2)
+    };
+
     // Compute offset of each data member from start of file
     let mut member_offsets = Vec::with_capacity(members.len());
-    let mut offset = 8 + symtab_total; // 8 = AR_MAGIC
+    let mut offset = 8 + symtab_total + ext_total; // 8 = AR_MAGIC
     for member in members {
         member_offsets.push(offset);
-        let name_field = format!("{}/", member.name);
-        let header_name_len = if name_field.len() > 16 { 16 } else { name_field.len() };
-        let _ = header_name_len; // member header is always 60 bytes
         offset += 60 + member.data.len();
         if member.data.len() % 2 != 0 {
             offset += 1; // padding
@@ -228,9 +246,27 @@ fn write_ar(members: &[ArMember]) -> Vec<u8> {
         }
     }
 
+    // Write the "//" extended-name member (holds the long member names).
+    if !ext_table.is_empty() {
+        write!(buf, "{:<16}", "//").unwrap();
+        write!(buf, "{:<12}", "0").unwrap();
+        write!(buf, "{:<6}", "0").unwrap();
+        write!(buf, "{:<6}", "0").unwrap();
+        write!(buf, "{:<8}", "0").unwrap();
+        write!(buf, "{:<10}", ext_table.len()).unwrap();
+        buf.extend_from_slice(b"`\n");
+        buf.extend_from_slice(&ext_table);
+        if ext_table.len() % 2 != 0 {
+            buf.push(b'\n');
+        }
+    }
+
     // Write data members
-    for member in members {
-        let name_field = format!("{}/", member.name);
+    for (idx, member) in members.iter().enumerate() {
+        let name_field = match ext_offset[idx] {
+            Some(off) => format!("/{}", off),
+            None => format!("{}/", member.name),
+        };
         write!(buf, "{:<16}", name_field).unwrap();
         write!(buf, "{:<12}", "0").unwrap();
         write!(buf, "{:<6}", "0").unwrap();
