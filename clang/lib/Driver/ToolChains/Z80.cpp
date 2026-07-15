@@ -241,7 +241,7 @@ Tool *Z80ToolChain::buildLinker() const {
 }
 
 void Z80ToolChain::addClangTargetOptions(const ArgList &DriverArgs,
-                                         ArgStringList &CC1Args,
+                                         ArgStringList &CC1Args, BoundArch,
                                          Action::OffloadKind) const {
   // When using the external SDCC assembler, emit sdasz80 assembly format.
   // With the integrated assembler, assembly goes directly through MC.
