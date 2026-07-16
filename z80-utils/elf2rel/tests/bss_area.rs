@@ -1,71 +1,102 @@
-//! Regression test for https://github.com/llvm-z80/llvm-z80/issues/253:
-//! `.bss` sections are routed into the SDCC `_DATA` area by
-//! `section_to_area()`, and because they are `SHT_NOBITS`, their zero bytes
-//! are materialized directly into that area's byte buffer -- inflating the
-//! emitted `.rel` file by the full size of every uninitialized static, even
-//! though nothing is actually initialized.
+//! Regression test for the elf2rel .bss-materialization bug (#253).
 //!
-//! Fixture: `tests/fixtures/bss_repro.o`, built from
-//! `tests/fixtures/bss_repro.c` (a single 4096-byte uninitialized global,
-//! `char buf[4096]`, plus one trivial function) via:
-//!   clang --target=z80 -Os -ffreestanding -ffunction-sections \
-//!     -fdata-sections -c bss_repro.c -o bss_repro.o
-//! Confirmed via `llvm-objdump -h bss_repro.o` that `buf` lands in a real
-//! `.bss._buf` section of type `BSS` (SHT_NOBITS), size 0x1000, as expected.
+//! `.bss` sections (ELF `SHT_NOBITS`) used to be routed to the SDCC `_DATA`
+//! area, and their zero bytes were appended to that area's byte buffer --
+//! inflating every emitted `.rel` file by the full size of each uninitialized
+//! static.  Example: `char flags[8191]` in sieve.c inflated SIEVE.COM from
+//! 188 B to 10179 B.
 //!
-//! Current (buggy) behavior: elf2rel emits an `_DATA` area sized 0x1000
-//! with 4096 literal zero bytes written to the `.rel` file (668 B input ->
-//! 22+ KB output). Expected behavior once #253 is fixed: `buf` should land
-//! in a dedicated, non-file-resident `_BSS` area (SDCC convention -- present
-//! in the area/size table for layout purposes, but contributing no bytes to
-//! the file), and `_DATA` should stay empty.
+//! Fix: `section_to_area()` now routes `.bss`/`.bss.*` to a dedicated `_BSS`
+//! area.  For `SHT_NOBITS` sections only the area's logical size grows; no
+//! bytes are ever appended to the byte buffer, so no `T` records are emitted
+//! for it (matching SDCC's own `_BSS` convention: zeroed by the linker/crt0
+//! at load time, not file-resident).
 //!
-//! Marked `#[ignore]` until the fix lands -- run explicitly with
-//! `cargo test -- --ignored` to observe the current failure. Remove the
-//! `#[ignore]` attribute (and this comment) once #253 is closed.
+//! The fixture ELF is built in memory using the `object` crate (no prebuilt
+//! binary committed to the repo).  The object crate 0.36 has no
+//! `Architecture::Z80`, so we build with `Architecture::I386` (same ELF32
+//! class) and patch `e_machine` to `0x1F90` (the value emitted by
+//! `clang --target=z80`) before passing the bytes to elf2rel.
 
+use object::write::Object;
+use object::{Architecture, BinaryFormat, Endianness, SectionKind};
 use std::process::Command;
 
-#[ignore = "known bug llvm-z80/llvm-z80#253: elf2rel routes .bss into _DATA \
-            and materializes its zero bytes into the .rel file; remove \
-            #[ignore] once elf2rel emits a real, byte-free _BSS area"]
+/// EM_Z80 as used by the ravn/llvm-z80 clang backend (also checked by elf2rel).
+/// Little-endian bytes for ELF32 header field `e_machine` at offset 18.
+const EM_Z80_LE: [u8; 2] = [0x90, 0x1F]; // 0x1F90
+const ELF32_E_MACHINE_OFFSET: usize = 18;
+
+/// Build a minimal Z80 ELF32 with:
+/// - `.text` PROGBITS section (1 byte, so _CODE has content)
+/// - `.bss`  NOBITS section  (4096 bytes, uninitialized)
+fn build_bss_fixture_elf() -> Vec<u8> {
+    let mut obj = Object::new(BinaryFormat::Elf, Architecture::I386, Endianness::Little);
+
+    let text = obj.add_section(b"".to_vec(), b".text".to_vec(), SectionKind::Text);
+    obj.append_section_data(text, &[0x00], 1);
+
+    // 4096 B uninitialized -> .bss (SHT_NOBITS).
+    // Before the fix: routed to _DATA, 4096 zero bytes written to .rel (bug).
+    // After the fix:  routed to _BSS, no bytes written (correct).
+    let bss = obj.add_section(b"".to_vec(), b".bss".to_vec(), SectionKind::UninitializedData);
+    obj.append_section_bss(bss, 4096, 1);
+
+    let mut bytes = obj.write().unwrap();
+    bytes[ELF32_E_MACHINE_OFFSET..ELF32_E_MACHINE_OFFSET + 2].copy_from_slice(&EM_Z80_LE);
+    bytes
+}
+
 #[test]
-fn bss_only_static_does_not_inflate_rel_file() {
-    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/bss_repro.o");
-    let out_path = std::env::temp_dir().join(format!(
-        "elf2rel_bss_area_test_{}.rel",
-        std::process::id()
-    ));
+fn bss_static_does_not_inflate_rel_file() {
+    // Write the in-memory fixture to a temp file so elf2rel can read it.
+    let tmp_dir = std::env::temp_dir();
+    let pid = std::process::id();
+    let in_path = tmp_dir.join(format!("elf2rel_bss_in_{pid}.o"));
+    let out_path = tmp_dir.join(format!("elf2rel_bss_out_{pid}.rel"));
+
+    std::fs::write(&in_path, build_bss_fixture_elf()).expect("write fixture");
 
     let status = Command::new(env!("CARGO_BIN_EXE_elf2rel"))
-        .arg(fixture)
+        .arg(&in_path)
         .arg(&out_path)
         .status()
-        .expect("failed to run elf2rel");
+        .expect("run elf2rel");
+    let _ = std::fs::remove_file(&in_path);
     assert!(status.success(), "elf2rel exited with failure");
 
-    let rel_text = std::fs::read_to_string(&out_path).expect("failed to read .rel output");
+    let rel = std::fs::read_to_string(&out_path).expect("read .rel output");
+    let rel_size = rel.len();
     let _ = std::fs::remove_file(&out_path);
 
-    // `buf` (4096 B, uninitialized) must not show up as _DATA content: a
-    // correct converter either omits _DATA entirely or emits it with size 0,
-    // routing `buf` into a real _BSS area instead.
-    let data_area_line = rel_text
-        .lines()
-        .find(|l| l.starts_with("A _DATA"))
-        .expect("expected an `A _DATA ...` area header line in the .rel output");
+    // With only .bss content, _DATA must be absent entirely
+    // (empty areas are filtered out by the active_areas logic in main.rs).
     assert!(
-        data_area_line.contains("size 0 ") || data_area_line.contains("size 0\n"),
-        "expected `_DATA` area to be empty (buf is .bss, not real data), \
-         but got: {data_area_line:?} -- the 4096-byte uninitialized static \
-         is being materialized as literal zero bytes in _DATA (issue #253)"
+        !rel.lines().any(|l| l.starts_with("A _DATA")),
+        "did not expect a `_DATA` area: buf is .bss, not real data\n{rel}"
     );
 
-    // A real fix should introduce a dedicated _BSS area for uninitialized
-    // statics rather than silently dropping them.
+    // buf must land in _BSS sized exactly 0x1000 (4096 = sizeof(buf)).
+    let bss_line = rel
+        .lines()
+        .find(|l| l.starts_with("A _BSS"))
+        .expect("expected an `A _BSS ...` area header line");
     assert!(
-        rel_text.contains("_BSS"),
-        "expected a dedicated `_BSS` area for the uninitialized `buf` static, \
-         found none in the .rel output (issue #253)"
+        bss_line.contains("size 1000 "),
+        "expected `_BSS` sized 0x1000, got: {bss_line:?}"
+    );
+
+    // No T-records after _BSS -- BSS must not be file-resident.
+    let after_bss = &rel[rel.find("A _BSS").unwrap()..];
+    assert!(
+        !after_bss.lines().skip(1).any(|l| l.starts_with('T')),
+        "no T records expected after _BSS header\n{after_bss}"
+    );
+
+    // Before the fix this was 22096 B (4096 zero bytes + T-record overhead).
+    // After the fix it is ~200 B.  1024 B is a safe upper bound.
+    assert!(
+        rel_size < 1024,
+        "expected small .rel (no materialized .bss); got {rel_size} B (was 22096 B with the bug)"
     );
 }
