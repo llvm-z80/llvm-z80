@@ -26,9 +26,15 @@ set(LLVM_ENABLE_PROJECTS "clang;lld" CACHE STRING "")
 set(LLVM_TARGETS_TO_BUILD "Native" CACHE STRING "")
 set(LLVM_EXPERIMENTAL_TARGETS_TO_BUILD "Z80" CACHE STRING "")
 
-# Portable binaries: statically link zstd (official does this).
-# Drop this line if a static libzstd is not available on the build host.
-set(LLVM_USE_STATIC_ZSTD ON CACHE BOOL "")
+# Portable binaries: drop every optional host dependency. None of them are
+# needed to compile for Z80/SM83, and each one pins the tarball to whatever
+# soname the build host happened to have -- e.g. lld links libxml2, so an
+# Arch-built release (libxml2.so.16) fails to start on a distro shipping an
+# older libxml2. LLVM_USE_STATIC_ZSTD is not enough: it silently falls back to
+# the shared libzstd when no static one is installed.
+set(LLVM_ENABLE_LIBXML2 OFF CACHE BOOL "")
+set(LLVM_ENABLE_ZLIB OFF CACHE BOOL "")
+set(LLVM_ENABLE_ZSTD OFF CACHE BOOL "")
 
 # Install only the user-facing toolchain, not the LLVM/Clang dev SDK.
 # The Z80/SM83 runtime (lib/z80, lib/sm83) is installed via a raw install()
