@@ -36,6 +36,7 @@ Z80TargetInfo::Z80TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
   LongDoubleAlign = 8;
   SuitableAlign = 8;
   DefaultAlignForAttributeAligned = 8;
+  MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 8;
   SizeType = UnsignedInt;
   PtrDiffType = SignedInt;
   IntPtrType = SignedInt;

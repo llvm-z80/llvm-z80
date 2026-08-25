@@ -51,6 +51,11 @@ Z80TargetLowering::Z80TargetLowering(const Z80TargetMachine &TM,
   // Stack pointer register
   setStackPointerRegisterToSaveRestore(Z80::SP);
 
+  // Only an 8-bit access is a single instruction, and interrupts are taken
+  // between instructions. Anything wider becomes an __atomic_* libcall, which
+  // the runtime does not provide, so it fails to link rather than look atomic.
+  setMaxAtomicSizeInBitsSupported(8);
+
   // Z80 has limited jump table support
   setMaximumJumpTableSize(std::min(256u, getMaximumJumpTableSize()));
 
