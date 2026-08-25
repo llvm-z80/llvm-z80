@@ -114,6 +114,8 @@ protected:
   // True if using the HLASM dialect on z/OS.
   bool IsHLASM = false;
 
+  bool IsSDCC = false;
+
   /// This is the maximum possible length of an instruction, which is needed to
   /// compute the size of an inline asm.  Defaults to 4.
   unsigned MaxInstLength = 4;
@@ -518,6 +520,7 @@ public:
 
   bool isAIX() const { return IsAIX; }
   bool isHLASM() const { return IsHLASM; }
+  bool isSDCC() const { return IsSDCC; }
   bool isMachO() const { return HasSubsectionsViaSymbols; }
   bool hasCOFFAssociativeComdats() const { return HasCOFFAssociativeComdats; }
   bool hasCOFFComdatConstants() const { return HasCOFFComdatConstants; }
