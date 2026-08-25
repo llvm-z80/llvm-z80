@@ -32,6 +32,8 @@
 #include "llvm/IR/IntrinsicsZ80.h"
 #include "llvm/Support/ErrorHandling.h"
 
+#include <optional>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "z80-isel"
@@ -89,6 +91,23 @@ private:
 };
 
 } // namespace
+
+/// The compile-time address behind \p AddrReg, or nullopt when the address is
+/// not a constant. Looks through the pointer casts that select to a plain copy.
+static std::optional<uint16_t> getConstantAddr(Register AddrReg,
+                                               MachineRegisterInfo &MRI) {
+  MachineInstr *Def = MRI.getVRegDef(AddrReg);
+  while (Def &&
+         (Def->getOpcode() == TargetOpcode::G_INTTOPTR ||
+          Def->getOpcode() == TargetOpcode::G_PTRTOINT ||
+          Def->getOpcode() == TargetOpcode::COPY) &&
+         Def->getOperand(1).isReg() && Def->getOperand(1).getReg().isVirtual())
+    Def = MRI.getVRegDef(Def->getOperand(1).getReg());
+  if (!Def || Def->getOpcode() != TargetOpcode::G_CONSTANT)
+    return std::nullopt;
+  return static_cast<uint16_t>(
+      Def->getOperand(1).getCImm()->getZExtValue() & 0xFFFF);
+}
 
 Z80InstructionSelector::Z80InstructionSelector(const Z80TargetMachine &TM,
                                                Z80Subtarget &STI,
@@ -1677,6 +1696,26 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
     const DebugLoc &DL = MI.getDebugLoc();
 
+    // A compile-time address needs no pointer in a register: SM83 reaches the
+    // high page 0xFF00-0xFFFF in two bytes and anywhere else in three, against
+    // four for loading a pair and going indirect.
+    if (DstTy.getSizeInBits() == 8 && MI.hasOneMemOperand() &&
+        MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
+      if (std::optional<uint16_t> Addr = getConstantAddr(AddrReg, MRI)) {
+        if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
+          return false;
+        bool HighPage = *Addr >= 0xFF00;
+        unsigned Opc = HighPage ? Z80::SM83_LDH_A_nind : Z80::SM83_LD_A_nnind;
+        BuildMI(MBB, MI, DL, TII.get(Opc))
+            .addImm(HighPage ? (*Addr & 0xFF) : *Addr)
+            .cloneMemRefs(MI);
+        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
+            .addReg(Z80::A);
+        MI.eraseFromParent();
+        return true;
+      }
+    }
+
     // Try IX-indexed addressing: match G_PTR_ADD(COPY $ix, G_CONSTANT d)
     // This produces LD r,(IX+d) instead of the multi-instruction HL-indirect
     // sequence, which is much more efficient for stack argument access.
@@ -1854,6 +1893,24 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     Register AddrReg = MI.getOperand(1).getReg();
     const LLT SrcTy = MRI.getType(SrcReg);
     const DebugLoc &DL = MI.getDebugLoc();
+
+    // See the matching fold in G_LOAD.
+    if (SrcTy.getSizeInBits() == 8 && MI.hasOneMemOperand() &&
+        MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
+      if (std::optional<uint16_t> Addr = getConstantAddr(AddrReg, MRI)) {
+        if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
+          return false;
+        bool HighPage = *Addr >= 0xFF00;
+        unsigned Opc = HighPage ? Z80::SM83_LDH_nind_A : Z80::SM83_LD_nnind_A;
+        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
+            .addReg(SrcReg);
+        BuildMI(MBB, MI, DL, TII.get(Opc))
+            .addImm(HighPage ? (*Addr & 0xFF) : *Addr)
+            .cloneMemRefs(MI);
+        MI.eraseFromParent();
+        return true;
+      }
+    }
 
     // Try IX-indexed addressing from G_FRAME_INDEX or
     // G_PTR_ADD(G_FRAME_INDEX, G_CONSTANT)
