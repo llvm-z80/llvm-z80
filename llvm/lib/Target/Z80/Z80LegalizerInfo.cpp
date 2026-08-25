@@ -491,6 +491,14 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   getActionDefinitionsBuilder({G_LROUND, G_LLROUND})
       .libcallForCartesianProduct({S32}, {S32, S64});
 
+  // Target intrinsics are selected directly, and legalizeIntrinsic accepts the
+  // ones this backend knows. InstructionSelect rechecks legality through the
+  // rules rather than through that hook, so they need one here as well.
+  getActionDefinitionsBuilder({G_INTRINSIC, G_INTRINSIC_W_SIDE_EFFECTS,
+                               G_INTRINSIC_CONVERGENT,
+                               G_INTRINSIC_CONVERGENT_W_SIDE_EFFECTS})
+      .alwaysLegal();
+
   // G_FENCE: no-op on single-threaded Z80 — erase in legalizeCustom.
   getActionDefinitionsBuilder(G_FENCE).custom();
 
