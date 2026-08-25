@@ -28,7 +28,6 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
-#include "llvm/IR/Constants.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -156,52 +155,9 @@ void Z80AsmPrinter::emitStartOfAsmFile(Module &M) {
   // TODO: Emit Z80-specific directives if needed
 }
 
-/// Check if a constant is composed of a single repeated non-zero byte.
-/// Mirrors AsmPrinter's isRepeatedByteSequence logic for
-/// ConstantDataSequential, ConstantArray, and ConstantInt. Returns the byte
-/// value or -1.
-static int isRepeatedNonZeroByte(const Constant *C, const DataLayout &DL) {
-  if (auto *CDS = dyn_cast<ConstantDataSequential>(C)) {
-    StringRef Data = CDS->getRawDataValues();
-    if (Data.empty())
-      return -1;
-    uint8_t Byte = Data[0];
-    if (Byte == 0)
-      return -1;
-    for (size_t i = 1; i < Data.size(); i++)
-      if ((uint8_t)Data[i] != Byte)
-        return -1;
-    return Byte;
-  }
-  if (auto *CA = dyn_cast<ConstantArray>(C)) {
-    if (CA->getNumOperands() == 0)
-      return -1;
-    int Byte = isRepeatedNonZeroByte(CA->getOperand(0), DL);
-    if (Byte == -1)
-      return -1;
-    for (unsigned i = 1, e = CA->getNumOperands(); i != e; i++)
-      if (isRepeatedNonZeroByte(CA->getOperand(i), DL) != Byte)
-        return -1;
-    return Byte;
-  }
-  if (auto *CI = dyn_cast<ConstantInt>(C)) {
-    uint64_t Size = DL.getTypeAllocSize(CI->getType());
-    if (Size == 0)
-      return -1;
-    uint8_t Byte = static_cast<uint8_t>(CI->getZExtValue());
-    if (Byte == 0)
-      return -1;
-    for (unsigned i = 1; i < Size; i++)
-      if (static_cast<uint8_t>(CI->getZExtValue() >> (i * 8)) != Byte)
-        return -1;
-    return Byte;
-  }
-  return -1;
-}
-
 void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
-  if (MAI.getAssemblerDialect() == 1) { // sdasz80 format
-    // Case 1: BSS locals - sdasz80 doesn't support .local/.comm directives.
+  if (MAI.isSDCC()) {
+    // BSS locals: sdasz80 doesn't support .local/.comm directives.
     // Handle zero-initialized variables by emitting in _DATA with explicit
     // zero bytes. (.ds in sdasz80 reserves space but does NOT zero-initialize.)
     if (GV->hasLocalLinkage() &&
@@ -217,32 +173,6 @@ void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
       for (uint64_t i = 0; i < Size; i++)
         OutStreamer->emitInt8(0);
       return;
-    }
-
-    // Case 2: Initialized globals with repeated non-zero byte patterns.
-    // The default AsmPrinter path detects repeated byte sequences and calls
-    // emitFill, which produces ".ds N,fill" - but sdasz80 only supports
-    // ".ds N" (zero-fill). Emit individual .db bytes instead.
-    if (GV->hasInitializer()) {
-      const DataLayout &DL = GV->getDataLayout();
-      int RepeatedByte = isRepeatedNonZeroByte(GV->getInitializer(), DL);
-      if (RepeatedByte != -1) {
-        uint64_t Size = DL.getTypeAllocSize(GV->getValueType());
-        if (Size > 1) {
-          MCSymbol *GVSym = getSymbol(GV);
-
-          if (!GV->hasLocalLinkage())
-            OutStreamer->emitSymbolAttribute(GVSym, MCSA_Global);
-
-          OutStreamer->switchSection(
-              getObjFileLowering().SectionForGlobal(GV, TM));
-
-          OutStreamer->emitLabel(GVSym);
-          for (uint64_t i = 0; i < Size; i++)
-            OutStreamer->emitInt8(RepeatedByte);
-          return;
-        }
-      }
     }
   }
 

@@ -1561,7 +1561,7 @@ void MCAsmStreamer::emitFill(const MCExpr &NumBytes, uint64_t FillValue,
     return;
 
   if (const char *ZeroDirective = MAI->getZeroDirective()) {
-    if (!MAI->isAIX() || FillValue == 0) {
+    if ((!MAI->isAIX() && !MAI->isSDCC()) || FillValue == 0) {
       // FIXME: Emit location directives
       OS << ZeroDirective;
       MAI->printExpr(OS, NumBytes);
