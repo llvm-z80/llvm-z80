@@ -59,6 +59,15 @@ Z80TargetLowering::Z80TargetLowering(const Z80TargetMachine &TM,
   // Z80 has limited jump table support
   setMaximumJumpTableSize(std::min(256u, getMaximumJumpTableSize()));
 
+  // Measured over the test suite at Os: on SM83 a switch of up to seven
+  // cases compiles smaller as a comparison tree than as a table (35 bytes
+  // on the one such switch in the suite, and every micro-sweep size up to
+  // eight cases), while on Z80 the generic threshold of four is already
+  // the size optimum, so only SM83 moves. Raising either past sixteen
+  // costs hundreds of bytes on interpreter-style dense switches.
+  if (STI.hasSM83())
+    setMinimumJumpTableEntries(8);
+
   // Z80 has no conditional move instruction, so SELECT is always expanded
   // to a branch sequence. Prefer branches over selects since they avoid
   // computing both sides of the conditional.
