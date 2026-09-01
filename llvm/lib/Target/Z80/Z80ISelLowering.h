@@ -45,9 +45,7 @@ public:
 
   MVT getCachedRegisterType(MVT VT) const override;
 
-  unsigned
-  getNumRegisters(LLVMContext &Context, EVT VT,
-                  std::optional<MVT> RegisterVT = std::nullopt) const override;
+  unsigned getCachedNumRegisters(MVT VT) const override;
 
   bool preferNarrowTypes() const override { return true; }
 

@@ -74,14 +74,12 @@ MVT Z80TargetLowering::getCachedRegisterType(MVT VT) const {
   return TargetLowering::getCachedRegisterType(VT);
 }
 
-unsigned
-Z80TargetLowering::getNumRegisters(LLVMContext &Context, EVT VT,
-                                   std::optional<MVT> RegisterVT) const {
+unsigned Z80TargetLowering::getCachedNumRegisters(MVT VT) const {
   if (VT.getSizeInBits() > 16)
     return VT.getSizeInBits() / 8;
   if (VT.getSizeInBits() > 8)
     return 1; // One 16-bit register
-  return TargetLowering::getNumRegisters(Context, VT, RegisterVT);
+  return TargetLowering::getCachedNumRegisters(VT);
 }
 
 

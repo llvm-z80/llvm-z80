@@ -211,7 +211,7 @@ void Z80PassConfig::addIRPasses() {
 bool Z80PassConfig::addPreISel() { return false; }
 
 bool Z80PassConfig::addIRTranslator() {
-  addPass(new IRTranslator(getOptLevel()));
+  addPass(new IRTranslatorLegacy(getOptLevel()));
   return false;
 }
 
@@ -223,7 +223,7 @@ void Z80PassConfig::addPreLegalizeMachineIR() {
 }
 
 bool Z80PassConfig::addLegalizeMachineIR() {
-  addPass(new Legalizer());
+  addPass(new LegalizerLegacy());
   return false;
 }
 
@@ -236,7 +236,7 @@ void Z80PassConfig::addPreRegBankSelect() {
 }
 
 bool Z80PassConfig::addRegBankSelect() {
-  addPass(new RegBankSelect());
+  addPass(new RegBankSelectLegacy());
   return false;
 }
 
@@ -244,11 +244,11 @@ void Z80PassConfig::addPreGlobalInstructionSelect() {
   // This pass helps reduce the live ranges of constants to within a basic
   // block, which can greatly improve machine scheduling, as they can now be
   // moved around to keep register pressure low.
-  addPass(new Localizer());
+  addPass(new LocalizerLegacy());
 }
 
 bool Z80PassConfig::addGlobalInstructionSelect() {
-  addPass(new InstructionSelect());
+  addPass(new InstructionSelectLegacy());
   return false;
 }
 

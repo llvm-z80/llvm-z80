@@ -3978,10 +3978,22 @@ private:
                                      MVT &RegisterVT);
 
 protected:
+  // LLVM-Z80: these two accessors are the single point where both the ordinary
+  // and the calling-convention paths read the per-MVT legalization tables, so
+  // they are the hooks a target overrides to describe a register breakdown that
+  // the tables cannot express. Keep them virtual when merging upstream.
+
   /// Return the type of registers that this ValueType will eventually require.
   virtual MVT getCachedRegisterType(MVT VT) const {
     assert((unsigned)VT.SimpleTy < std::size(RegisterTypeForVT));
     return RegisterTypeForVT[VT.SimpleTy];
+  }
+
+  /// Return the number of registers that this ValueType will eventually
+  /// require.
+  virtual unsigned getCachedNumRegisters(MVT VT) const {
+    assert((unsigned)VT.SimpleTy < std::size(NumRegistersForVT));
+    return NumRegistersForVT[VT.SimpleTy];
   }
 
 private:
@@ -4008,11 +4020,8 @@ private:
   unsigned getNumRegistersImpl(LLVMContext &Context, EVT VT,
                                bool ForCallingConv) const {
     if (VT.isSimple() &&
-        !shouldUseDynamicVectorTypeBreakdown(VT, ForCallingConv)) {
-      assert((unsigned)VT.getSimpleVT().SimpleTy <
-             std::size(NumRegistersForVT));
-      return NumRegistersForVT[VT.getSimpleVT().SimpleTy];
-    }
+        !shouldUseDynamicVectorTypeBreakdown(VT, ForCallingConv))
+      return getCachedNumRegisters(VT.getSimpleVT());
     if (VT.isVector()) {
       EVT VT1;
       MVT VT2;

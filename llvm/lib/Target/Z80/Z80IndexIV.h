@@ -18,7 +18,7 @@
 
 namespace llvm {
 
-struct Z80IndexIV : public PassInfoMixin<Z80IndexIV> {
+struct Z80IndexIV : public OptionalPassInfoMixin<Z80IndexIV> {
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
                         LoopStandardAnalysisResults &AR, LPMUpdater &U);
 };
