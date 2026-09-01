@@ -3766,21 +3766,30 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
       return false;
 
+    const DebugLoc &DL = MI.getDebugLoc();
+    Register LowByte;
+
     if (SrcBits <= 8) {
-      // s8 → s1: both in GR8, just COPY
       if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
         return false;
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-          .addReg(SrcReg);
+      LowByte = SrcReg;
     } else {
       // s16 → s8/s1: extract low byte
       if (!RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
         return false;
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
-          .addReg(SrcReg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-          .addReg(Z80::L);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(SrcReg);
+      LowByte = Z80::L;
     }
+
+    if (DstBits == 1) {
+      // The rest of the backend reads an s1 in a GR8 as exactly 0 or 1.
+      // Truncation is the one producer that can leave other bits set.
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(LowByte);
+      BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
+      LowByte = Z80::A;
+    }
+
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(LowByte);
     MI.eraseFromParent();
     return true;
   }

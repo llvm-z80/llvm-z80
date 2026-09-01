@@ -45,6 +45,36 @@ using namespace llvm;
 // Determines whether an argument goes in a register or on the stack.
 namespace {
 
+/// A physical register holds a whole byte, so an i1 cannot be copied into or
+/// out of one directly. Widen on the way in, narrow on the way out.
+static Register widenToPhysRegWidth(MachineIRBuilder &MIRBuilder,
+                                    MachineRegisterInfo &MRI, Register VReg) {
+  LLT Ty = MRI.getType(VReg);
+  if (!Ty.isScalar() || Ty.getSizeInBits() >= 8)
+    return VReg;
+  return MIRBuilder.buildZExt(LLT::scalar(8), VReg).getReg(0);
+}
+
+/// \p ArrivesZeroExtended records a caller's zeroext promise, which lets the
+/// combiner drop the mask the narrowing G_TRUNC would otherwise leave.
+static void copyFromPhysReg(MachineIRBuilder &MIRBuilder,
+                            MachineRegisterInfo &MRI, Register VReg,
+                            Register PhysReg, bool ArrivesZeroExtended) {
+  LLT Ty = MRI.getType(VReg);
+  if (!Ty.isScalar() || Ty.getSizeInBits() >= 8) {
+    MIRBuilder.buildCopy(VReg, PhysReg);
+    return;
+  }
+  Register Wide = MRI.createGenericVirtualRegister(LLT::scalar(8));
+  MIRBuilder.buildCopy(Wide, PhysReg);
+  if (ArrivesZeroExtended)
+    Wide = MIRBuilder
+               .buildAssertZExt(MRI.cloneVirtualRegister(Wide), Wide,
+                                Ty.getSizeInBits())
+               .getReg(0);
+  MIRBuilder.buildTrunc(VReg, Wide);
+}
+
 /// Get the return type size in bits, handling struct types correctly.
 /// getPrimitiveSizeInBits() returns 0 for structs; we need the actual size
 /// to match SDCC's cleanup decision which uses the declared return type size.
@@ -425,7 +455,8 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
     BitWidth = 16; // Pointers
 
   if (BitWidth <= 8) {
-    MIRBuilder.buildCopy(Regs.Ret_I8, VRegs[0]);
+    MIRBuilder.buildCopy(Regs.Ret_I8,
+                         widenToPhysRegWidth(MIRBuilder, MRI, VRegs[0]));
     emitRet({{Regs.Ret_I8, RegState::Implicit}});
   } else if (BitWidth <= 16) {
     MIRBuilder.buildCopy(Regs.Ret_I16, VRegs[0]);
@@ -566,7 +597,8 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
         MIRBuilder.buildMergeLikeInstr(VReg, {LoReg, HiReg});
       } else {
         MBB.addLiveIn(Assign.PhysReg);
-        MIRBuilder.buildCopy(VReg, Register(Assign.PhysReg));
+        copyFromPhysReg(MIRBuilder, MRI, VReg, Register(Assign.PhysReg),
+                        Arg.hasAttribute(Attribute::ZExt));
       }
     }
 
@@ -837,7 +869,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
 
     if (BitWidth <= 8) {
       // Push i8 as 1 byte: PUSH AF + INC SP (matches SDCC's push af;inc sp)
-      MIRBuilder.buildCopy(Z80::A, VReg);
+      MIRBuilder.buildCopy(Z80::A, widenToPhysRegWidth(MIRBuilder, MRI, VReg));
       MIRBuilder.buildInstr(Z80::PUSH_AF);
       MIRBuilder.buildInstr(Z80::INC_SP);
     } else if (BitWidth <= 16) {
@@ -911,7 +943,8 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
           ArgRegs.push_back(Assign.PhysReg);
           ArgRegs.push_back(Assign.PhysReg2);
         } else {
-          MIRBuilder.buildCopy(Assign.PhysReg, VReg);
+          MIRBuilder.buildCopy(Assign.PhysReg,
+                               widenToPhysRegWidth(MIRBuilder, MRI, VReg));
           ArgRegs.push_back(Assign.PhysReg);
         }
       }
@@ -1145,7 +1178,9 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
         BitWidth = 16;
 
       if (BitWidth <= 8) {
-        MIRBuilder.buildCopy(VReg, Register(Regs.Ret_I8));
+        copyFromPhysReg(MIRBuilder, MRI, VReg, Register(Regs.Ret_I8),
+                        !Info.OrigRet.Flags.empty() &&
+                            Info.OrigRet.Flags[0].isZExt());
       } else if (BitWidth <= 16) {
         MIRBuilder.buildCopy(VReg, Register(Regs.Ret_I16));
       } else if (BitWidth <= 32) {
