@@ -603,7 +603,7 @@ bool Z80ExpandPseudo::expandSatArith8(MachineBasicBlock &MBB, MachineInstr &MI,
     // If result was positive (S=0): RLCA puts 0 in CF, SBC A,A = 0x00,
     //   XOR 0x80 = 0x80 (negative overflow → min negative)
     BuildMI(SatMBB, DL, TII.get(Z80::RLCA));
-    BuildMI(SatMBB, DL, TII.get(Z80::SBC_A_A));
+    Z80::markUndefUse(BuildMI(SatMBB, DL, TII.get(Z80::SBC_A_A)), Z80::A);
     BuildMI(SatMBB, DL, TII.get(Z80::XOR_n)).addImm(0x80);
     SatMBB->addSuccessor(TailMBB);
 
@@ -1013,7 +1013,7 @@ bool Z80ExpandPseudo::expandSDivMod16(MachineBasicBlock &MBB, MachineInstr &MI,
   BuildMI(NegDvdMBB, DL, TII.get(Z80::XOR_A));
   BuildMI(NegDvdMBB, DL, TII.get(Z80::SUB_L));
   BuildMI(NegDvdMBB, DL, TII.get(Z80::LD_L_A));
-  BuildMI(NegDvdMBB, DL, TII.get(Z80::SBC_A_A));
+  Z80::markUndefUse(BuildMI(NegDvdMBB, DL, TII.get(Z80::SBC_A_A)), Z80::A);
   BuildMI(NegDvdMBB, DL, TII.get(Z80::SUB_H));
   BuildMI(NegDvdMBB, DL, TII.get(Z80::LD_H_A));
   NegDvdMBB->addSuccessor(DvdPosMBB);  // fall through
@@ -1028,7 +1028,7 @@ bool Z80ExpandPseudo::expandSDivMod16(MachineBasicBlock &MBB, MachineInstr &MI,
   BuildMI(NegDsrMBB, DL, TII.get(Z80::XOR_A));
   BuildMI(NegDsrMBB, DL, TII.get(Z80::SUB_E));
   BuildMI(NegDsrMBB, DL, TII.get(Z80::LD_E_A));
-  BuildMI(NegDsrMBB, DL, TII.get(Z80::SBC_A_A));
+  Z80::markUndefUse(BuildMI(NegDsrMBB, DL, TII.get(Z80::SBC_A_A)), Z80::A);
   BuildMI(NegDsrMBB, DL, TII.get(Z80::SUB_D));
   BuildMI(NegDsrMBB, DL, TII.get(Z80::LD_D_A));
   NegDsrMBB->addSuccessor(DsrPosMBB);  // fall through
@@ -1129,7 +1129,7 @@ bool Z80ExpandPseudo::expandSDivMod16(MachineBasicBlock &MBB, MachineInstr &MI,
   BuildMI(NegResMBB, DL, TII.get(Z80::XOR_A));
   BuildMI(NegResMBB, DL, TII.get(Z80::SUB_E));
   BuildMI(NegResMBB, DL, TII.get(Z80::LD_E_A));
-  BuildMI(NegResMBB, DL, TII.get(Z80::SBC_A_A));
+  Z80::markUndefUse(BuildMI(NegResMBB, DL, TII.get(Z80::SBC_A_A)), Z80::A);
   BuildMI(NegResMBB, DL, TII.get(Z80::SUB_D));
   BuildMI(NegResMBB, DL, TII.get(Z80::LD_D_A));
   NegResMBB->addSuccessor(TailMBB);  // fall through

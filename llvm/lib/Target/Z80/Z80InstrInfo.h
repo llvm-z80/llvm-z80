@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_Z80_Z80INSTRINFO_H
 #define LLVM_LIB_TARGET_Z80_Z80INSTRINFO_H
 
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
@@ -21,6 +22,18 @@
 namespace llvm {
 
 class Z80Subtarget;
+
+namespace Z80 {
+/// Mark a register the instruction reads only incidentally as undef: the
+/// result does not depend on the value (SBC A,A spreads carry whatever A
+/// holds, AND A only clears carry, a flag-save PUSH AF only carries F), so
+/// liveness must not demand a prior definition.
+inline void markUndefUse(const MachineInstrBuilder &MIB, MCRegister Reg) {
+  for (MachineOperand &MO : MIB.getInstr()->operands())
+    if (MO.isReg() && MO.isUse() && MO.getReg() == Reg)
+      MO.setIsUndef();
+}
+} // namespace Z80
 
 class Z80InstrInfo : public Z80GenInstrInfo {
 public:

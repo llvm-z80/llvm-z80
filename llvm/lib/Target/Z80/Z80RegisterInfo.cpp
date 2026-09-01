@@ -235,6 +235,40 @@ static bool isFlagsLiveAfter(MachineBasicBlock::iterator MI,
 // Address computation helpers
 //===----------------------------------------------------------------------===//
 
+// Emit the PUSH AF of a flag-preserving PUSH AF; ...; POP AF pair.
+//
+// The pair carries A's value across as well as F, so the push genuinely
+// reads A whenever anything reads A after the pop. Calling the read undef
+// would let later passes clobber a value the pop still delivers — the
+// verifier's complaint is instead about the nearest preceding definition
+// being marked dead (when nothing else reads A), so clear that flag. Only
+// when the block holds no definition and A is not live-in is the read
+// genuinely of an undefined register.
+static void emitFlagSavePush(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator InsertBefore,
+                             const DebugLoc &DL, const TargetInstrInfo &TII) {
+  const TargetRegisterInfo *TRI =
+      MBB.getParent()->getSubtarget().getRegisterInfo();
+  MachineInstrBuilder Push =
+      BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_AF));
+  for (MachineBasicBlock::iterator I = Push->getIterator();
+       I != MBB.begin();) {
+    --I;
+    if (I->modifiesRegister(Z80::A, TRI)) {
+      if (MachineOperand *MO = I->findRegisterDefOperand(Z80::A, TRI))
+        MO->setIsDead(false);
+      return;
+    }
+    if (MachineOperand *MO =
+            I->findRegisterUseOperand(Z80::A, TRI, /*isKill=*/true)) {
+      MO->setIsKill(false);
+      return;
+    }
+  }
+  if (!MBB.isLiveIn(Z80::A) && !MBB.isLiveIn(Z80::AF))
+    Z80::markUndefUse(Push, Z80::A);
+}
+
 // Emit: PUSH IX; POP HL; LD <TempReg>,offset; ADD HL,<TempReg>
 // After this, HL = IX + offset. TempReg must be BC or DE.
 // If PreserveFlags is true, wraps ADD HL with PUSH AF/POP AF to preserve
@@ -256,7 +290,7 @@ static void emitLargeOffsetAddr(MachineBasicBlock &MBB,
 
   BuildMI(MBB, InsertBefore, DL, TII.get(LdOpc)).addImm(Offset & 0xFFFF);
   if (PreserveFlags)
-    BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_AF));
+    emitFlagSavePush(MBB, InsertBefore, DL, TII);
   BuildMI(MBB, InsertBefore, DL, TII.get(AddOpc));
   if (PreserveFlags)
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::POP_AF));
@@ -628,7 +662,7 @@ static void emitSPRelativeAddr(MachineBasicBlock &MBB,
   const auto &STI = MBB.getParent()->getSubtarget<Z80Subtarget>();
   if (STI.hasSM83() && AdjOffset >= -128 && AdjOffset <= 127) {
     if (PreserveFlags)
-      BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_AF));
+      emitFlagSavePush(MBB, InsertBefore, DL, TII);
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::LDHL_SP_e))
         .addImm(AdjOffset & 0xFF);
     if (PreserveFlags)
@@ -641,7 +675,7 @@ static void emitSPRelativeAddr(MachineBasicBlock &MBB,
   BuildMI(MBB, InsertBefore, DL, TII.get(Z80::LD_HL_nn))
       .addImm(AdjOffset & 0xFFFF);
   if (PreserveFlags)
-    BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_AF));
+    emitFlagSavePush(MBB, InsertBefore, DL, TII);
   BuildMI(MBB, InsertBefore, DL, TII.get(Z80::ADD_HL_SP));
   if (PreserveFlags)
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::POP_AF));
@@ -1219,7 +1253,7 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
         BuildMI(MBB, MI, DL,
                 TII.get(TempReg == Z80::BC ? Z80::ADD_HL_BC : Z80::ADD_HL_DE));
       } else {
-        BuildMI(MBB, MI, DL, TII.get(Z80::AND_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::AND_A)), Z80::A);
         BuildMI(MBB, MI, DL,
                 TII.get(TempReg == Z80::BC ? Z80::SBC_HL_BC : Z80::SBC_HL_DE));
       }
@@ -1391,7 +1425,7 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       BuildMI(MBB, MI, DL,
               TII.get(TempReg == Z80::BC ? Z80::ADD_HL_BC : Z80::ADD_HL_DE));
     } else {
-      BuildMI(MBB, MI, DL, TII.get(Z80::AND_A));
+      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::AND_A)), Z80::A);
       BuildMI(MBB, MI, DL,
               TII.get(TempReg == Z80::BC ? Z80::SBC_HL_BC : Z80::SBC_HL_DE));
     }

@@ -41,6 +41,17 @@ Z80FrameLowering::Z80FrameLowering()
     : TargetFrameLowering(StackGrowsDown, /*StackAlignment=*/Align(1),
                           /*LocalAreaOffset=*/-2) {}
 
+/// PUSH AF moves SP by two. The bytes it writes become frame space that the
+/// locals overwrite, so what it reads out of AF never reaches anything.
+static void emitStackAllocPush(MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator I, const DebugLoc &DL,
+                               const TargetInstrInfo &TII) {
+  MachineInstrBuilder MIB = BuildMI(MBB, I, DL, TII.get(Z80::PUSH_AF));
+  for (MachineOperand &MO : MIB->operands())
+    if (MO.isReg() && MO.isUse())
+      MO.setIsUndef();
+}
+
 bool Z80FrameLowering::hasFPImpl(const MachineFunction &MF) const {
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
 
@@ -142,13 +153,17 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
       unsigned PushCount = StackSize / 2;
       if (PushCount <= 4) {
         for (unsigned i = 0; i < PushCount; ++i)
-          BuildMI(MBB, MBBI, DL, TII.get(Z80::PUSH_AF));
+          emitStackAllocPush(MBB, MBBI, DL, TII);
         if (StackSize % 2)
           BuildMI(MBB, MBBI, DL, TII.get(Z80::DEC_SP));
       } else {
         // Large frame: PUSH HL; LD HL,-(size-2); ADD HL,SP; LD SP,HL;
         // restore HL from IX-based save location.
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::PUSH_HL));
+        MachineInstrBuilder PushHL = BuildMI(MBB, MBBI, DL, TII.get(Z80::PUSH_HL));
+        // The save only matters when HL carries an incoming argument.
+        if (!MBB.isLiveIn(Z80::HL) && !MBB.isLiveIn(Z80::L) &&
+            !MBB.isLiveIn(Z80::H))
+          Z80::markUndefUse(PushHL, Z80::HL);
         BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_HL_nn))
             .addImm(-(int64_t)(StackSize - 2) & 0xFFFF);
         BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_HL_SP));
@@ -187,7 +202,7 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
       if (HLLive || PushCount <= 12) {
         // Use PUSH AF (1 byte per 2 bytes, doesn't clobber any registers).
         for (unsigned i = 0; i < PushCount; ++i)
-          BuildMI(MBB, MBBI, DL, TII.get(Z80::PUSH_AF));
+          emitStackAllocPush(MBB, MBBI, DL, TII);
         if (LocalSize % 2)
           BuildMI(MBB, MBBI, DL, TII.get(Z80::DEC_SP));
       } else {

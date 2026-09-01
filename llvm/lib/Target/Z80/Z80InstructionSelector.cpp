@@ -617,7 +617,7 @@ void Z80InstructionSelector::emitSigned16BitCompare(MachineBasicBlock &MBB,
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(LhsHi);
   BuildMI(MBB, MI, DL, TII.get(Z80::XOR_r)).addReg(RhsHi);
   BuildMI(MBB, MI, DL, TII.get(Z80::RLCA));
-  BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+  Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
   Register SignDiffMask = MRI.createVirtualRegister(&Z80::GR8RegClass);
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), SignDiffMask)
       .addReg(Z80::A);
@@ -626,7 +626,7 @@ void Z80InstructionSelector::emitSigned16BitCompare(MachineBasicBlock &MBB,
   // high-pressure situations like i64 narrowScalar chains)
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHS);
   BuildMI(MBB, MI, DL, TII.get(Z80::SUB_HL_rr)).addReg(RHS);
-  BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+  Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
   BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
   Register UnsignedLt = MRI.createVirtualRegister(&Z80::GR8RegClass);
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), UnsignedLt).addReg(Z80::A);
@@ -2794,7 +2794,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(SrcReg);
         BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_A)); // carry = sign bit
-        BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)); // A = 0xFF or 0x00
+        Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A); // A = 0xFF or 0x00
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
       } else if (ShiftAmt > 0) {
@@ -2866,7 +2866,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(Z80::L);
         BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_A));
-        BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
         BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_A));
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::HL);
@@ -3017,7 +3017,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(LHS);
         emitSUB(RHS);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SUB_n)).addImm(1);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3028,7 +3028,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(LHS);
         emitSUB(RHS);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::ADD_A_n)).addImm(0xFF);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3037,7 +3037,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(LHS);
         emitCP(RHS);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3047,7 +3047,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(LHS);
         emitCP(RHS);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CCF));
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3056,7 +3056,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(RHS);
         emitCP(LHS);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3066,7 +3066,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(RHS);
         emitCP(LHS);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CCF));
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3098,7 +3098,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CP_r)).addReg(ModRHS);
         if (InvertC)
           BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CCF));
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A));
+        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
       }
@@ -3197,12 +3197,12 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
         switch (Pred) {
         case CmpInst::ICMP_ULT:
-          BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+          Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
           BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
           break;
         case CmpInst::ICMP_UGE:
           BuildMI(MBB, MI, DL, TII.get(Z80::CCF));
-          BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+          Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
           BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
           break;
         default:
@@ -3374,11 +3374,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
     } else if (NormPred == CmpInst::ICMP_ULT) {
       // Carry flag set if LHS < RHS.
-      BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
     } else {
       // UGE: carry clear if LHS >= RHS → invert.
-      BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
       BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
     }
@@ -3414,11 +3414,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     } else if (NormPred == CmpInst::ICMP_NE) {
       BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
     } else if (NormPred == CmpInst::ICMP_ULT) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
     } else {
       // UGE
-      BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A));
+      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
       BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
     }
