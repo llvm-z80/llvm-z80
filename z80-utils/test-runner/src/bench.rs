@@ -536,8 +536,8 @@ fn print_table(results: &[BenchResult], _config: &BenchConfig) {
             clang.tstates,
             sdcc.tstates,
             winner_str,
-            if !clang.correct { format!(" {red}!{reset}") } else { String::new() },
-            if !sdcc.correct { format!(" {red}!{reset}") } else { String::new() },
+            if !clang.correct { format!(" {red}!Clang{reset}") } else { String::new() },
+            if !sdcc.correct { format!(" {red}!SDCC{reset}") } else { String::new() },
         );
     }
 
