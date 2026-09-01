@@ -21,6 +21,7 @@
 #include "Z80OpcodeUtils.h"
 #include "Z80Subtarget.h"
 
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -139,6 +140,18 @@ bool Z80ExpandPseudo::runOnMachineFunction(MachineFunction &MF) {
         break;
       }
     }
+  }
+
+  if (Modified) {
+    // Blocks created above start with no live-in list, which every later
+    // liveness query reads as "everything dead" — and several passes act on
+    // that answer. Recompute the blocks that have none; a block whose
+    // live-ins are genuinely empty recomputes back to empty.
+    SmallVector<MachineBasicBlock *, 8> NoLiveIns;
+    for (MachineBasicBlock &B : MF)
+      if (&B != &MF.front() && B.livein_empty())
+        NoLiveIns.push_back(&B);
+    fullyRecomputeLiveIns(NoLiveIns);
   }
 
   return Modified;
