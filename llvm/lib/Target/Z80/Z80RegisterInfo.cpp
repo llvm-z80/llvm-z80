@@ -316,38 +316,19 @@ static void emitLargeOffsetAddr(MachineBasicBlock &MBB,
 // of DefReg) counts as a kill.
 // Check whether ADJCALLSTACKUP will actually clobber Reg when expanded.
 //
-// ADJCALLSTACKUP carries implicit-def annotations for HL, A, SP, but the
-// actual register side-effects depend on the expansion path chosen in
-// Z80FrameLowering::eliminateCallFramePseudoInstr (which runs AFTER frame
-// index elimination within PEI). The expansion paths are:
-//
-//   AdjAmount == 0         → erased entirely (no register effects)
-//   SM83 && AdjAmount≤127  → ADD SP,e     (only SP/flags modified)
-//   AdjAmount ≤ 16         → POP AF × N   (A/flags modified, HL untouched)
-//   AdjAmount > 16         → LD HL,n; ADD HL,SP; LD SP,HL (HL/flags modified)
-//
-// If we naively trust the implicit-defs, isRegLiveAt() may conclude a
-// register (e.g. HL) is dead when the pseudo won't actually modify it,
-// causing SPILL/RELOAD expansion to skip saving the register.
+// The pseudo's operands carry the instance's scratch clobber since call
+// lowering computes it, but this query predates that and runs during frame
+// index elimination, before eliminateCallFramePseudoInstr expands the
+// pseudo — so derive the answer from the same policy function rather than
+// scanning operands.
 static bool adjCallStackUpClobbersReg(const MachineInstr &MI, Register Reg,
                                       const TargetRegisterInfo *TRI) {
   assert(MI.getOpcode() == Z80::ADJCALLSTACKUP);
   int64_t AdjAmount = MI.getOperand(0).getImm() - MI.getOperand(1).getImm();
-
-  if (AdjAmount == 0)
-    return false;
-
   const auto &STI = MI.getMF()->getSubtarget<Z80Subtarget>();
-  if (STI.hasSM83() && AdjAmount <= 127)
-    // ADD SP,e: only SP and flags modified.
-    return false;
-
-  if (AdjAmount <= 16)
-    // POP AF: clobbers A and flags; HL is untouched.
-    return TRI->regsOverlap(Reg, Z80::A);
-
-  // LD HL,n; ADD HL,SP; LD SP,HL: clobbers HL and flags.
-  return TRI->regsOverlap(Reg, Z80::HL);
+  Register Scratch =
+      Z80FrameLowering::callFrameDestroyScratch(STI, AdjAmount);
+  return Scratch.isValid() && TRI->regsOverlap(Reg, Scratch);
 }
 
 static bool isRegLiveAt(Register Reg, MachineBasicBlock &MBB,

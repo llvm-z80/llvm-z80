@@ -18,6 +18,8 @@
 
 namespace llvm {
 
+class Z80Subtarget;
+
 class Z80FrameLowering : public TargetFrameLowering {
 public:
   Z80FrameLowering();
@@ -39,6 +41,14 @@ public:
   MachineBasicBlock::iterator
   eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator MI) const override;
+
+  /// The scratch register ADJCALLSTACKUP's expansion burns to pop
+  /// \p CallerPopBytes, or 0 when the expansion touches none. The single
+  /// authority for the policy eliminateCallFramePseudoInstr implements;
+  /// call lowering declares the instance's clobbers from it and liveness
+  /// queries consult it.
+  static Register callFrameDestroyScratch(const Z80Subtarget &STI,
+                                          int64_t CallerPopBytes);
 
   bool hasReservedCallFrame(const MachineFunction &MF) const override;
   // Ensure replaceFrameIndices runs even when there are no stack objects,

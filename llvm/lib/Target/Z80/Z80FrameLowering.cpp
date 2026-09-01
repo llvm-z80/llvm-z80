@@ -101,14 +101,18 @@ MachineBasicBlock::iterator Z80FrameLowering::eliminateCallFramePseudoInstr(
   if (Amount == 0)
     return MBB.erase(MI);
 
-  // Clean up stack after call: restore SP by adding Amount.
+  // Clean up stack after call: restore SP by adding Amount. Every branch
+  // must agree with callFrameDestroyScratch below, which is how call
+  // lowering and liveness queries predict what this expansion touches.
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
   if (STI.hasSM83() && Amount <= 127) {
     // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
+    assert(callFrameDestroyScratch(STI, Amount) == Register());
     BuildMI(MBB, MI, DL, TII.get(Z80::ADD_SP_e)).addImm(Amount & 0xFF);
   } else if (Amount <= 16) {
     // Small amounts: use POP AF (each pops 2 bytes, clobbers A but not HL).
     // More compact than INC SP (1 byte per 2 bytes vs 1 byte per 1 byte).
+    assert(callFrameDestroyScratch(STI, Amount) == Register(Z80::A));
     unsigned PopCount = Amount / 2;
     for (unsigned i = 0; i < PopCount; ++i)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_AF));
@@ -116,12 +120,24 @@ MachineBasicBlock::iterator Z80FrameLowering::eliminateCallFramePseudoInstr(
       BuildMI(MBB, MI, DL, TII.get(Z80::INC_SP));
   } else {
     // Larger amounts: LD HL, Amount; ADD HL, SP; LD SP, HL
+    assert(callFrameDestroyScratch(STI, Amount) == Register(Z80::HL));
     BuildMI(MBB, MI, DL, TII.get(Z80::LD_HL_nn)).addImm(Amount);
     BuildMI(MBB, MI, DL, TII.get(Z80::ADD_HL_SP));
     BuildMI(MBB, MI, DL, TII.get(Z80::LD_SP_HL));
   }
 
   return MBB.erase(MI);
+}
+
+Register Z80FrameLowering::callFrameDestroyScratch(const Z80Subtarget &STI,
+                                                   int64_t CallerPopBytes) {
+  if (CallerPopBytes == 0)
+    return Register(); // erased entirely
+  if (STI.hasSM83() && CallerPopBytes <= 127)
+    return Register(); // ADD SP,e
+  if (CallerPopBytes <= 16)
+    return Z80::A; // POP AF per two bytes
+  return Z80::HL;  // LD HL,N; ADD HL,SP; LD SP,HL
 }
 
 void Z80FrameLowering::emitPrologue(MachineFunction &MF,

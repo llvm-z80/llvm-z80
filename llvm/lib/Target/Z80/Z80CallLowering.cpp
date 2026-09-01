@@ -75,6 +75,18 @@ static void copyFromPhysReg(MachineIRBuilder &MIRBuilder,
   MIRBuilder.buildTrunc(VReg, Wide);
 }
 
+/// Declare the scratch register ADJCALLSTACKUP's expansion will clobber.
+/// The pseudo's static defs cover only SP: which register the SP adjustment
+/// burns depends on how much the caller itself must pop, which is known
+/// here and nowhere later that liveness would still care.
+static void addCallFrameDestroyClobbers(MachineInstrBuilder MIB,
+                                        int64_t CallerPopBytes,
+                                        const Z80Subtarget &STI) {
+  if (Register Scratch =
+          Z80FrameLowering::callFrameDestroyScratch(STI, CallerPopBytes))
+    MIB.addDef(Scratch, RegState::Implicit);
+}
+
 /// Get the return type size in bits, handling struct types correctly.
 /// getPrimitiveSizeInBits() returns 0 for structs; we need the actual size
 /// to match SDCC's cleanup decision which uses the declared return type size.
@@ -998,9 +1010,11 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   // value registers).
   bool EmittedAdjUp = false;
   if (CalleeCleanupBytes > 0) {
-    MIRBuilder.buildInstr(Z80::ADJCALLSTACKUP)
-        .addImm(StackArgBytes)
-        .addImm(CalleeCleanupBytes);
+    addCallFrameDestroyClobbers(MIRBuilder.buildInstr(Z80::ADJCALLSTACKUP)
+                                    .addImm(StackArgBytes)
+                                    .addImm(CalleeCleanupBytes),
+                                StackArgBytes - CalleeCleanupBytes,
+                                MF.getSubtarget<Z80Subtarget>());
     EmittedAdjUp = true;
   }
 
@@ -1197,9 +1211,11 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
 
   // Emit ADJCALLSTACKUP if not already emitted above (callee-cleanup).
   if (!EmittedAdjUp) {
-    MIRBuilder.buildInstr(Z80::ADJCALLSTACKUP)
-        .addImm(StackArgBytes)
-        .addImm(CalleeCleanupBytes);
+    addCallFrameDestroyClobbers(MIRBuilder.buildInstr(Z80::ADJCALLSTACKUP)
+                                    .addImm(StackArgBytes)
+                                    .addImm(CalleeCleanupBytes),
+                                StackArgBytes - CalleeCleanupBytes,
+                                MF.getSubtarget<Z80Subtarget>());
   }
 
   return true;

@@ -1057,9 +1057,13 @@ let Defs = [SP], Uses = [SP], hasSideEffects = true,
     mayLoad = false, mayStore = false in {
 def ADJCALLSTACKDOWN : Z80Pseudo<(outs), (ins i16imm:$bytes, i16imm:$prior)>;
 }
-// ADJCALLSTACKUP may clobber HL (via LD HL,N; ADD HL,SP; LD SP,HL for large
-// amounts) and A (via POP AF for small amounts).
-let Defs = [SP, HL, A], Uses = [SP], hasSideEffects = true,
+// ADJCALLSTACKUP's expansion may clobber A (POP AF for small amounts) or HL
+// (LD HL,N; ADD HL,SP; LD SP,HL for large amounts), but only when the caller
+// itself has bytes to pop. Call lowering knows the amount and adds the
+// matching implicit-def operands there; declaring the scratch registers
+// statically killed a call's return-value def on every callee-cleanup call,
+// where the pseudo erases to nothing.
+let Defs = [SP], Uses = [SP], hasSideEffects = true,
     mayLoad = false, mayStore = false in {
 def ADJCALLSTACKUP : Z80Pseudo<(outs), (ins i16imm:$bytes, i16imm:$prior)>;
 }
