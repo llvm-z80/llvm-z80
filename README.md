@@ -5,7 +5,7 @@
 </p>
 
 LLVM-Z80 is a LLVM fork supporting the Zilog Z80 series of microprocessors.  
-[[Backend Code]](https://github.com/llvm-z80/llvm-z80/tree/main/llvm/lib/Target/Z80) | [[Tests / Utilities]](https://github.com/llvm-z80/llvm-z80/tree/main/z80-utils) | [[Wiki]](https://github.com/llvm-z80/llvm-z80/wiki) | [[FAQ]](https://github.com/llvm-z80/llvm-z80/wiki/FAQ) | [[Prebuilt Binaries]](https://github.com/llvm-z80/llvm-z80/releases) | [[AUTHORS]](https://github.com/llvm-z80/llvm-z80/blob/main/AUTHORS) | [[NOTICE]](https://github.com/llvm-z80/llvm-z80/blob/main/NOTICE)
+[[Releases]](https://github.com/llvm-z80/llvm-z80/releases) | [[Backend Code]](https://github.com/llvm-z80/llvm-z80/tree/main/llvm/lib/Target/Z80) | [[Tests / Utilities]](https://github.com/llvm-z80/llvm-z80/tree/main/z80-utils) | [[Wiki]](https://github.com/llvm-z80/llvm-z80/wiki) | [[FAQ]](https://github.com/llvm-z80/llvm-z80/wiki/FAQ) | [[AUTHORS]](https://github.com/llvm-z80/llvm-z80/blob/main/AUTHORS) | [[NOTICE]](https://github.com/llvm-z80/llvm-z80/blob/main/NOTICE)
 
 ## Notice
 
@@ -138,7 +138,30 @@ sdldz80 -i output.ihx input.rel build/lib/z80/z80_rt.lib
 
 Runtime libraries are built at `build/lib/z80/` and `build/lib/sm83/`.
 
-### Related Works
+## Releases
+Releases are cut from a release branch. Each release branch follows one upstream LLVM release line.
+For example, the `release/22.x` branch tracks LLVM 22.
+Releases are annotated tags named `llvmz80-<upstream version>-r<n>`.
+The first part is the upstream LLVM release the branch sits on, and `-r<n>` is the downstream revision
+on top of it.
+
+Prebuilt binaries on the [releases page](https://github.com/llvm-z80/llvm-z80/releases) are built from these tags.
+
+## Contributing
+
+### Branches
+Development happens on `main`. Please open pull requests against `main`.
+Do not push to or open pull requests against a release branch. Maintainers cherry-pick
+merged fixes onto the release branch.
+
+### AI-assisted contributions
+LLVM-Z80 permits the use of AI automation tools, including automatically generated issues and pull requests.
+
+Be aware of two things. Automated submissions may be handled at a lower priority than ones written by a person.
+And a pull request that shows no sign of having been reviewed by a human may be closed without further review.
+If you submit it, you are responsible for it, so read the diff, build it, and be ready to explain why it is correct.
+
+## Related Works
 LLVM-Z80 stands on the shoulders of the following projects.
 * [LLVM](https://llvm.org/) : The LLVM Compiler Infrastructure, upstream of this project.
 * [LLVM-MOS](https://llvm-mos.org/) : Another attempt to create an LLVM backend for a classic CPU, LLVM-Z80 has adopted many optimization passes from LLVM-MOS.
