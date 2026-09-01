@@ -158,7 +158,11 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       SrcDead = (LQR == MachineBasicBlock::LQR_Dead);
     }
     if (SrcDead) {
-      BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
+      MachineInstrBuilder MIB = BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
+      // Neither register the swap declares it reads is read by anything.
+      const TargetRegisterInfo *TRI = STI->getRegisterInfo();
+      MIB->findRegisterUseOperand(DestReg, TRI)->setIsUndef();
+      MIB->findRegisterDefOperand(SrcReg, TRI)->setIsDead();
       return;
     }
   }
