@@ -583,6 +583,20 @@ def RELOAD_GR16 : Z80Pseudo<(outs GR16:$dst), (ins i32imm:$fi, i32imm:$offset)> 
   let isReMaterializable = true;
 }
 
+// Registers that don't fit the GR16 operand — physical IX/IY, and virtual
+// registers in the wider Anyi16 class — spill through a separate pair rather
+// than a widened SPILL_GR16: the descriptor's class reaches the register
+// allocator through its temporaries, and widening it perturbs allocation.
+def SPILL_ANY16 : Z80Pseudo<(outs), (ins Anyi16:$src, i32imm:$fi, i32imm:$offset)> {
+  let mayStore = true;
+  let mayLoad = false;
+}
+def RELOAD_ANY16 : Z80Pseudo<(outs Anyi16:$dst), (ins i32imm:$fi, i32imm:$offset)> {
+  let mayLoad = true;
+  let mayStore = false;
+  let isReMaterializable = true;
+}
+
 // 16-bit add/sub from frame slot via 8-bit IX-indexed ALU.
 // ADD_HL_FI expands to: LD A,L; ADD A,(IX+d); LD L,A; LD A,H; ADC A,(IX+d+1); LD H,A
 // SUB_HL_FI expands to: LD A,L; SUB (IX+d); LD L,A; LD A,H; SBC A,(IX+d+1); LD H,A

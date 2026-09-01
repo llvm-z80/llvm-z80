@@ -1022,11 +1022,13 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   }
 
   // Add any additional offset from the instruction operand
-  // (for accessing bytes within a multi-byte stack slot)
+  // (for accessing bytes within a multi-byte stack slot). Zero it rather than
+  // drop it: an instruction that survives this pass keeps the operand count
+  // its descriptor declares.
   if (FIOperandNum + 1 < MI->getNumOperands() &&
       MI->getOperand(FIOperandNum + 1).isImm()) {
     Offset += MI->getOperand(FIOperandNum + 1).getImm();
-    MI->removeOperand(FIOperandNum + 1);
+    MI->getOperand(FIOperandNum + 1).setImm(0);
   }
 
   unsigned Opc = MI->getOpcode();
@@ -1167,14 +1169,14 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       return false;
     }
 
-    if (Opc == Z80::SPILL_GR16) {
+    if (Opc == Z80::SPILL_GR16 || Opc == Z80::SPILL_ANY16) {
       Register SrcReg = MI->getOperand(0).getReg();
       expandSpillGR16SPRelative(MBB, MI, DL, TII, SrcReg, Offset, this);
       MI->eraseFromParent();
       return false;
     }
 
-    if (Opc == Z80::RELOAD_GR16) {
+    if (Opc == Z80::RELOAD_GR16 || Opc == Z80::RELOAD_ANY16) {
       Register DstReg = MI->getOperand(0).getReg();
       expandReloadGR16SPRelative(MBB, MI, DL, TII, DstReg, Offset, this);
       MI->eraseFromParent();
@@ -1237,6 +1239,7 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   // Small offset: fits in IX+d signed 8-bit displacement (-128 to +127).
   // For 16-bit SPILL/RELOAD, both Offset and Offset+1 must fit.
   bool Is16BitFI = (Opc == Z80::SPILL_GR16 || Opc == Z80::RELOAD_GR16 ||
+                    Opc == Z80::SPILL_ANY16 || Opc == Z80::RELOAD_ANY16 ||
                     Opc == Z80::ADD_HL_FI || Opc == Z80::SUB_HL_FI);
   int64_t MaxOffset = Is16BitFI ? Offset + 1 : Offset;
 
@@ -1315,14 +1318,14 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     return false;
   }
 
-  if (Opc == Z80::SPILL_GR16) {
+  if (Opc == Z80::SPILL_GR16 || Opc == Z80::SPILL_ANY16) {
     Register SrcReg = MI->getOperand(0).getReg();
     expandSpillGR16LargeOffset(MBB, MI, DL, TII, SrcReg, Offset, this);
     MI->eraseFromParent();
     return false;
   }
 
-  if (Opc == Z80::RELOAD_GR16) {
+  if (Opc == Z80::RELOAD_GR16 || Opc == Z80::RELOAD_ANY16) {
     Register DstReg = MI->getOperand(0).getReg();
     expandReloadGR16LargeOffset(MBB, MI, DL, TII, DstReg, Offset, this);
     MI->eraseFromParent();

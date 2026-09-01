@@ -46,6 +46,7 @@ Register Z80InstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
   switch (MI.getOpcode()) {
   case Z80::RELOAD_GR8:
   case Z80::RELOAD_GR16:
+  case Z80::RELOAD_ANY16:
     if (MI.getOperand(1).isFI()) {
       FrameIndex = MI.getOperand(1).getIndex();
       return MI.getOperand(0).getReg();
@@ -60,6 +61,7 @@ Register Z80InstrInfo::isStoreToStackSlot(const MachineInstr &MI,
   switch (MI.getOpcode()) {
   case Z80::SPILL_GR8:
   case Z80::SPILL_GR16:
+  case Z80::SPILL_ANY16:
     if (MI.getOperand(1).isFI()) {
       FrameIndex = MI.getOperand(1).getIndex();
       return MI.getOperand(0).getReg();
@@ -420,7 +422,12 @@ void Z80InstrInfo::storeRegToStackSlot(
     if (RC->hasSuperClassEq(&Z80::GR16RegClass) ||
         TRI->getCommonSubClass(RC, &Z80::GR16RegClass) ||
         Z80::IR16RegClass.hasSubClassEq(RC)) {
-      BuildMI(MBB, MI, DL, get(Z80::SPILL_GR16))
+      // Whatever doesn't fit the GR16 operand goes through the Anyi16 twin;
+      // see the definitions in Z80InstrInfo.td.
+      bool InGR16 = SrcReg.isPhysical()
+                        ? Z80::GR16RegClass.contains(SrcReg)
+                        : Z80::GR16RegClass.hasSubClassEq(RC);
+      BuildMI(MBB, MI, DL, get(InGR16 ? Z80::SPILL_GR16 : Z80::SPILL_ANY16))
           .addReg(SrcReg, getKillRegState(isKill))
           .addFrameIndex(FrameIndex)
           .addImm(0)
@@ -466,7 +473,10 @@ void Z80InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
     if (RC->hasSuperClassEq(&Z80::GR16RegClass) ||
         TRI->getCommonSubClass(RC, &Z80::GR16RegClass) ||
         Z80::IR16RegClass.hasSubClassEq(RC)) {
-      BuildMI(MBB, MI, DL, get(Z80::RELOAD_GR16))
+      bool InGR16 = DestReg.isPhysical()
+                        ? Z80::GR16RegClass.contains(DestReg)
+                        : Z80::GR16RegClass.hasSubClassEq(RC);
+      BuildMI(MBB, MI, DL, get(InGR16 ? Z80::RELOAD_GR16 : Z80::RELOAD_ANY16))
           .addReg(DestReg, RegState::Define)
           .addFrameIndex(FrameIndex)
           .addImm(0)
@@ -755,7 +765,8 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return true;
   }
 
-  case Z80::SPILL_GR16: {
+  case Z80::SPILL_GR16:
+  case Z80::SPILL_ANY16: {
     // SPILL_GR16 src, offset -> LD (IX+d),lo ; LD (IX+d+1),hi
     // Large offsets are handled in eliminateFrameIndex.
     Register SrcReg = MI.getOperand(0).getReg();
@@ -809,7 +820,8 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return true;
   }
 
-  case Z80::RELOAD_GR16: {
+  case Z80::RELOAD_GR16:
+  case Z80::RELOAD_ANY16: {
     // RELOAD_GR16 dst, offset -> LD lo,(IX+d) ; LD hi,(IX+d+1)
     // Large offsets are handled in eliminateFrameIndex.
     Register DestReg = MI.getOperand(0).getReg();
