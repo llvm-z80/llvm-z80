@@ -22,6 +22,7 @@
 #include "Z80Subtarget.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -29,6 +30,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "z80-late-opt"
@@ -176,6 +178,22 @@ public:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 };
+
+// --- SM83: reuse the address LDHL SP,e left in HL ---
+//
+// Every stack slot access recomputes its address from scratch, but spill
+// code touches neighboring slots in bursts, so HL usually still holds an
+// address one byte away (the 16-bit spill expansion even ends on slot+1
+// via LD (HL+)). Track what HL holds relative to the current SP and turn
+// a recomputation into nothing (same slot) or INC/DEC HL (next slot).
+//
+// The offset is tracked relative to SP, so SP movement (PUSH/POP/ADD SP)
+// shifts it; a call ends tracking, since callee cleanup leaves SP
+// unknowable here (the same reason the push ix/pop hl rewrite was
+// abandoned). LDHL also defines FLAGS, so a rewrite needs FLAGS dead.
+static bool reuseLDHLAddress(MachineBasicBlock &MBB,
+                             const TargetInstrInfo *TII,
+                             const TargetRegisterInfo *TRI);
 
 // Get the destination register for a LD r,(HL) instruction,
 // or Register() if not one.
@@ -358,6 +376,470 @@ static bool isRegDeadAfter(MachineBasicBlock::iterator After,
     }
   }
   return true;
+}
+
+// Get the destination register of a LD r,A instruction, or Register().
+static Register getLDrADstReg(unsigned Opc) {
+  switch (Opc) {
+  case Z80::LD_B_A:
+    return Z80::B;
+  case Z80::LD_C_A:
+    return Z80::C;
+  case Z80::LD_D_A:
+    return Z80::D;
+  case Z80::LD_E_A:
+    return Z80::E;
+  case Z80::LD_H_A:
+    return Z80::H;
+  case Z80::LD_L_A:
+    return Z80::L;
+  default:
+    return Register();
+  }
+}
+
+// Get the LD A,r opcode for a given register r, or 0.
+static unsigned getLDArOpcode(Register R) {
+  switch (R.id()) {
+  case Z80::B:
+    return Z80::LD_A_B;
+  case Z80::C:
+    return Z80::LD_A_C;
+  case Z80::D:
+    return Z80::LD_A_D;
+  case Z80::E:
+    return Z80::LD_A_E;
+  case Z80::H:
+    return Z80::LD_A_H;
+  case Z80::L:
+    return Z80::LD_A_L;
+  default:
+    return 0;
+  }
+}
+
+// Get the INC r / DEC r opcode for a given register r, or 0.
+static unsigned getIncDecROpcode(Register R, bool IsInc) {
+  switch (R.id()) {
+  case Z80::B:
+    return IsInc ? Z80::INC_B : Z80::DEC_B;
+  case Z80::C:
+    return IsInc ? Z80::INC_C : Z80::DEC_C;
+  case Z80::D:
+    return IsInc ? Z80::INC_D : Z80::DEC_D;
+  case Z80::E:
+    return IsInc ? Z80::INC_E : Z80::DEC_E;
+  case Z80::H:
+    return IsInc ? Z80::INC_H : Z80::DEC_H;
+  case Z80::L:
+    return IsInc ? Z80::INC_L : Z80::DEC_L;
+  default:
+    return 0;
+  }
+}
+
+// --- Increment a register where it lives ---
+//
+// LD A,r; INC/DEC A; LD r,A round-trips through A for a plain increment.
+// INC r produces the same value and the same flags, in one byte. Valid on
+// both targets; needs A dead afterward, since the round trip left the new
+// value in A as a side effect.
+static bool directIncDec(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
+                         const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+  for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
+    auto Next = std::next(MII);
+    Register R = getLDArSrcReg(MII->getOpcode());
+    if (!R || Next == MIE) {
+      MII = Next;
+      continue;
+    }
+    unsigned Op2 = Next->getOpcode();
+    if (Op2 != Z80::INC_A && Op2 != Z80::DEC_A) {
+      MII = Next;
+      continue;
+    }
+    auto Third = std::next(Next);
+    if (Third == MIE || getLDrADstReg(Third->getOpcode()) != R) {
+      MII = Next;
+      continue;
+    }
+    auto After = std::next(Third);
+    if (!isRegDeadAfter(After, MBB, TRI, Z80::A)) {
+      MII = Next;
+      continue;
+    }
+    LLVM_DEBUG(dbgs() << "  Direct inc/dec: " << *MII);
+    BuildMI(MBB, MII, MII->getDebugLoc(),
+            TII->get(getIncDecROpcode(R, Op2 == Z80::INC_A)));
+    MBB.erase(MII);
+    MBB.erase(Next);
+    MBB.erase(Third);
+    MII = After;
+    Changed = true;
+  }
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+// --- Keep a saved register on the stack across untouched stretches ---
+//
+// Consecutive stack accesses each save and restore a live HL around
+// themselves, producing POP rr ... PUSH rr with nothing in between that
+// cares. When the stretch touches neither rr nor SP (removing the pair
+// leaves SP two lower there, so any SP-relative access would slip), the
+// value can simply stay on the stack. The adjacent-pair case is handled
+// by the POP/PUSH peephole above; this is its windowed extension.
+static bool elidePopPushAcrossStretch(MachineBasicBlock &MBB,
+                                      const TargetInstrInfo *TII,
+                                      const TargetRegisterInfo *TRI) {
+  static const struct {
+    unsigned PopOpc;
+    unsigned PushOpc;
+    MCPhysReg Reg;
+  } Pairs[] = {
+      {Z80::POP_BC, Z80::PUSH_BC, Z80::BC},
+      {Z80::POP_DE, Z80::PUSH_DE, Z80::DE},
+      {Z80::POP_HL, Z80::PUSH_HL, Z80::HL},
+  };
+  bool Changed = false;
+  for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
+    auto Next = std::next(MII);
+    for (const auto &P : Pairs) {
+      if (MII->getOpcode() != P.PopOpc)
+        continue;
+      unsigned Budget = 16;
+      for (auto J = Next; J != MIE && Budget--; ++J) {
+        if (J->getOpcode() == P.PushOpc) {
+          // The pop also refills the register itself; anything reading it
+          // after the push would see stale contents without the pair.
+          if (!isRegDeadAfter(std::next(J), MBB, TRI, P.Reg))
+            break;
+          LLVM_DEBUG(dbgs() << "  Pop/push elision across stretch: " << *MII);
+          MBB.erase(J);
+          Next = MBB.erase(MII);
+          Changed = true;
+          break;
+        }
+        // Push and pop model their SP movement through getSPAdjust, not
+        // operands, so ask both ways: anything that moves or even reads SP
+        // would see it two bytes short inside the shortened stretch.
+        if (J->isCall() || J->isBranch() || J->isTerminator() ||
+            J->isInlineAsm() || J->readsRegister(P.Reg, TRI) ||
+            J->modifiesRegister(P.Reg, TRI) || TII->getSPAdjust(*J) != 0 ||
+            J->readsRegister(Z80::SP, TRI) ||
+            J->modifiesRegister(Z80::SP, TRI))
+          break;
+      }
+      break;
+    }
+    MII = Next;
+  }
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+// --- SM83: route (HL) accesses through A for the post-increment form ---
+//
+//   LD A,(HL); INC HL  -> LD A,(HL+)              (2B/4M -> 1B/2M)
+//   LD (HL),A; INC HL  -> LD (HL+),A              (2B/4M -> 1B/2M)
+//   LD r,(HL); INC HL  -> LD A,(HL+); LD r,A      (6M -> 5M, A dead)
+//   LD (HL),r; INC HL  -> LD A,r; LD (HL+),A      (4M -> 3M, A dead)
+//
+// The non-A forms trade nothing in size and touch no flags; they only
+// need A free to carry the value.
+static bool fusePostIncAccess(MachineBasicBlock &MBB,
+                              const TargetInstrInfo *TII,
+                              const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+  for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
+    MachineInstr &MI = *MII;
+    unsigned Opc = MI.getOpcode();
+    auto Next = std::next(MII);
+    if (Next == MIE || Next->getOpcode() != Z80::INC_HL) {
+      MII = Next;
+      continue;
+    }
+    auto After = std::next(Next);
+    const DebugLoc &DL = MI.getDebugLoc();
+
+    if (Opc == Z80::LD_A_HLind) {
+      BuildMI(MBB, MII, DL, TII->get(Z80::LD_A_HLI));
+    } else if (Opc == Z80::LD_HLind_A) {
+      BuildMI(MBB, MII, DL, TII->get(Z80::LD_HLI_A));
+    } else if (Register Dst = getLoadHLindDstReg(Opc);
+               Dst && isRegDeadAfter(After, MBB, TRI, Z80::A)) {
+      BuildMI(MBB, MII, DL, TII->get(Z80::LD_A_HLI));
+      BuildMI(MBB, MII, DL, TII->get(getLDrAOpcode(Dst)));
+    } else if (Register Src = getStoreHLindSrcReg(Opc);
+               Src && Src != Z80::A &&
+               isRegDeadAfter(After, MBB, TRI, Z80::A)) {
+      BuildMI(MBB, MII, DL, TII->get(getLDArOpcode(Src)));
+      BuildMI(MBB, MII, DL, TII->get(Z80::LD_HLI_A));
+    } else {
+      MII = Next;
+      continue;
+    }
+    LLVM_DEBUG(dbgs() << "  Post-inc fuse: " << MI);
+    MBB.erase(MII);
+    MBB.erase(Next);
+    MII = After;
+    Changed = true;
+  }
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+// --- SM83: buy constant stores a trip through A ---
+//
+// LD (HL),n costs two bytes per store and cannot post-increment; through A
+// the store is one byte and fuses with a following INC HL into LD (HL+),A.
+// Within a stretch where A carries nothing (no reads or writes), stores of
+// one constant repeat often enough (array and struct initialization) that
+// materializing the constant once pays for itself:
+//   cost: XOR A = 1 byte (needs dead flags) or LD A,n = 2 bytes
+//   gain: 1 byte per plain store, 2 bytes per store+INC HL pair
+static bool materializeConstantStores(MachineBasicBlock &MBB,
+                                      const TargetInstrInfo *TII,
+                                      const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+
+  auto WindowEnd = MBB.begin();
+  while (WindowEnd != MBB.end()) {
+    // Find the next maximal window with no genuine use or def of A.
+    auto WindowBegin = WindowEnd;
+    while (WindowBegin != MBB.end() &&
+           (WindowBegin->isCall() || WindowBegin->isInlineAsm() ||
+            WindowBegin->readsRegister(Z80::A, TRI) ||
+            WindowBegin->modifiesRegister(Z80::A, TRI)))
+      ++WindowBegin;
+    WindowEnd = WindowBegin;
+    SmallVector<MachineBasicBlock::iterator, 8> Stores;
+    while (WindowEnd != MBB.end() && !WindowEnd->isCall() &&
+           !WindowEnd->isInlineAsm() &&
+           !WindowEnd->readsRegister(Z80::A, TRI) &&
+           !WindowEnd->modifiesRegister(Z80::A, TRI)) {
+      if (WindowEnd->getOpcode() == Z80::LD_HLind_n)
+        Stores.push_back(WindowEnd);
+      ++WindowEnd;
+    }
+    if (Stores.empty())
+      continue;
+
+    // The window not touching A is not enough: A may be carrying a value
+    // straight through it to a reader beyond, which our constant would
+    // clobber. Only proceed when A is dead past the window.
+    if (!isRegDeadAfter(WindowEnd, MBB, TRI, Z80::A))
+      continue;
+
+    // Group the stores by constant and convert each group that profits.
+    SmallVector<std::pair<int64_t, unsigned>, 4> Groups; // value, saving
+    for (auto It : Stores) {
+      int64_t V = It->getOperand(0).getImm() & 0xFF;
+      bool Fused = std::next(It) != MBB.end() &&
+                   std::next(It)->getOpcode() == Z80::INC_HL;
+      auto *G = llvm::find_if(Groups, [&](auto &P) { return P.first == V; });
+      if (G == Groups.end())
+        Groups.push_back({V, Fused ? 2u : 1u});
+      else
+        G->second += Fused ? 2 : 1;
+    }
+    // Convert only the best group: a second constant's LD A,n could land
+    // between the first group's converted stores and corrupt what A holds.
+    llvm::sort(Groups, [](auto &L, auto &R) { return L.second > R.second; });
+    Groups.truncate(1);
+    for (auto &G : Groups) {
+      const int64_t Value = G.first;
+      const unsigned Saving = G.second;
+      auto FirstIt = *llvm::find_if(Stores, [&](auto It) {
+        return (It->getOperand(0).getImm() & 0xFF) == Value;
+      });
+      bool FlagsDead = isRegDeadAfter(FirstIt, MBB, TRI, Z80::FLAGS);
+      unsigned Cost = (Value == 0 && FlagsDead) ? 1 : 2;
+      if (Saving <= Cost)
+        continue;
+
+      // Materialize the constant once, before its first store.
+      const DebugLoc &DL = FirstIt->getDebugLoc();
+      if (Value == 0 && FlagsDead)
+        BuildMI(MBB, FirstIt, DL, TII->get(Z80::XOR_A));
+      else
+        BuildMI(MBB, FirstIt, DL, TII->get(Z80::LD_A_n)).addImm(Value);
+
+      for (auto It : Stores) {
+        if ((It->getOperand(0).getImm() & 0xFF) != Value)
+          continue;
+        auto NextIt = std::next(It);
+        if (NextIt != MBB.end() && NextIt->getOpcode() == Z80::INC_HL) {
+          BuildMI(MBB, It, It->getDebugLoc(), TII->get(Z80::LD_HLI_A));
+          MBB.erase(It);
+          MBB.erase(NextIt);
+        } else {
+          BuildMI(MBB, It, It->getDebugLoc(), TII->get(Z80::LD_HLind_A));
+          MBB.erase(It);
+        }
+      }
+      Changed = true;
+      LLVM_DEBUG(dbgs() << "  A invest: constant " << Value << " saves "
+                        << (Saving - Cost) << "B\n");
+    }
+  }
+
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+static bool reuseLDHLAddress(MachineBasicBlock &MBB,
+                             const TargetInstrInfo *TII,
+                             const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+  bool Known = false;  // Whether HL = SP + Off holds here.
+  int64_t Off = 0;     // Relative to the CURRENT SP.
+  bool AKnown = false; // Whether A holds the constant AVal here.
+  int64_t AVal = 0;
+
+  for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
+    MachineInstr &MI = *MII;
+    unsigned Opc = MI.getOpcode();
+    auto Next = std::next(MII);
+
+    // --- A-constant reuse: a store of a constant A already holds can go
+    // through A (half the size), and with a following INC HL it fuses
+    // into the post-increment store. Reloading the same constant into A
+    // is dropped outright.
+    if (Opc == Z80::LD_HLind_n && AKnown &&
+        (MI.getOperand(0).getImm() & 0xFF) == (AVal & 0xFF)) {
+      if (Next != MIE && Next->getOpcode() == Z80::INC_HL) {
+        LLVM_DEBUG(dbgs() << "  A reuse: fusing to (hl+) " << MI);
+        BuildMI(MBB, MII, MI.getDebugLoc(), TII->get(Z80::LD_HLI_A));
+        auto AfterInc = std::next(Next);
+        MBB.erase(MII);
+        MBB.erase(Next);
+        MII = AfterInc;
+        Off += 1; // LD (HL+),A moved HL exactly as the INC HL did.
+        Changed = true;
+        continue;
+      }
+      LLVM_DEBUG(dbgs() << "  A reuse: store via A " << MI);
+      BuildMI(MBB, MII, MI.getDebugLoc(), TII->get(Z80::LD_HLind_A));
+      MII = MBB.erase(MII);
+      Changed = true;
+      continue;
+    }
+    if (Opc == Z80::LD_A_n && AKnown &&
+        (MI.getOperand(0).getImm() & 0xFF) == (AVal & 0xFF)) {
+      // LD A,n leaves flags alone, so the reload can simply go.
+      LLVM_DEBUG(dbgs() << "  A reuse: erasing reload " << MI);
+      MII = MBB.erase(MII);
+      Changed = true;
+      continue;
+    }
+    if (Opc == Z80::XOR_A && AKnown && (AVal & 0xFF) == 0 &&
+        isRegDeadAfter(Next, MBB, TRI, Z80::FLAGS)) {
+      LLVM_DEBUG(dbgs() << "  A reuse: erasing xor a " << MI);
+      MII = MBB.erase(MII);
+      Changed = true;
+      continue;
+    }
+
+    // Track what A holds.
+    if (Opc == Z80::LD_A_n) {
+      AKnown = true;
+      AVal = MI.getOperand(0).getImm() & 0xFF;
+    } else if (Opc == Z80::XOR_A) {
+      AKnown = true;
+      AVal = 0;
+    } else if (MI.isCall() || MI.isInlineAsm() ||
+               MI.modifiesRegister(Z80::A, TRI)) {
+      AKnown = false;
+    }
+
+    if (Opc == Z80::LDHL_SP_e) {
+      // The stored immediate is the masked byte of a signed displacement.
+      int64_t N = SignExtend64<8>(MI.getOperand(0).getImm() & 0xFF);
+      if (Known && isRegDeadAfter(Next, MBB, TRI, Z80::FLAGS)) {
+        int64_t D = N - Off;
+        if (D == 0) {
+          LLVM_DEBUG(dbgs() << "  LDHL reuse: erasing " << MI);
+          MII = MBB.erase(MII);
+          Changed = true;
+          continue;
+        }
+        if (D == 1 || D == -1) {
+          LLVM_DEBUG(dbgs() << "  LDHL reuse: inc/dec for " << MI);
+          BuildMI(MBB, MII, MI.getDebugLoc(),
+                  TII->get(D == 1 ? Z80::INC_HL : Z80::DEC_HL));
+          MII = MBB.erase(MII);
+          Off = N;
+          Changed = true;
+          continue;
+        }
+      }
+      Known = true;
+      Off = N;
+      MII = Next;
+      continue;
+    }
+
+    switch (Opc) {
+    case Z80::INC_HL:
+      Off += 1;
+      break;
+    case Z80::DEC_HL:
+      Off -= 1;
+      break;
+    case Z80::LD_HLI_A:
+    case Z80::LD_A_HLI:
+      Off += 1;
+      break;
+    case Z80::LD_HLD_A:
+    case Z80::LD_A_HLD:
+      Off -= 1;
+      break;
+    // HL is pinned to an absolute address, so SP movement shifts the
+    // SP-relative offset in the opposite direction.
+    case Z80::PUSH_AF:
+    case Z80::PUSH_BC:
+    case Z80::PUSH_DE:
+    case Z80::PUSH_HL:
+      Off += 2;
+      break;
+    case Z80::POP_AF:
+    case Z80::POP_BC:
+    case Z80::POP_DE:
+      Off -= 2;
+      break;
+    case Z80::INC_SP:
+      Off -= 1;
+      break;
+    case Z80::DEC_SP:
+      Off += 1;
+      break;
+    case Z80::ADD_SP_e:
+      Off -= SignExtend64<8>(MI.getOperand(0).getImm() & 0xFF);
+      break;
+    case Z80::LD_SP_HL: // SP := HL, so HL = SP + 0.
+      Off = 0;
+      break;
+    default:
+      // POP_HL loads an unknown value; calls leave SP itself unknowable
+      // (callee cleanup); anything else touching HL or SP ends tracking.
+      if (MI.isCall() || MI.isInlineAsm() ||
+          MI.modifiesRegister(Z80::HL, TRI) ||
+          MI.modifiesRegister(Z80::SP, TRI))
+        Known = false;
+      break;
+    }
+    MII = Next;
+  }
+
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
 }
 
 bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
@@ -1555,6 +2037,21 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       for (MCPhysReg Def : TII->get(Opc).implicit_defs())
         invalidateReg(AvailValues, TRI, Def);
     }
+  }
+
+
+  // Run last: earlier peepholes pattern-match LDHL-based slot accesses
+  // (redundant store elimination keys slot identity on them), so the
+  // address-reuse rewrite must not obscure those first.
+  for (MachineBasicBlock &MBB : MF) {
+    if (STI.hasSM83()) {
+      Changed |= reuseLDHLAddress(MBB, TII, TRI);
+      // After address reuse: it creates the INC HL neighbors these fuse with.
+      Changed |= materializeConstantStores(MBB, TII, TRI);
+      Changed |= fusePostIncAccess(MBB, TII, TRI);
+    }
+    Changed |= directIncDec(MBB, TII, TRI);
+    Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
   }
 
   return Changed;
