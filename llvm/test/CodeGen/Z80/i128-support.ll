@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 
 ; Test: i128 addition (narrowed to 8 x i16 add/adc chain)
 define i128 @add128(i128 %a, i128 %b) {

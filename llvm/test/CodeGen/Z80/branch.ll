@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
 
 ; Test conditional branch based on 16-bit equality comparison
 ; CMP+BR fusion: G_ICMP EQ + G_BRCOND → XOR-based compare + JP Z

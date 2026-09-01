@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
 
 ; 16-bit EQ: uses XOR-based comparison (does not clobber HL)
 define i8 @icmp_eq16(i16 %a, i16 %b) {

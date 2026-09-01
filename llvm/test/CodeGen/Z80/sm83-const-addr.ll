@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=sm83 -O1 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=sm83 -O1 < %s | FileCheck %s
 
 ; A compile-time address needs no pointer in a register. The high page
 ; 0xFF00-0xFFFF has a 2-byte LDH form; anywhere else takes the 3-byte absolute

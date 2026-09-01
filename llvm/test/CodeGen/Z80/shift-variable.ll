@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
 
 ; Test: variable 8-bit shift left uses DJNZ loop
 define i8 @shl8_var(i8 %val, i8 %amt) {

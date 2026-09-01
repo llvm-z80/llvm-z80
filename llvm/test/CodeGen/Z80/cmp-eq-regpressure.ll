@@ -1,5 +1,5 @@
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s -o /dev/null
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s -o /dev/null
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s -o /dev/null
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s -o /dev/null
 ;
 ; Test that 16-bit EQ/NE comparisons work under register pressure.
 ; The XOR_CMP_EQ16/NE16 pseudo operands must be constrained to GR16

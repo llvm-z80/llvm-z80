@@ -1,5 +1,5 @@
-; RUN: llc -mtriple=z80 -O1 < %s | FileCheck %s
-; RUN: llc -mtriple=sm83 -O1 < %s | FileCheck %s --check-prefix=SM83
+; RUN: llc -verify-machineinstrs -mtriple=z80 -O1 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=sm83 -O1 < %s | FileCheck %s --check-prefix=SM83
 
 ; An 8-bit load or store is a single instruction and interrupts are taken
 ; between instructions, so it is already atomic and needs no libcall. Anything

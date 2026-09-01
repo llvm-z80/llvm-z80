@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 
 ; Test SHL+ASHR pattern matching for sign extension optimization.
 ; SHL 8 + ASHR 8 on i16 should use SEXT_GR8_GR16 pseudo (5 instructions)

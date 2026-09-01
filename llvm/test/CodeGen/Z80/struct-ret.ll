@@ -1,5 +1,5 @@
-; RUN: llc -mtriple=z80 -O1 < %s | FileCheck %s
-; RUN: llc -mtriple=sm83 -O1 < %s | FileCheck %s --check-prefix=SM83
+; RUN: llc -verify-machineinstrs -mtriple=z80 -O1 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=sm83 -O1 < %s | FileCheck %s --check-prefix=SM83
 
 ; Test aggregate (struct) return packing into registers without stack slots.
 

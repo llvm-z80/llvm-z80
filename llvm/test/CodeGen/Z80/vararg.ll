@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
 ; Test variadic function support (va_start, va_arg)
 
 target datalayout = "e-m:o-p:16:8-i16:8-i32:8-i64:8-n8:16"

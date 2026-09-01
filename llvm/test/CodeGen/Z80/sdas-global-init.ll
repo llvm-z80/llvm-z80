@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 < %s | FileCheck %s
 
 ; The sdas .ds directive reserves zeroed space and takes no fill operand, so a
 ; repeated non-zero byte has to be written out as .db.
