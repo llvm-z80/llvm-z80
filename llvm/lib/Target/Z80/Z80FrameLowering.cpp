@@ -25,6 +25,7 @@
 
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -68,6 +69,33 @@ bool Z80FrameLowering::hasFPImpl(const MachineFunction &MF) const {
   // uses SP-relative addressing (LD HL,offset; ADD HL,SP).
   return MF.getTarget().Options.DisableFramePointerElim(MF) ||
          MFI.hasVarSizedObjects() || MFI.isFrameAddressTaken();
+}
+
+void Z80FrameLowering::processFunctionBeforeFrameFinalized(
+    MachineFunction &MF, RegScavenger *RS) const {
+  // SP is at an arbitrary address when a function is entered and SM83's
+  // SP-relative addressing rules out realigning it, so an alignment above
+  // the byte-aligned stack cannot be honored. Anything that genuinely needs
+  // one (an OAM DMA source buffer, say) silently receives an arbitrary
+  // address today, so refuse loudly instead: the linker can place a static
+  // object at any alignment.
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  Align Requested = getStackAlign();
+  for (int I = MFI.getObjectIndexBegin(), E = MFI.getObjectIndexEnd(); I != E;
+       ++I) {
+    if (MFI.isDeadObjectIndex(I))
+      continue;
+    Requested = std::max(Requested, MFI.getObjectAlign(I));
+  }
+  if (Requested > getStackAlign()) {
+    const Function &F = MF.getFunction();
+    F.getContext().diagnose(DiagnosticInfoUnsupported(
+        F,
+        "an over-aligned stack object (alignment " + Twine(Requested.value()) +
+            ", but the stack is byte-aligned); use a static object for "
+            "aligned data",
+        F.getSubprogram()));
+  }
 }
 
 bool Z80FrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {

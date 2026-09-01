@@ -51,6 +51,11 @@ public:
   bool hasBitIntType() const override { return true; }
   bool hasInt128Type() const override { return true; }
 
+  // Everything is byte-aligned; without this, clang gives long long and
+  // double locals their "natural" alignment, which the byte-aligned stack
+  // rejects. Same override as AVR and MSP430.
+  bool allowsLargerPreferedTypeAlignment() const override { return false; }
+
   CallingConvCheckResult checkCallingConvention(CallingConv CC) const override;
 };
 

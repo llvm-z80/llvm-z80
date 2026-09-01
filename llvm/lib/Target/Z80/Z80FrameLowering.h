@@ -51,6 +51,12 @@ public:
                                           int64_t CallerPopBytes);
 
   bool hasReservedCallFrame(const MachineFunction &MF) const override;
+
+  // Refuses over-aligned stack objects: SP is arbitrary at entry, so they
+  // cannot be honored, and silently placing them unaligned miscompiles
+  // hardware-facing code like an OAM DMA source buffer.
+  void processFunctionBeforeFrameFinalized(MachineFunction &MF,
+                                           RegScavenger *RS) const override;
   // Ensure replaceFrameIndices runs even when there are no stack objects,
   // so that ADJCALLSTACKDOWN/UP pseudos are always eliminated.
   bool needsFrameIndexResolution(const MachineFunction &MF) const override {
