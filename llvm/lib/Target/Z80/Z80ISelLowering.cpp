@@ -65,13 +65,13 @@ Z80TargetLowering::Z80TargetLowering(const Z80TargetMachine &TM,
   PredictableSelectIsExpensive = true;
 }
 
-MVT Z80TargetLowering::getRegisterType(MVT VT) const {
+MVT Z80TargetLowering::getCachedRegisterType(MVT VT) const {
   // Z80 has 8-bit and 16-bit registers
   if (VT.getSizeInBits() > 16)
     return MVT::i8; // Split larger values into bytes
   if (VT.getSizeInBits() > 8)
     return MVT::i16;
-  return TargetLowering::getRegisterType(VT);
+  return TargetLowering::getCachedRegisterType(VT);
 }
 
 unsigned

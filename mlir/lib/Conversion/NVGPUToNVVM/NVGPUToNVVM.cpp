@@ -330,6 +330,10 @@ static FailureOr<NVVM::MMATypes> getNvvmMmaType(Type t) {
     return NVVM::MMATypes::f64;
   if (elType.isF32())
     return NVVM::MMATypes::tf32;
+  if (elType.isF8E4M3FN())
+    return NVVM::MMATypes::e4m3;
+  if (elType.isF8E5M2())
+    return NVVM::MMATypes::e5m2;
   return failure();
 }
 
@@ -1090,7 +1094,7 @@ struct NVGPUGenerateWarpgroupDescriptorLowering
 
 static Value makeI64Const(ImplicitLocOpBuilder &b, int32_t index) {
   return LLVM::ConstantOp::create(b, b.getIntegerType(64),
-                                  b.getI32IntegerAttr(index));
+                                  b.getI64IntegerAttr(index));
 }
 
 /// Returns a Value that holds data type enum that is expected by CUDA driver.
@@ -1807,8 +1811,8 @@ lookupConvOp(const TableEntry (&table)[N], Type srcElemType, Type dstElemType) {
 
 /// Extract a single element from a vector.
 static Value extractElement(ImplicitLocOpBuilder &b, Value srcVec, int idx) {
-  auto vecTy = cast<VectorType>(srcVec.getType());
-  assert(idx >= 0 && idx < vecTy.getNumElements() &&
+  assert(idx >= 0 &&
+         idx < cast<VectorType>(srcVec.getType()).getNumElements() &&
          "extractElement: index out of bounds");
   IntegerType i64Ty = b.getI64Type();
   return b.create<LLVM::ExtractElementOp>(

@@ -289,6 +289,22 @@ def StdVariantChecker : Checker<"StdVariant">,
   HelpText<"Check for bad type access for std::variant.">,
   Documentation<HasDocumentation>;
 
+def LifetimeModeling : Checker<"LifetimeModeling">,
+  HelpText<"Model lifetime annotations for other checkers">,
+  Documentation<NotDocumented>,
+  Hidden;
+
+def UseAfterLifetimeEnd : Checker<"UseAfterLifetimeEnd">,
+  HelpText<"Check for uses of references or pointers that "
+           "outlive their bound object">,
+  Dependencies<[LifetimeModeling]>,
+  Documentation<HasDocumentation>;
+
+def DanglingPtrDeref : Checker<"DanglingPtrDeref">,
+  HelpText<"Check for dereferences of a dangling pointer">,
+  Dependencies<[LifetimeModeling]>,
+  Documentation<HasDocumentation>;
+
 } // end "alpha.core"
 
 //===----------------------------------------------------------------------===//
@@ -601,6 +617,13 @@ let ParentPackage = UnixAlpha in {
 
 def PthreadLockChecker : Checker<"PthreadLock">,
   HelpText<"Simple lock -> unlock checker">,
+  CheckerOptions<[
+    CmdLineOption<Boolean,
+                  "WarnOnLockOrderReversal",
+                  "Warn when locks are not released in LIFO order.",
+                  "false",
+                  Released>
+  ]>,
   Dependencies<[PthreadLockBase]>,
   Documentation<HasDocumentation>;
 
@@ -794,22 +817,6 @@ def SmartPtrChecker: Checker<"SmartPtr">,
   HelpText<"Find the dereference of null SmrtPtr">,
   Dependencies<[SmartPtrModeling]>,
   Documentation<HasDocumentation>;
-
-def LifetimeModeling : Checker<"LifetimeModeling">,
-  HelpText<"Model lifetime annotations for other checkers">,
-  Documentation<NotDocumented>,
-  Hidden;
-
-def UseAfterLifetimeEnd : Checker<"UseAfterLifetimeEnd">,
-  HelpText<"Check for uses of references or pointers that "
-           "outlive their bound object">,
-  Dependencies<[LifetimeModeling]>,
-  Documentation<NotDocumented>;
-
-def DanglingPtrDeref : Checker<"DanglingPtrDeref">,
-  HelpText<"Check for dereferences of a dangling pointer">,
-  Dependencies<[LifetimeModeling]>,
-  Documentation<NotDocumented>;
 
 } // end: "alpha.cplusplus"
 

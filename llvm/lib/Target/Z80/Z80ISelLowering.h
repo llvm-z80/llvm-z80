@@ -43,7 +43,7 @@ public:
 
   ConstraintType getConstraintType(StringRef Constraint) const override;
 
-  MVT getRegisterType(MVT VT) const override;
+  MVT getCachedRegisterType(MVT VT) const override;
 
   unsigned
   getNumRegisters(LLVMContext &Context, EVT VT,
