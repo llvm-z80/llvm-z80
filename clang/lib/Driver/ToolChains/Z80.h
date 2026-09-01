@@ -88,6 +88,12 @@ public:
   addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                         llvm::opt::ArgStringList &CC1Args, BoundArch BA,
                         Action::OffloadKind DeviceOffloadKind) const override;
+
+  // Bare-metal target: only the builtin resource headers and an explicit
+  // sysroot are searched, never the host's /usr/include.
+  void
+  AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                            llvm::opt::ArgStringList &CC1Args) const override;
 };
 
 } // end namespace toolchains

@@ -267,3 +267,27 @@ void Z80ToolChain::addClangTargetOptions(const ArgList &DriverArgs,
   CC1Args.push_back("-mllvm");
   CC1Args.push_back("-two-entry-phi-node-folding-threshold=0");
 }
+
+void Z80ToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
+                                             ArgStringList &CC1Args) const {
+  // The host's headers must never be searched: glibc's stdint.h defines
+  // int32_t as int, which is 16 bits here, silently truncating every
+  // int32_t in a translation unit that includes it.
+  if (DriverArgs.hasArg(options::OPT_nostdinc))
+    return;
+
+  if (!DriverArgs.hasArg(options::OPT_nobuiltininc)) {
+    SmallString<128> Dir(getDriver().ResourceDir);
+    llvm::sys::path::append(Dir, "include");
+    addSystemInclude(DriverArgs, CC1Args, Dir.str());
+  }
+
+  if (DriverArgs.hasArg(options::OPT_nostdlibinc))
+    return;
+
+  if (!getDriver().SysRoot.empty()) {
+    SmallString<128> Dir(getDriver().SysRoot);
+    llvm::sys::path::append(Dir, "include");
+    addSystemInclude(DriverArgs, CC1Args, Dir.str());
+  }
+}
