@@ -19,7 +19,7 @@ using namespace clang::targets;
 Z80TargetInfo::Z80TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
     : TargetInfo(Triple) {
   // Must match Z80TargetMachine data layout
-  resetDataLayout("e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-n8:16");
+  resetDataLayout("e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-ve-n8:16");
 
   PointerWidth = 16;
   PointerAlign = 8;
@@ -45,6 +45,10 @@ Z80TargetInfo::Z80TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
   LongFractAlign = 8;
   HalfAlign = 8;
   BFloat16Align = 8;
+  // Vectors take their element's byte alignment (the "ve" datalayout token);
+  // their natural alignment cannot be honored on a byte-aligned stack.
+  VectorsAreElementAligned = true;
+  MaxVectorAlign = 8;
   SuitableAlign = 8;
   DefaultAlignForAttributeAligned = 8;
   MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 8;

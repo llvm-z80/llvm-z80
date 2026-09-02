@@ -76,7 +76,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
 // f64:8 = 64-bit floats with 8-bit alignment
 // n8:16 = native integer widths are 8 and 16 bits
 static const char *Z80DataLayout =
-    "e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-n8:16";
+    "e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-ve-n8:16";
 
 /// Processes a CPU name.
 static StringRef getCPU(StringRef CPU, const Triple &TT) {

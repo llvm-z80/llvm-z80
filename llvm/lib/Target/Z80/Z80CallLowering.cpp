@@ -99,6 +99,17 @@ static unsigned getReturnTypeSizeInBits(Type *RetTy, const DataLayout &DL) {
   return Bits;
 }
 
+/// The calling convention moves values as integers; a vector crosses the
+/// boundary through a bitcast to the integer of the same size.
+static Register vectorToInt(MachineIRBuilder &MIRBuilder,
+                            MachineRegisterInfo &MRI, Register Reg) {
+  LLT Ty = MRI.getType(Reg);
+  if (!Ty.isVector())
+    return Reg;
+  return MIRBuilder.buildBitcast(LLT::scalar(Ty.getSizeInBits()), Reg)
+      .getReg(0);
+}
+
 /// Determine if callee cleans up stack arguments.
 /// sdcccall(0): always caller cleanup (returns false).
 /// sdcccall(1):
@@ -466,12 +477,14 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
   if (BitWidth == 0)
     BitWidth = 16; // Pointers
 
+  Register Ret0 = vectorToInt(MIRBuilder, MRI, VRegs[0]);
+
   if (BitWidth <= 8) {
     MIRBuilder.buildCopy(Regs.Ret_I8,
-                         widenToPhysRegWidth(MIRBuilder, MRI, VRegs[0]));
+                         widenToPhysRegWidth(MIRBuilder, MRI, Ret0));
     emitRet({{Regs.Ret_I8, RegState::Implicit}});
   } else if (BitWidth <= 16) {
-    MIRBuilder.buildCopy(Regs.Ret_I16, VRegs[0]);
+    MIRBuilder.buildCopy(Regs.Ret_I16, Ret0);
     emitRet({{Regs.Ret_I16, RegState::Implicit}});
   } else if (BitWidth <= 32) {
     if (VRegs.size() >= 2) {
@@ -481,7 +494,7 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
       // Single 32-bit vreg - need to unmerge
       Register LoReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
       Register HiReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
-      MIRBuilder.buildUnmerge({LoReg, HiReg}, VRegs[0]);
+      MIRBuilder.buildUnmerge({LoReg, HiReg}, Ret0);
       MIRBuilder.buildCopy(Regs.Ret_I32_Lo, LoReg);
       MIRBuilder.buildCopy(Regs.Ret_I32_Hi, HiReg);
     }
@@ -546,6 +559,10 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
     HasStackArgs = true;
   }
 
+  // Vector arguments arrive as their integer image; the bitcasts back are
+  // emitted after the loop, once every fill is in place.
+  SmallVector<std::pair<Register, Register>, 2> VecArgCasts;
+
   unsigned ArgIdx = 0;
   for (const Argument &Arg : F.args()) {
     ArrayRef<Register> ArgVRegs = VRegs[ArgIdx];
@@ -555,6 +572,12 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
     }
 
     Register VReg = ArgVRegs[0];
+    if (LLT VRegTy = MRI.getType(VReg); VRegTy.isVector()) {
+      Register IntReg = MRI.createGenericVirtualRegister(
+          LLT::scalar(VRegTy.getSizeInBits()));
+      VecArgCasts.push_back({VReg, IntReg});
+      VReg = IntReg;
+    }
 
     // Frontend-generated sret: when Clang demotes struct return at the
     // frontend level, the sret pointer appears as a regular arg with
@@ -676,6 +699,9 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
 
     ++ArgIdx;
   }
+
+  for (auto [VecReg, IntReg] : VecArgCasts)
+    MIRBuilder.buildBitcast(VecReg, IntReg);
 
   // HasStackArgs is tracked but no longer forces frame address taken.
   // Fixed stack objects are resolved by eliminateFrameIndex for both
@@ -832,7 +858,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   for (auto I = StackArgIndices.rbegin(), E = StackArgIndices.rend(); I != E;
        ++I) {
     const ArgInfo &Arg = Info.OrigArgs[*I];
-    Register VReg = Arg.Regs[0];
+    Register VReg = vectorToInt(MIRBuilder, MRI, Arg.Regs[0]);
 
     // Byval: copy struct bytes from source pointer to stack.
     // Push from highest offset to lowest so that lowest offset ends up
@@ -942,7 +968,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
         continue;
       }
 
-      Register VReg = Arg.Regs[0];
+      Register VReg = vectorToInt(MIRBuilder, MRI, Arg.Regs[0]);
       unsigned BitWidth = Arg.Ty->getPrimitiveSizeInBits();
       if (BitWidth == 0)
         BitWidth = 16;
@@ -1196,6 +1222,15 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
       if (BitWidth == 0)
         BitWidth = 16;
 
+      // A vector result is received as its integer image, then bitcast.
+      Register OrigVReg;
+      LLT VRegTy = MRI.getType(VReg);
+      if (VRegTy.isVector()) {
+        OrigVReg = VReg;
+        VReg = MRI.createGenericVirtualRegister(
+            LLT::scalar(VRegTy.getSizeInBits()));
+      }
+
       if (BitWidth <= 8) {
         copyFromPhysReg(MIRBuilder, MRI, VReg, Register(Regs.Ret_I8),
                         !Info.OrigRet.Flags.empty() &&
@@ -1211,6 +1246,9 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
       } else {
         return false;
       }
+
+      if (OrigVReg.isValid())
+        MIRBuilder.buildBitcast(OrigVReg, VReg);
     }
   }
 

@@ -74,12 +74,14 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // s1->s8 is a no-op (s1 already lives in an 8-bit register on Z80)
   getActionDefinitionsBuilder({G_ANYEXT, G_SEXT, G_ZEXT})
       .legalFor({{S16, S8}, {S8, S1}, {S16, S1}})
+      .scalarize(0)
       .widenScalarToNextPow2(1)
       .clampScalar(0, S8, S16);
 
   // s1 lives in GR8 on Z80, so s1 is valid as a trunc destination.
   getActionDefinitionsBuilder(G_TRUNC)
       .legalFor({{S8, S16}, {S1, S8}, {S1, S16}})
+      .scalarize(0)
       .widenScalarToNextPow2(1)
       .clampScalar(1, S8, S16);
 
@@ -89,6 +91,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // manipulation in Rust core) are widened before narrowScalar operates.
   getActionDefinitionsBuilder({G_ADD, G_SUB})
       .legalFor({S8, S16})
+      .scalarize(0)
       .widenScalarToNextPow2(0)
       .narrowScalar(0, LegalizeMutations::changeTo(0, S16))
       .clampScalar(0, S8, S16);
@@ -126,6 +129,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   getActionDefinitionsBuilder({G_AND, G_OR, G_XOR})
       .legalFor({S8})
+      .scalarize(0)
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S8);
 
@@ -144,12 +148,14 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   };
   getActionDefinitionsBuilder(G_SHL)
       .legalFor({{S8, S8}, {S16, S8}})
+      .scalarize(0)
       .customIf(isNonPow2ShiftType)
       .clampScalar(1, S8, S8)
       .clampScalar(0, S8, S16);
 
   getActionDefinitionsBuilder({G_LSHR, G_ASHR})
       .legalFor({{S8, S8}, {S16, S8}})
+      .scalarize(0)
       .customIf(isNonPow2ShiftType)
       .clampScalar(1, S8, S8)
       .clampScalar(0, S8, S16);
@@ -160,6 +166,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // i32: libcall (__mulsi3) — avoids narrowing to 4 separate i16 multiplies
   getActionDefinitionsBuilder(G_MUL)
       .legalFor({S8, S16})
+      .scalarize(0)
       .libcallFor({S32, S64})
       .narrowScalarIf(LegalityPredicates::typeIs(0, S128),
                       LegalizeMutations::changeTo(0, S64))
@@ -193,6 +200,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // i128: libcall (__divti3, __udivti3, __modti3, __umodti3)
   getActionDefinitionsBuilder({G_UDIV, G_UREM, G_SDIV, G_SREM})
       .legalFor({S8, S16})
+      .scalarize(0)
       .libcallFor({S32, S64, S128})
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S128);
@@ -214,6 +222,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // We must use minScalar to force s1 -> s8.
   getActionDefinitionsBuilder(G_ICMP)
       .legalFor({{S8, S8}, {S8, S16}, {S8, P0}})
+      .minScalarOrElt(0, S8) // no s1 elements: they cannot reach memory ops
+      .scalarize(0)
       .customFor({{S8, S32}, {S8, S64}, {S8, S128}})
       .minScalar(0, S8)
       .widenScalarToNextPow2(1)
@@ -223,6 +233,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // G_SELECT condition (operand 1) is s1, which needs widening to s8
   getActionDefinitionsBuilder(G_SELECT)
       .legalFor({{S8, S8}, {S16, S8}, {P0, S8}})
+      .scalarize(0)
       .minScalar(1, S8)
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S16);
@@ -234,9 +245,12 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // generic LegalizerHelper::lowerLoad does not handle this case.
   // G_LOAD and G_STORE are defined separately because the extending load
   // customIf must not apply to G_STORE.
+  // Vector loads and stores split into per-element accesses (any element
+  // count, volatile included); scalar narrowing then handles wide elements.
   getActionDefinitionsBuilder(G_LOAD)
       .legalForTypesWithMemDesc(
           {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1}})
+      .scalarize(0)
       .lowerIfMemSizeNotByteSizePow2()
       .customIf([](const LegalityQuery &Q) {
         return Q.Types[0].getSizeInBits() >
@@ -247,6 +261,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   getActionDefinitionsBuilder(G_STORE)
       .legalForTypesWithMemDesc(
           {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1}})
+      .scalarize(0)
       .lowerIfMemSizeNotByteSizePow2()
       .clampScalar(0, S8, S16);
 
@@ -289,18 +304,21 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // PHI nodes
   getActionDefinitionsBuilder(G_PHI)
       .legalFor({S8, S16, P0})
+      .scalarize(0)
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S16);
 
   // Freeze - converts undef to a deterministic value. No-op at codegen level.
   getActionDefinitionsBuilder(G_FREEZE)
       .legalFor({S8, S16, P0})
+      .scalarize(0)
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S16);
 
   // Copy
   getActionDefinitionsBuilder(G_IMPLICIT_DEF)
       .legalFor({S8, S16, P0})
+      .scalarize(0)
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S16);
 
@@ -315,6 +333,16 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   // Build vector (for creating 16-bit from two 8-bit values)
   getActionDefinitionsBuilder(G_BUILD_VECTOR).legalFor({{S16, S8}});
+
+  // Vector element access goes through a stack temporary. The generic
+  // lowering would give that temporary the vector's natural alignment,
+  // which a byte-aligned stack cannot provide, so it is custom.
+  getActionDefinitionsBuilder({G_EXTRACT_VECTOR_ELT, G_INSERT_VECTOR_ELT})
+      .custom();
+  getActionDefinitionsBuilder(G_SHUFFLE_VECTOR).lower();
+
+  // No cache or prefetch hardware.
+  getActionDefinitionsBuilder(G_PREFETCH).custom();
 
   // Bit manipulation builtins
   // G_BSWAP: custom lowering using UNMERGE+MERGE to avoid CSE conflict
@@ -403,6 +431,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // f64 → libcall (__adddf3, __subdf3, __muldf3, __divdf3) — unimplemented
   getActionDefinitionsBuilder({G_FADD, G_FSUB, G_FMUL, G_FDIV})
       .customFor({S32})
+      .scalarize(0)
       .libcallFor({S64})
       .minScalar(0, S32);
 
@@ -410,6 +439,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // f64 → libcall (__gedf2, __ledf2, etc.) — unimplemented
   getActionDefinitionsBuilder(G_FCMP)
       .customForCartesianProduct({S1}, {S32})
+      .scalarize(0)
       .libcallForCartesianProduct({S1}, {S64})
       .minScalar(1, S32);
 
@@ -430,11 +460,13 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   //   f32↔i32: libcall (__fixsfsi, __floatsisf, etc.)
   //   f64↔i32/i64: libcall (__fixdfsi, __fixdfdi, etc.) — unimplemented
   getActionDefinitionsBuilder({G_FPTOSI, G_FPTOUI})
+      .scalarize(0)
       .libcallForCartesianProduct({S32, S64}, {S32, S64})
       .minScalar(0, S32)
       .minScalar(1, S32);
 
   getActionDefinitionsBuilder({G_SITOFP, G_UITOFP})
+      .scalarize(0)
       .libcallForCartesianProduct({S32, S64}, {S32, S64})
       .minScalar(0, S32)
       .minScalar(1, S32);
@@ -534,6 +566,77 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     // Z80 is single-threaded with no memory reordering — fences are no-ops.
     MI.eraseFromParent();
     return true;
+
+  case TargetOpcode::G_PREFETCH:
+    // No cache to prefetch into.
+    MI.eraseFromParent();
+    return true;
+
+  case TargetOpcode::G_EXTRACT_VECTOR_ELT:
+  case TargetOpcode::G_INSERT_VECTOR_ELT: {
+    // Spill the vector to a byte-aligned stack slot and access the element
+    // by address. (The generic lowering's stack temporary takes the
+    // vector's natural alignment, which the byte-aligned stack rejects.)
+    bool IsInsert = MI.getOpcode() == TargetOpcode::G_INSERT_VECTOR_ELT;
+    Register Dst = MI.getOperand(0).getReg();
+    Register SrcVec = MI.getOperand(1).getReg();
+    Register InsVal = IsInsert ? MI.getOperand(2).getReg() : Register();
+    Register Idx = MI.getOperand(IsInsert ? 3 : 2).getReg();
+
+    LLT VecTy = MRI.getType(SrcVec);
+    LLT EltTy = VecTy.getElementType();
+    LLT S16 = LLT::scalar(16);
+    LLT P0 = LLT::pointer(0, 16);
+    MachineFunction &MF = MIRBuilder.getMF();
+
+    // Sub-byte elements (i1 vectors from compares) cannot go through
+    // memory; widen to byte elements and redo.
+    if (EltTy.getSizeInBits() < 8) {
+      LLT WideEltTy = LLT::scalar(8);
+      LLT WideVecTy = LLT::fixed_vector(VecTy.getNumElements(), WideEltTy);
+      auto WideVec = MIRBuilder.buildAnyExt(WideVecTy, SrcVec);
+      if (IsInsert) {
+        auto WideVal = MIRBuilder.buildAnyExt(WideEltTy, InsVal);
+        auto WideRes = MIRBuilder.buildInsertVectorElement(WideVecTy, WideVec,
+                                                           WideVal, Idx);
+        MIRBuilder.buildTrunc(Dst, WideRes);
+      } else {
+        auto WideRes =
+            MIRBuilder.buildExtractVectorElement(WideEltTy, WideVec, Idx);
+        MIRBuilder.buildTrunc(Dst, WideRes);
+      }
+      MI.eraseFromParent();
+      return true;
+    }
+
+    int FI = MF.getFrameInfo().CreateStackObject(VecTy.getSizeInBytes(),
+                                                 Align(1), false);
+    auto Base = MIRBuilder.buildFrameIndex(P0, FI);
+    MachinePointerInfo PtrInfo = MachinePointerInfo::getFixedStack(MF, FI);
+    auto *VecStMMO = MF.getMachineMemOperand(
+        PtrInfo, MachineMemOperand::MOStore, VecTy, Align(1));
+    MIRBuilder.buildStore(SrcVec, Base, *VecStMMO);
+
+    auto Idx16 = MIRBuilder.buildZExtOrTrunc(S16, Idx);
+    auto EltSize = MIRBuilder.buildConstant(S16, EltTy.getSizeInBytes());
+    auto Off = MIRBuilder.buildMul(S16, Idx16, EltSize);
+    auto Addr = MIRBuilder.buildPtrAdd(P0, Base, Off);
+
+    if (IsInsert) {
+      auto *EltStMMO = MF.getMachineMemOperand(
+          MachinePointerInfo(), MachineMemOperand::MOStore, EltTy, Align(1));
+      MIRBuilder.buildStore(InsVal, Addr, *EltStMMO);
+      auto *VecLdMMO = MF.getMachineMemOperand(
+          PtrInfo, MachineMemOperand::MOLoad, VecTy, Align(1));
+      MIRBuilder.buildLoad(Dst, Base, *VecLdMMO);
+    } else {
+      auto *EltLdMMO = MF.getMachineMemOperand(
+          MachinePointerInfo(), MachineMemOperand::MOLoad, EltTy, Align(1));
+      MIRBuilder.buildLoad(Dst, Addr, *EltLdMMO);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
 
   case TargetOpcode::G_DYN_STACKALLOC: {
     // SM83 has no frame pointer register (no IX/IY), so dynamic stack
