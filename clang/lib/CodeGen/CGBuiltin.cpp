@@ -4102,6 +4102,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     Locality = (E->getNumArgs() > 2)
                    ? EmitScalarOrConstFoldImmArg(ICEArguments, 2, E)
                    : llvm::ConstantInt::get(Int32Ty, 3);
+    // The intrinsic hint operands are fixed at i32, but the C arguments have
+    // type 'int', which is narrower on 16-bit targets.
+    RW = Builder.CreateZExtOrTrunc(RW, Int32Ty);
+    Locality = Builder.CreateZExtOrTrunc(Locality, Int32Ty);
     Value *Data = llvm::ConstantInt::get(Int32Ty, 1);
     Function *F = CGM.getIntrinsic(Intrinsic::prefetch, Address->getType());
     Builder.CreateCall(F, {Address, RW, Locality, Data});
