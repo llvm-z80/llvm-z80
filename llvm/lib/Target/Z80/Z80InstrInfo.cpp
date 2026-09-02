@@ -1403,11 +1403,19 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         BuildMI(MBB, MI, DL, get(Z80::INC_SP));
       BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
       BuildMI(MBB, MI, DL, get(Z80::RET));
+    } else if (MI.readsRegister(Z80::HL, TRI)) {
+      // Z80 large with an i32/float return: the value travels in HLDE (the
+      // SDCC float exception makes such functions callee-cleanup), so the
+      // usual HL scratch would destroy it. Use IY, which calls already
+      // declare clobbered.
+      BuildMI(MBB, MI, DL, get(Z80::POP_BC));
+      BuildMI(MBB, MI, DL, get(Z80::LD_IY_nn)).addImm(Amount);
+      BuildMI(MBB, MI, DL, get(Z80::ADD_IY_SP));
+      BuildMI(MBB, MI, DL, get(Z80::LD_SP_IY));
+      BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
+      BuildMI(MBB, MI, DL, get(Z80::RET));
     } else {
       // Z80 large: POP BC; LD HL,N; ADD HL,SP; LD SP,HL; PUSH BC; RET
-      // NOTE: This clobbers HL. Safe for __sdcccall(1) where Amount>8 only
-      // occurs with RetBits<=16 (return in A/DE). For future __z88dk_callee
-      // with i32/float returns (HLDE), this path needs revision.
       BuildMI(MBB, MI, DL, get(Z80::POP_BC));
       BuildMI(MBB, MI, DL, get(Z80::LD_HL_nn)).addImm(Amount);
       BuildMI(MBB, MI, DL, get(Z80::ADD_HL_SP));
