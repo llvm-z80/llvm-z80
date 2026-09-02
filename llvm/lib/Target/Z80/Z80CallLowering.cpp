@@ -504,7 +504,9 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   bool IsVarArg = F.isVarArg();
   CallingConv::ID CC = F.getCallingConv();
 
-  if (F.arg_empty() && !IsVarArg)
+  // Even with no arguments, an sret-demoted return still needs its hidden
+  // pointer read from the stack below.
+  if (F.arg_empty() && !IsVarArg && FLI.CanLowerReturn)
     return true;
 
   const CallingConvRegs &Regs = getRegsForCC(CC);
