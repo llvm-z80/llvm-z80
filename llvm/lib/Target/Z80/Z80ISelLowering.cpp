@@ -74,21 +74,28 @@ Z80TargetLowering::Z80TargetLowering(const Z80TargetMachine &TM,
   PredictableSelectIsExpensive = true;
 }
 
-MVT Z80TargetLowering::getCachedRegisterType(MVT VT) const {
-  // Z80 has 8-bit and 16-bit registers
+// Values wider than a 16-bit register pair are passed and returned as
+// individual bytes: the SDCC conventions place them in arbitrary mixes of
+// 8-bit registers and stack slots, which the default largest-legal-type
+// breakdown (pairs of i16) cannot describe.
+MVT Z80TargetLowering::getRegisterTypeForCallingConv(LLVMContext &Context,
+                                                     CallingConv::ID CC,
+                                                     EVT VT) const {
   if (VT.getSizeInBits() > 16)
-    return MVT::i8; // Split larger values into bytes
+    return MVT::i8;
   if (VT.getSizeInBits() > 8)
     return MVT::i16;
-  return TargetLowering::getCachedRegisterType(VT);
+  return TargetLowering::getRegisterTypeForCallingConv(Context, CC, VT);
 }
 
-unsigned Z80TargetLowering::getCachedNumRegisters(MVT VT) const {
+unsigned Z80TargetLowering::getNumRegistersForCallingConv(LLVMContext &Context,
+                                                          CallingConv::ID CC,
+                                                          EVT VT) const {
   if (VT.getSizeInBits() > 16)
-    return VT.getSizeInBits() / 8;
+    return divideCeil(VT.getSizeInBits(), 8);
   if (VT.getSizeInBits() > 8)
-    return 1; // One 16-bit register
-  return TargetLowering::getCachedNumRegisters(VT);
+    return 1;
+  return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
 }
 
 

@@ -43,9 +43,12 @@ public:
 
   ConstraintType getConstraintType(StringRef Constraint) const override;
 
-  MVT getCachedRegisterType(MVT VT) const override;
+  MVT getRegisterTypeForCallingConv(LLVMContext &Context, CallingConv::ID CC,
+                                    EVT VT) const override;
 
-  unsigned getCachedNumRegisters(MVT VT) const override;
+  unsigned getNumRegistersForCallingConv(LLVMContext &Context,
+                                         CallingConv::ID CC,
+                                         EVT VT) const override;
 
   bool preferNarrowTypes() const override { return true; }
 
