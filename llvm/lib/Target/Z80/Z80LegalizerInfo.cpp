@@ -263,6 +263,13 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
           {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1}})
       .scalarize(0)
       .lowerIfMemSizeNotByteSizePow2()
+      // Truncating stores (value wider than memory, e.g. the tail byte of
+      // a split wide-bitfield store) become G_TRUNC + store.
+      .customIf([](const LegalityQuery &Q) {
+        return !Q.Types[0].isVector() && !Q.Types[0].isPointer() &&
+               Q.Types[0].getSizeInBits() >
+                   Q.MMODescrs[0].MemoryTy.getSizeInBits();
+      })
       .clampScalar(0, S8, S16);
 
   // Pointer operations
@@ -753,6 +760,20 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     MI.eraseFromParent();
     return true;
   }
+  case TargetOpcode::G_STORE: {
+    // Truncating G_STORE (value type > memory type): decompose into
+    // G_TRUNC + G_STORE at memory width.  The tail byte of a split
+    // wide-bitfield store arrives in this shape.
+    Register Val = MI.getOperand(0).getReg();
+    Register Ptr = MI.getOperand(1).getReg();
+    MachineMemOperand &MMO = **MI.memoperands_begin();
+    LLT MemTy = MMO.getMemoryType();
+    auto Trunc = MIRBuilder.buildTrunc(MemTy, Val);
+    MIRBuilder.buildStore(Trunc, Ptr, MMO);
+    MI.eraseFromParent();
+    return true;
+  }
+
   case TargetOpcode::G_SEXTLOAD:
   case TargetOpcode::G_ZEXTLOAD: {
     // Decompose extending load into G_LOAD + G_SEXT/G_ZEXT.
