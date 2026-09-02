@@ -269,6 +269,39 @@ static void emitFlagSavePush(MachineBasicBlock &MBB,
     Z80::markUndefUse(Push, Z80::A);
 }
 
+// Emit a PUSH HL that saves HL across an inserted sequence. Register
+// allocation may have marked an earlier use of HL as a kill (or its def as
+// dead); this late insertion reads HL after that point, so the stale flag
+// on the nearest HL access must be cleared. If the block never touches HL
+// and it is not live-in, the read carries no value and is marked undef.
+static void emitHLSavePush(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator InsertBefore,
+                           const DebugLoc &DL, const TargetInstrInfo &TII) {
+  const TargetRegisterInfo *TRI =
+      MBB.getParent()->getSubtarget().getRegisterInfo();
+  MachineInstrBuilder Push =
+      BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_HL));
+  for (MachineBasicBlock::iterator I = Push->getIterator();
+       I != MBB.begin();) {
+    --I;
+    bool Touched = false;
+    for (MachineOperand &MO : I->operands()) {
+      if (!MO.isReg() || !MO.getReg().isValid() ||
+          !TRI->regsOverlap(MO.getReg(), Z80::HL))
+        continue;
+      Touched = true;
+      if (MO.isDef())
+        MO.setIsDead(false);
+      else if (MO.isKill())
+        MO.setIsKill(false);
+    }
+    if (Touched)
+      return;
+  }
+  if (!MBB.isLiveIn(Z80::HL) && !MBB.isLiveIn(Z80::L) && !MBB.isLiveIn(Z80::H))
+    Z80::markUndefUse(Push, Z80::HL);
+}
+
 // Emit: PUSH IX; POP HL; LD <TempReg>,offset; ADD HL,<TempReg>
 // After this, HL = IX + offset. TempReg must be BC or DE.
 // If PreserveFlags is true, wraps ADD HL with PUSH AF/POP AF to preserve
@@ -410,7 +443,7 @@ static void expandSpillGR8LargeOffset(MachineBasicBlock &MBB,
     BuildMI(MBB, MI, DL, TII.get(getCopyToAOpcode(SrcReg)));
 
   if (NeedSaveHL)
-    BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+    emitHLSavePush(MBB, MI, DL, TII);
   if (NeedSaveTemp)
     BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
 
@@ -452,7 +485,7 @@ static void expandReloadGR8LargeOffset(MachineBasicBlock &MBB,
   if (NeedSaveAF)
     BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_AF));
   if (NeedSaveHL)
-    BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+    emitHLSavePush(MBB, MI, DL, TII);
   if (NeedSaveTemp)
     BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
 
@@ -535,7 +568,7 @@ static void expandSpillGR16LargeOffset(MachineBasicBlock &MBB,
     bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, TRI);
 
     if (NeedSaveHL)
-      BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+      emitHLSavePush(MBB, MI, DL, TII);
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
 
@@ -600,7 +633,7 @@ static void expandReloadGR16LargeOffset(MachineBasicBlock &MBB,
     bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
 
     if (NeedSaveHL)
-      BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+      emitHLSavePush(MBB, MI, DL, TII);
 
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, DstReg, PreserveFlags);
 
@@ -685,7 +718,7 @@ static void expandSpillGR8SPRelative(MachineBasicBlock &MBB,
 
   bool NeedSaveHL = SrcIsHL || isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
   if (NeedSaveHL) {
-    BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+    emitHLSavePush(MBB, MI, DL, TII);
     SPDelta += 2;
   }
 
@@ -722,7 +755,7 @@ static void expandReloadGR8SPRelative(MachineBasicBlock &MBB,
 
   bool NeedSaveHL = DstIsHL || isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
   if (NeedSaveHL) {
-    BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+    emitHLSavePush(MBB, MI, DL, TII);
     SPDelta += 2;
   }
 
@@ -1306,7 +1339,7 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
 
     if (NeedSaveHL)
-      BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+      emitHLSavePush(MBB, MI, DL, TII);
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
