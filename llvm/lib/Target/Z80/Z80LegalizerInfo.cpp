@@ -558,6 +558,23 @@ bool Z80LegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
   case Intrinsic::z80_nop:
     // These intrinsics are legal and will be selected directly
     return true;
+
+  case Intrinsic::vacopy: {
+    // The va_list is a single pointer to the next argument, so copying the
+    // list is copying that pointer.
+    MachineIRBuilder &MIRBuilder = Helper.MIRBuilder;
+    MachineFunction &MF = MIRBuilder.getMF();
+    LLT P0 = LLT::pointer(0, 16);
+    auto *LoadMMO = MF.getMachineMemOperand(
+        MachinePointerInfo(), MachineMemOperand::MOLoad, P0, Align(1));
+    auto Val = MIRBuilder.buildLoad(P0, MI.getOperand(2), *LoadMMO);
+    auto *StoreMMO = MF.getMachineMemOperand(
+        MachinePointerInfo(), MachineMemOperand::MOStore, P0, Align(1));
+    MIRBuilder.buildStore(Val, MI.getOperand(1), *StoreMMO);
+    MI.eraseFromParent();
+    return true;
+  }
+
   default:
     return false;
   }
