@@ -21,6 +21,11 @@ Z80TargetInfo::Z80TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
   // Must match Z80TargetMachine data layout
   resetDataLayout("e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-ve-n8:16");
 
+  // The data layout mangles globals with a leading underscore (sdas
+  // convention); the frontend prefix must agree, and a non-empty prefix is
+  // also what makes asm("name") renames emit their exact spelling.
+  UserLabelPrefix = "_";
+
   PointerWidth = 16;
   PointerAlign = 8;
   ShortAlign = 8;
