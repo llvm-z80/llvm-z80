@@ -581,7 +581,10 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
       classifyArg(Regs, RegParamCount, FirstKind, 64, IsVarArg, CC);
       Type *ByValTy = Arg.getParamByValType();
       unsigned ByValSize = MF.getDataLayout().getTypeAllocSize(ByValTy);
-      int FI = MFI.CreateFixedObject(ByValSize, 2 + StackArgOffset, true);
+      // An empty aggregate still needs an address, but occupies no stack;
+      // give it a one-byte object overlapping the next slot.
+      int FI = MFI.CreateFixedObject(std::max(ByValSize, 1u),
+                                     2 + StackArgOffset, true);
       MIRBuilder.buildFrameIndex(VReg, FI);
       StackArgOffset += ByValSize;
       HasStackArgs = true;
