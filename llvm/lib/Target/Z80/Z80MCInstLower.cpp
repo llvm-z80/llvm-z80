@@ -13,6 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 #include "Z80MCInstLower.h"
+#include "MCTargetDesc/Z80MCExpr.h"
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80InstrInfo.h"
 #include "Z80MachineFunctionInfo.h"
@@ -103,5 +104,20 @@ MCOperand Z80MCInstLower::lowerSymbolOperand(const MachineOperand &MO,
   if (!MO.isJTI() && MO.getOffset() != 0)
     Expr = MCBinaryExpr::createAdd(
         Expr, MCConstantExpr::create(MO.getOffset(), Ctx), Ctx);
+
+  // A target flag picks out one byte of the symbol's address; the Z80MCExpr
+  // wrapper routes the encoder to the matching Addr16_Low/High fixup.
+  switch (MO.getTargetFlags()) {
+  case Z80::MO_NO_FLAGS:
+    break;
+  case Z80::MO_ADDR16_LO:
+    Expr = Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO, Expr, false, Ctx);
+    break;
+  case Z80::MO_ADDR16_HI:
+    Expr = Z80MCExpr::create(Z80MCExpr::VK_ADDR16_HI, Expr, false, Ctx);
+    break;
+  default:
+    llvm_unreachable("Unknown target flag on symbol operand");
+  }
   return MCOperand::createExpr(Expr);
 }

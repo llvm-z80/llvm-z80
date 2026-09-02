@@ -235,6 +235,14 @@ void Z80InstPrinterSDCC::printOperand(const MCInst *MI, unsigned OpNo,
         OS << "z80_16(" << formatImm(Value) << ')';
         return;
       }
+      // sdasz80 spells the byte-of-address operators as unary < and >.
+      if (MME->getKind() == Z80MCExpr::VK_ADDR16_LO ||
+          MME->getKind() == Z80MCExpr::VK_ADDR16_HI) {
+        OS << (MME->getKind() == Z80MCExpr::VK_ADDR16_LO ? "<(" : ">(");
+        MAI.printExpr(OS, *MME->getSubExpr());
+        OS << ')';
+        return;
+      }
     }
     MAI.printExpr(OS, *Op.getExpr());
   }

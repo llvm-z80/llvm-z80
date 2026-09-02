@@ -730,7 +730,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
       Changed = true;
       continue;
     }
-    if (Opc == Z80::LD_A_n && AKnown &&
+    if (Opc == Z80::LD_A_n && AKnown && MI.getOperand(0).isImm() &&
         (MI.getOperand(0).getImm() & 0xFF) == (AVal & 0xFF)) {
       // LD A,n leaves flags alone, so the reload can simply go.
       LLVM_DEBUG(dbgs() << "  A reuse: erasing reload " << MI);
@@ -746,8 +746,10 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
       continue;
     }
 
-    // Track what A holds.
-    if (Opc == Z80::LD_A_n) {
+    // Track what A holds. LD A,n can carry a link-time symbol byte instead
+    // of an immediate; its value is unknown here, so it falls through to
+    // the modifiesRegister case and invalidates the tracking.
+    if (Opc == Z80::LD_A_n && MI.getOperand(0).isImm()) {
       AKnown = true;
       AVal = MI.getOperand(0).getImm() & 0xFF;
     } else if (Opc == Z80::XOR_A) {
@@ -980,7 +982,8 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
     for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
          MII != MIE;) {
       MachineInstr &MI = *MII;
-      if (MI.getOpcode() == Z80::LD_A_n && MI.getOperand(0).getImm() == 0) {
+      if (MI.getOpcode() == Z80::LD_A_n && MI.getOperand(0).isImm() &&
+          MI.getOperand(0).getImm() == 0) {
         auto After = std::next(MII);
         if (isRegDeadAfter(After, MBB, TRI, Z80::FLAGS)) {
           LLVM_DEBUG(dbgs() << "  LD A,#0 → XOR A: " << MI);

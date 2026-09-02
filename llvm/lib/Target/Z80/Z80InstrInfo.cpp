@@ -1986,3 +1986,11 @@ void Z80InstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
   // On Z80, JP nn can reach any address in the 64KB space.
   BuildMI(&MBB, DL, get(Z80::JP_nn)).addMBB(&NewDestBB);
 }
+
+ArrayRef<std::pair<unsigned, const char *>>
+Z80InstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
+  static const std::pair<unsigned, const char *> Flags[] = {
+      {Z80::MO_ADDR16_LO, "z80-addr16-lo"},
+      {Z80::MO_ADDR16_HI, "z80-addr16-hi"}};
+  return Flags;
+}

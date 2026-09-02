@@ -21,6 +21,7 @@
 #include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -3750,6 +3751,44 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             MI.eraseFromParent();      // erase G_TRUNC
             return true;
           }
+        }
+      }
+
+      // Fold trunc(ptrtoint(global)) and trunc(lshr(ptrtoint(global), 8))
+      // into an 8-bit immediate load of the symbol's low/high address byte.
+      // The GB banking convention encodes a bank number as a symbol's
+      // link-time address, so only one byte of it is wanted; materializing
+      // the full 16-bit address costs twice the bytes and burns a register
+      // pair. The Addr16_Low/High fixups carry the byte to the linker.
+      if (SrcDef && MRI.hasOneNonDBGUse(SrcReg)) {
+        // The truncated byte: low by default; high through lshr by 8.
+        MachineInstr *AddrDef = SrcDef;
+        unsigned Flag = Z80::MO_ADDR16_LO;
+        if (SrcDef->getOpcode() == TargetOpcode::G_LSHR) {
+          auto ShAmt = getIConstantVRegValWithLookThrough(
+              SrcDef->getOperand(2).getReg(), MRI);
+          Register ShSrc = SrcDef->getOperand(1).getReg();
+          if (ShAmt && ShAmt->Value == 8 && MRI.hasOneNonDBGUse(ShSrc)) {
+            AddrDef = MRI.getVRegDef(ShSrc);
+            Flag = Z80::MO_ADDR16_HI;
+          }
+        }
+        MachineInstr *GlobalDef =
+            AddrDef && AddrDef->getOpcode() == TargetOpcode::G_PTRTOINT
+                ? MRI.getVRegDef(AddrDef->getOperand(1).getReg())
+                : nullptr;
+        if (GlobalDef &&
+            GlobalDef->getOpcode() == TargetOpcode::G_GLOBAL_VALUE) {
+          if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
+            return false;
+          const MachineOperand &GVOp = GlobalDef->getOperand(1);
+          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r8_n), DstReg)
+              .addGlobalAddress(GVOp.getGlobal(), GVOp.getOffset(), Flag);
+          MI.eraseFromParent(); // erase G_TRUNC
+          // The address chain (G_LSHR, G_PTRTOINT, G_GLOBAL_VALUE, shift
+          // amount) may have other users; whatever is now dead is removed
+          // by the selector's trivially-dead sweep.
+          return true;
         }
       }
     }

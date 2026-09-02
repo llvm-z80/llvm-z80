@@ -94,6 +94,9 @@ public:
                             int64_t BrOffset = 0,
                             RegScavenger *RS = nullptr) const override;
 
+  ArrayRef<std::pair<unsigned, const char *>>
+  getSerializableDirectMachineOperandTargetFlags() const override;
+
 private:
   const Z80Subtarget *STI;
 };
@@ -102,11 +105,17 @@ namespace Z80 {
 
 enum AddressSpace : unsigned { AS_Memory = 0, NumAddrSpaces };
 
+/// Target-specific flags on symbol machine operands. They select which part
+/// of the symbol's link-time address an 8-bit immediate slot receives; the
+/// MC lowering wraps the flagged operand in the matching Z80MCExpr variant
+/// so the existing Addr16_Low/High fixups and relocations carry it to the
+/// linker.
 enum TOF {
   MO_NO_FLAGS = 0,
-  MO_LO,
-  MO_HI,
-  MO_HI_JT,
+  /// The low byte of the symbol's 16-bit address (sdasz80 "#<sym").
+  MO_ADDR16_LO,
+  /// The high byte of the symbol's 16-bit address (sdasz80 "#>sym").
+  MO_ADDR16_HI,
 };
 
 } // namespace Z80
