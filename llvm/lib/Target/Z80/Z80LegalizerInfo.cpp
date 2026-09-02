@@ -559,6 +559,11 @@ bool Z80LegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
     // These intrinsics are legal and will be selected directly
     return true;
 
+  case Intrinsic::clear_cache:
+    // No instruction cache to synchronize.
+    MI.eraseFromParent();
+    return true;
+
   case Intrinsic::vacopy: {
     // The va_list is a single pointer to the next argument, so copying the
     // list is copying that pointer.
