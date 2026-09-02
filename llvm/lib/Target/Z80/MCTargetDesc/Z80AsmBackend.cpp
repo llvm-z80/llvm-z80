@@ -108,6 +108,14 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   if (Fixup.getKind() == Z80::LDH8)
     Value -= 0xFF00;
 
+  // A resolved 8-bit PC-relative displacement outside the JR range would be
+  // silently truncated into a branch to the wrong place; branch relaxation
+  // should have widened it, so refuse loudly instead.
+  if (IsResolved && Fixup.getKind() == Z80::PCRel8 &&
+      !isInt<8>(static_cast<int64_t>(Value)))
+    getContext().reportError(Fixup.getLoc(),
+                             "relative branch target out of range");
+
   maybeAddReloc(F, Fixup, Target, Value, IsResolved);
 
   unsigned Kind = Fixup.getKind();

@@ -1649,6 +1649,23 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::UMOD16: return IsSM83 ? 45 : 31;
     case Z80::SDIV16: return IsSM83 ? 79 : 66;
     case Z80::SMOD16: return IsSM83 ? 78 : 64;
+    case Z80::MUL8:   return IsSM83 ? 13 : 12;
+    case Z80::UDIV8:  return IsSM83 ? 16 : 15;
+    case Z80::UMOD8:  return IsSM83 ? 15 : 14;
+    case Z80::SDIV8:  return IsSM83 ? 38 : 37;
+    case Z80::SMOD8:  return IsSM83 ? 35 : 34;
+    case Z80::SHL8_VAR:
+    case Z80::LSHR8_VAR:
+    case Z80::ASHR8_VAR: return IsSM83 ? 9 : 8;
+    case Z80::ROTL8_VAR:
+    case Z80::ROTR8_VAR: return IsSM83 ? 8 : 7;
+    case Z80::SHL16_VAR: return IsSM83 ? 8 : 7;
+    case Z80::LSHR16_VAR:
+    case Z80::ASHR16_VAR: return IsSM83 ? 11 : 10;
+    case Z80::UADDSAT8: return 5;
+    case Z80::USUBSAT8: return 4;
+    case Z80::SADDSAT8:
+    case Z80::SSUBSAT8: return 8;
     default: break;
     }
   }
