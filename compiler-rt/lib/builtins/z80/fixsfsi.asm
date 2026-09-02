@@ -1,23 +1,18 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___fixsfsi
-	.globl __fsi_not_nan
-	.globl __fsi_lsh_lp
-	.globl __fsi_rshift
-	.globl __fsi_rsh_lp
-	.globl __fsi_sign
-	.globl __fsi_zero
-	.globl __fsi_zero_nr
-	.globl __fsi_overflow
-	.globl __fsi_ovf_neg
 	.globl ___fixunssfsi
-	.globl __fusi_not_nan
-	.globl __fusi_lsh_lp
-	.globl __fusi_rsh
-	.globl __fusi_rsh_lp
-	.globl __fusi_done
-	.globl __fusi_zero
-	.globl __fusi_overflow
+
+;===------------------------------------------------------------------------===;
+; ___fixsfsi - Convert float to signed int32
+;
+; Input:  HLDE = float
+; Output: HLDE = signed int32
+;
+; Algorithm:
+;   1. Extract sign, exponent, mantissa
+;   2. If exp < 127 (|value| < 1.0) → return 0
+;   3. If exp >= 127+31 → overflow (clamp to INT32_MAX/MIN)
 
 ;      shift = exp - 127 - 23 = exp - 150
 ;      If shift >= 0: left shift mantissa by shift
@@ -241,15 +236,3 @@ __fusi_overflow:
 	ld	hl, #0xFFFF
 	ld	de, #0xFFFF
 	ret
-
-;===------------------------------------------------------------------------===;
-; ___floatsisf - Convert signed int32 to float
-;
-; Input:  HLDE = signed int32
-; Output: HLDE = float
-;
-; Algorithm:
-;   1. If 0 → return +0.0
-;   2. Save sign, take absolute value
-;   3. Find highest set bit → determines exponent
-;   4. Shift mantissa to position implicit bit at bit 23

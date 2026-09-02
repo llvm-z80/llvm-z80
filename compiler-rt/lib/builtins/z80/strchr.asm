@@ -1,9 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strchr
-	.globl _strchr_loop
-	.globl _strchr_found
-	.globl _strchr_notfound
+
+;===------------------------------------------------------------------------===;
+; _strchr - Find character in string
+;
+; Input:  HL = string, DE = character (E = char)
+; Output: DE = pointer to char, or 0 if not found
+;===------------------------------------------------------------------------===;
 
 _strchr:
 _strchr_loop:
@@ -20,9 +24,3 @@ _strchr_found:
 _strchr_notfound:
 	ld	de, #0
 	ret
-
-;===------------------------------------------------------------------------===;
-; _memcmp - Compare memory blocks
-;
-; Input:  HL = ptr1, DE = ptr2, stack = size (i16)
-; Output: DE = negative/zero/positive

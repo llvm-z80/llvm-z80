@@ -1,34 +1,21 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___unordsf2
-	.globl __sm_unord_ck_b
-	.globl __sm_unord_no
-	.globl __sm_unord_yes
 	.globl ___cmpsf2_fast
-	.globl ___eqsf2_fast
-	.globl ___nesf2_fast
-	.globl ___ltsf2_fast
-	.globl ___lesf2_fast
-	.globl ___gtsf2_fast
-	.globl ___gesf2_fast
 	.globl ___cmpsf2
 	.globl ___eqsf2
 	.globl ___nesf2
 	.globl ___ltsf2
 	.globl ___lesf2
-	.globl __sm_cmp_nan_a_no
-	.globl __sm_cmp_begin
-	.globl __sm_cmp_signs
-	.globl __sm_cmp_same_sign
-	.globl __sm_cmp_a_gt_s
-	.globl __sm_cmp_a_lt_s
-	.globl __sm_cmp_lt_p
-	.globl __sm_cmp_eq_p
-	.globl __sm_cmp_gt_p
 	.globl ___gtsf2
 	.globl ___gesf2
-	.globl __sm_cmpgt_nan_a_no
-	.globl __sm_cmpgt_nan_lt
+
+;===------------------------------------------------------------------------===;
+; ___unordsf2 - Check if either argument is NaN
+;
+; Input:  DEBC = a, stack = b
+; Output: BC = nonzero (1) if a or b is NaN, 0 if both ordered
+;===------------------------------------------------------------------------===;
 
 
 ___unordsf2:
@@ -312,6 +299,3 @@ __sm_cmpgt_nan_lt:
 	pop	hl		; return address
 	add	sp, #4		; callee-cleanup: skip 4 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; ___subsf3_fast - Fast-math float subtraction (no NaN checks)

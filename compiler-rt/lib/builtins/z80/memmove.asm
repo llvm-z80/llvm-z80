@@ -1,8 +1,6 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memmove
-	.globl _memmove_fwd
-	.globl _memmove_ret
 
 ;===------------------------------------------------------------------------===;
 ; _memmove - Copy memory block (handles overlapping regions)

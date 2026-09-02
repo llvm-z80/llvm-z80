@@ -1,7 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strnlen
-	.globl _strnlen_loop
+
+;===------------------------------------------------------------------------===;
+; _strnlen - Bounded string length
+;
+; Input:  DE = string, BC = maxlen
+; Output: BC = min(strlen(s), maxlen)
+;===------------------------------------------------------------------------===;
 
 _strnlen:
 	ld	h, d
@@ -19,9 +25,3 @@ _strnlen_loop:
 	inc	bc
 	dec	de
 	jr	_strnlen_loop
-
-;===------------------------------------------------------------------------===;
-; _strcmp - Compare two null-terminated strings
-;
-; Input:  DE = str1, BC = str2
-; Output: BC = negative/zero/positive (str1 <=> str2)

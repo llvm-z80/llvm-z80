@@ -1,9 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strncpy
-	.globl _strncpy_loop
-	.globl _strncpy_pad
-	.globl _strncpy_done
+
+;===------------------------------------------------------------------------===;
+; _strncpy - Copy string with bound (pads with nulls)
+;
+; Input:  DE = dest, BC = src, stack = n (i16)
+; Output: BC = dest
+;===------------------------------------------------------------------------===;
 
 _strncpy:
 	push	de		; save dest for return
@@ -43,9 +47,3 @@ _strncpy_done:
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; _stpcpy - Copy string, return pointer to end of dest
-;
-; Input:  DE = dest, BC = src
-; Output: BC = pointer to null terminator in dest

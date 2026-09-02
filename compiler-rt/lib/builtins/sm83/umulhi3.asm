@@ -1,8 +1,6 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl __mul8x8
-	.globl __mul8x8_loop
-	.globl __mul8x8_skip
 	.globl ___umulhi3
 
 ;===------------------------------------------------------------------------===;
@@ -132,8 +130,3 @@ ___umulhi3:
 
 	add	sp, #10		; clean: p2+p1+p0+b+a = 5 pushes
 	ret
-
-;===------------------------------------------------------------------------===;
-; __neg32_debc - Negate 32-bit value in DEBC
-;
-; DEBC = -DEBC (two's complement)

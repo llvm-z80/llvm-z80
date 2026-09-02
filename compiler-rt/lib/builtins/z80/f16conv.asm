@@ -1,21 +1,18 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___extendhfsf2
-	.globl __h2f_exp_zero
-	.globl __h2f_denorm_loop
-	.globl __h2f_exp_max
-	.globl __h2f_pack
-	.globl __h2f_zero
 	.globl ___truncsfhf2
-	.globl __s2h_round_up
-	.globl __s2h_no_round
-	.globl __s2h_inf_nan
-	.globl __s2h_inf
-	.globl __s2h_overflow
-	.globl __s2h_zero_denorm
-	.globl __s2h_underflow
-	.globl __s2h_uflow_shift
-	.globl __s2h_uflow_next
+
+;===------------------------------------------------------------------------===;
+; ___extendhfsf2 - Convert IEEE 754 half-precision (f16) to single (f32)
+;
+; Input:  HL = f16 (H=SEEEEE MM, L=MMMM MMMM)
+; Output: HLDE = f32
+;
+; f16: 1 sign + 5 exp (bias 15) + 10 mantissa
+; f32: 1 sign + 8 exp (bias 127) + 23 mantissa
+; Normal: f32_exp = f16_exp + 112, f32_mant = f16_mant << 13
+;===------------------------------------------------------------------------===;
 
 ___extendhfsf2:
 	; Extract sign

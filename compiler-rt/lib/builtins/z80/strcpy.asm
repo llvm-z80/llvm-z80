@@ -1,8 +1,6 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strcpy
-	.globl _strcpy_loop
-	.globl _strcpy_done
 
 ;===------------------------------------------------------------------------===;
 ; _strcpy - Copy string
@@ -24,8 +22,3 @@ _strcpy_loop:
 _strcpy_done:
 	pop	de		; DE = original dest
 	ret
-
-;===------------------------------------------------------------------------===;
-; _strncpy - Copy string with bound (pads with nulls)
-;
-; Input:  HL = dest, DE = src, stack = n (i16)

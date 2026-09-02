@@ -2,21 +2,13 @@
 	.area _CODE
 	.globl __udiv128_setup
 	.globl __udiv128_core
-	.globl __udiv128_loop
-	.globl __udiv128_skip
 	.globl __udiv128_copy_quot
 	.globl __udiv128_copy_rem
 	.globl __neg128_mem
 	.globl ___udivti3
 	.globl ___divti3
-	.globl __divti3_div_pos
-	.globl __divti3_dvs_pos
-	.globl __divti3_done
 	.globl ___umodti3
 	.globl ___modti3
-	.globl __modti3_div_pos
-	.globl __modti3_dvs_pos
-	.globl __modti3_done
 
 ;===------------------------------------------------------------------------===;
 ; 128-bit Integer Division and Modulo for Z80

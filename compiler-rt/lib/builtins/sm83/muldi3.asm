@@ -42,6 +42,7 @@
 
 ; Helper macro-like pattern: load a[i] into DE, b[j] into BC
 ; Since we can't use macros easily in sdasz80, we inline each call.
+;===------------------------------------------------------------------------===;
 
 ___muldi3:
 	push	af		; dummy (8,9)

@@ -1,7 +1,14 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strlen
-	.globl _strlen_loop
+
+;===------------------------------------------------------------------------===;
+; _strlen - Get string length
+;
+; Input:  DE = pointer to null-terminated string
+; Output: BC = length (number of bytes before null terminator)
+; Uses LDI A,(HL) for auto-incrementing string scan.
+;===------------------------------------------------------------------------===;
 
 _strlen:
 	ld	h, d
@@ -13,9 +20,3 @@ _strlen_loop:
 	ret	z		; found null, BC = length
 	inc	bc
 	jr	_strlen_loop
-
-;===------------------------------------------------------------------------===;
-; _strnlen - Bounded string length
-;
-; Input:  DE = string, BC = maxlen
-; Output: BC = min(strlen(s), maxlen)

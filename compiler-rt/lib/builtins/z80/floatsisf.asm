@@ -1,15 +1,19 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___floatsisf
-	.globl __flsi_nz
-	.globl __flsi_pos
-	.globl __flsi_norm_h
-	.globl __flsi_nlp
-	.globl __flsi_normed
-	.globl __flsi_rndup
-	.globl __flsi_nornd
-	.globl __flsi_e0
 	.globl ___floatunsisf
+
+;===------------------------------------------------------------------------===;
+; ___floatsisf - Convert signed int32 to float
+;
+; Input:  HLDE = signed int32
+; Output: HLDE = float
+;
+; Algorithm:
+;   1. If 0 → return +0.0
+;   2. Save sign, take absolute value
+;   3. Find highest set bit → determines exponent
+;   4. Shift mantissa to position implicit bit at bit 23
 
 ;   6. Pack sign + exponent + mantissa
 ;===------------------------------------------------------------------------===;

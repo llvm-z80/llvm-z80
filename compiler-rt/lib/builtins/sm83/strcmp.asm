@@ -1,8 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strcmp
-	.globl _strcmp_loop
-	.globl _strcmp_done
+
+;===------------------------------------------------------------------------===;
+; _strcmp - Compare two null-terminated strings
+;
+; Input:  DE = str1, BC = str2
+; Output: BC = negative/zero/positive (str1 <=> str2)
+;===------------------------------------------------------------------------===;
 
 _strcmp:
 	ld	h, d
@@ -28,10 +33,3 @@ _strcmp_done:
 	ret	z
 	ld	b, #0xFF
 	ret
-
-;===------------------------------------------------------------------------===;
-; _strncmp - Compare two strings up to n bytes
-;
-; Input:  DE = str1, BC = str2, stack = n (i16)
-; Output: BC = negative/zero/positive
-; Uses SUB (HL) for comparing bytes directly from memory.

@@ -1,14 +1,12 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl __udiv32_core
-	.globl __udiv32_skip
-	.globl __neg32_hlde
-	.globl __neg32_divisor
 	.globl ___udivsi3
 	.globl ___divsi3
 	.globl ___umodsi3
 	.globl ___modsi3
 
+;===------------------------------------------------------------------------===;
 ; __udiv32_core - Core 32-bit unsigned division subroutine
 ;
 ; Preconditions:
@@ -252,27 +250,3 @@ ___modsi3:
 
 	pop	ix
 	ret
-
-;===------------------------------------------------------------------------===;
-;=== 64-bit Integer Arithmetic ===============================================;
-;===------------------------------------------------------------------------===;
-;
-; 64-bit division and modulo via restoring division algorithm.
-; Memory-based: Z80 registers are too small for 64-bit operands.
-;
-; Calling convention (sret demotion, SDCC __sdcccall(1)):
-;   Stack (caller pushes): sret pointer (2B), dividend (8B), divisor (8B)
-;   sret pointer is at lowest address (pushed last by caller)
-;
-; Stack frame after push ix; ld ix,#0; add ix,sp; allocate 16:
-;   IX-16..IX-9  = remainder (8 bytes, little-endian, IX-16 = LSB)
-;   IX-8..IX-1   = quotient  (8 bytes, little-endian, IX-8  = LSB)
-;   IX+0,1       = saved IX
-;   IX+2,3       = return address
-;   IX+4,5       = sret pointer (caller pushed on stack)
-;   IX+6..IX+13  = dividend (8 bytes, little-endian, IX+6  = LSB)
-;   IX+14..IX+21 = divisor  (8 bytes, little-endian, IX+14 = LSB)
-;
-;===------------------------------------------------------------------------===;
-
-;===------------------------------------------------------------------------===;

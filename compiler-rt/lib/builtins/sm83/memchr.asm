@@ -1,9 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memchr
-	.globl _memchr_loop
-	.globl _memchr_found
-	.globl _memchr_notfound
+
+;===------------------------------------------------------------------------===;
+; _memchr - Find byte in memory block
+;
+; Input:  DE = ptr, BC = byte (C = value), stack = size (i16)
+; Output: BC = pointer to byte, or 0 if not found
+;===------------------------------------------------------------------------===;
 
 _memchr:
 	; Load size: [ret_addr(2), size_lo, size_hi]
@@ -38,10 +42,3 @@ _memchr_notfound:
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; _bzero - Zero out memory block
-;
-; Input:  DE = ptr, BC = size
-; Output: BC = ptr
-; Uses E as zero holder for efficient loop.

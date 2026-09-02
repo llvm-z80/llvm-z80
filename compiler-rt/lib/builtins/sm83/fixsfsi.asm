@@ -1,23 +1,22 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___fixsfsi
-	.globl __sm_fsi_not_nan
-	.globl __sm_fsi_lsh_lp
-	.globl __sm_fsi_rshift
-	.globl __sm_fsi_rsh_lp
-	.globl __sm_fsi_sign
-	.globl __sm_fsi_zero
-	.globl __sm_fsi_zero_nr
-	.globl __sm_fsi_overflow
-	.globl __sm_fsi_ovf_neg
 	.globl ___fixunssfsi
-	.globl __sm_fusi_not_nan
-	.globl __sm_fusi_lsh_lp
-	.globl __sm_fusi_rsh
-	.globl __sm_fusi_rsh_lp
-	.globl __sm_fusi_done
-	.globl __sm_fusi_zero
-	.globl __sm_fusi_overflow
+
+;===------------------------------------------------------------------------===;
+; ___fixsfsi - Convert float to signed int32
+;
+; Input:  DEBC = float (D=sign+exp_hi, E=exp_lo+mant_hi, B=mant_mid, C=mant_lo)
+; Output: DEBC = signed int32 (D=MSB, C=LSB)
+;
+; Algorithm:
+;   1. Extract sign, exponent, mantissa
+;   2. If exp < 127 (|value| < 1.0) → return 0
+;   3. If exp >= 158 → overflow (clamp to INT32_MAX/MIN)
+;   4. Set implicit bit, mantissa = 0:E:B:C (24-bit)
+;   5. shift = exp - 150: positive → left shift, negative → right shift
+;   6. Apply sign (negate if negative)
+;===------------------------------------------------------------------------===;
 
 ___fixsfsi:
 	; --- NaN check: exp=255 and mantissa!=0 → return 0 ---
@@ -245,17 +244,3 @@ __sm_fusi_overflow:
 	ld	de, #0xFFFF
 	ld	bc, #0xFFFF
 	ret
-
-;===------------------------------------------------------------------------===;
-; ___floatsisf - Convert signed int32 to float
-;
-; Input:  DEBC = signed int32 (D=MSB, C=LSB)
-; Output: DEBC = float
-;
-; Algorithm:
-;   1. If 0 → return +0.0
-;   2. Save sign, take absolute value
-;   3. Find highest set bit → determines exponent
-;   4. Shift mantissa to position implicit bit at bit 23
-;   5. Round-to-nearest-even using guard/round/sticky
-;   6. Pack sign + exponent + mantissa

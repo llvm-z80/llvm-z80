@@ -1,10 +1,15 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memmove
-	.globl _memmove_bwd_loop
-	.globl _memmove_fwd
-	.globl _memmove_fwd_loop
-	.globl _memmove_done
+
+;===------------------------------------------------------------------------===;
+; _memmove - Copy memory block (handles overlapping regions)
+;
+; Input:  DE = dest, BC = src, stack = size (i16)
+; Output: BC = dest (original)
+; If dest < src: forward copy using LDI A,(HL)
+; If dest >= src: backward copy using LDD A,(HL)
+;===------------------------------------------------------------------------===;
 
 _memmove:
 	push	de		; save dest for return
@@ -67,10 +72,3 @@ _memmove_done:
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; _memset - Fill memory block
-;
-; Input:  DE = dest, BC = value (C = byte), stack = size (i16)
-; Output: BC = dest (original)
-; Uses E as fill byte holder, freeing A for the loop counter check.

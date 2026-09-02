@@ -1,15 +1,22 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___floatsisf
-	.globl __sm_flsi_nz
-	.globl __sm_flsi_pos
-	.globl __sm_flsi_norm
-	.globl __sm_flsi_nlp
-	.globl __sm_flsi_normed
-	.globl __sm_flsi_rndup
-	.globl __sm_flsi_nornd
-	.globl __sm_flsi_e0
 	.globl ___floatunsisf
+
+;===------------------------------------------------------------------------===;
+; ___floatsisf - Convert signed int32 to float
+;
+; Input:  DEBC = signed int32 (D=MSB, C=LSB)
+; Output: DEBC = float
+;
+; Algorithm:
+;   1. If 0 → return +0.0
+;   2. Save sign, take absolute value
+;   3. Find highest set bit → determines exponent
+;   4. Shift mantissa to position implicit bit at bit 23
+;   5. Round-to-nearest-even using guard/round/sticky
+;   6. Pack sign + exponent + mantissa
+;===------------------------------------------------------------------------===;
 
 ___floatsisf:
 	; Check for zero

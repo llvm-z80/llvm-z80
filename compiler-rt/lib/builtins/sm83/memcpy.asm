@@ -1,8 +1,14 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memcpy
-	.globl _memcpy_loop
-	.globl _memcpy_done
+
+;===------------------------------------------------------------------------===;
+; _memcpy - Copy memory block
+;
+; Input:  DE = dest, BC = src, stack = size (i16)
+; Output: BC = dest (original)
+; Uses LDI A,(HL) for auto-incrementing source reads.
+;===------------------------------------------------------------------------===;
 
 _memcpy:
 	push	de		; save dest for return
@@ -32,11 +38,3 @@ _memcpy_done:
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; _memmove - Copy memory block (handles overlapping regions)
-;
-; Input:  DE = dest, BC = src, stack = size (i16)
-; Output: BC = dest (original)
-; If dest < src: forward copy using LDI A,(HL)
-; If dest >= src: backward copy using LDD A,(HL)

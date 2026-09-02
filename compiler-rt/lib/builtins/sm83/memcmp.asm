@@ -1,10 +1,14 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memcmp
-	.globl _memcmp_loop
-	.globl _memcmp_eq
-	.globl _memcmp_done
-	.globl _memcmp_ret
+
+;===------------------------------------------------------------------------===;
+; _memcmp - Compare memory blocks
+;
+; Input:  DE = ptr1, BC = ptr2, stack = size (i16)
+; Output: BC = negative/zero/positive
+; Uses SUB (HL) for comparing bytes directly from memory.
+;===------------------------------------------------------------------------===;
 
 _memcmp:
 	; Load size: [ret_addr(2), size_lo, size_hi]
@@ -40,9 +44,3 @@ _memcmp_ret:
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; _memchr - Find byte in memory block
-;
-; Input:  DE = ptr, BC = byte (C = value), stack = size (i16)
-; Output: BC = pointer to byte, or 0 if not found

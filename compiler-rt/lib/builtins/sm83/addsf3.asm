@@ -4,45 +4,10 @@
 	.globl ___addsf3_fast
 	.globl ___subsf3
 	.globl ___addsf3
-	.globl __sm_add_nan_a_no
-	.globl __sm_add_nan_b_no
-	.globl __sm_add_unpack_a
-	.globl __sm_add_a_norm
-	.globl __sm_add_a_done
-	.globl __sm_add_b_norm
-	.globl __sm_add_b_done
-	.globl __sm_add_no_inf_a
-	.globl __sm_add_no_inf
-	.globl __sm_add_a_nz
-	.globl __sm_add_b_nz
-	.globl __sm_add_shb_lp
-	.globl __sm_add_shb_ns
-	.globl __sm_add_shift_a
-	.globl __sm_add_sha_lp
-	.globl __sm_add_sha_ns
-	.globl __sm_add_no_shift
-	.globl __sm_add_aligned
-	.globl __sm_add_carry_ns
-	.globl __sm_add_norm_load_e
-	.globl __sm_add_sub_mant
-	.globl __sm_add_sub_cmp
-	.globl __sm_add_sub_bga
-	.globl __sm_add_sub_eq
-	.globl __sm_add_norm
-	.globl __sm_add_nlp
-	.globl __sm_add_denorm
-	.globl __sm_add_round
-	.globl __sm_add_rup
-	.globl __sm_add_rup_ok
-	.globl __sm_add_pack
-	.globl __sm_add_pe0
-	.globl __sm_add_pack_den
-	.globl __sm_add_done
-	.globl __sm_add_nan_yes
-	.globl __sm_add_ret_a
-	.globl __sm_add_ret_b
-	.globl __sm_add_ret_inf
-	.globl __sm_add_ret_zero
+
+;===------------------------------------------------------------------------===;
+; ___subsf3_fast - Fast-math float subtraction (no NaN checks)
+;===------------------------------------------------------------------------===;
 
 ___subsf3_fast:
 	ldhl	sp, #5
@@ -726,6 +691,3 @@ __sm_add_ret_zero:
 	ld	b, d
 	ld	c, d
 	jr	__sm_add_done
-
-;===------------------------------------------------------------------------===;
-; ___mulsf3_fast - Fast-math float multiplication (no NaN/Inf/zero checks)

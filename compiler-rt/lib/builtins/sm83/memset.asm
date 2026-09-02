@@ -1,8 +1,14 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memset
-	.globl _memset_loop
-	.globl _memset_done
+
+;===------------------------------------------------------------------------===;
+; _memset - Fill memory block
+;
+; Input:  DE = dest, BC = value (C = byte), stack = size (i16)
+; Output: BC = dest (original)
+; Uses E as fill byte holder, freeing A for the loop counter check.
+;===------------------------------------------------------------------------===;
 
 _memset:
 	push	de		; save dest for return
@@ -33,10 +39,3 @@ _memset_done:
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; _strlen - Get string length
-;
-; Input:  DE = pointer to null-terminated string
-; Output: BC = length (number of bytes before null terminator)
-; Uses LDI A,(HL) for auto-incrementing string scan.

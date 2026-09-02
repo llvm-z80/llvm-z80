@@ -1,7 +1,6 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strlen
-	.globl _strlen_loop
 
 ;===------------------------------------------------------------------------===;
 ; _strlen - Get string length
@@ -18,8 +17,3 @@ _strlen_loop:
 	inc	hl
 	inc	de
 	jr	_strlen_loop
-
-;===------------------------------------------------------------------------===;
-; _strnlen - Bounded string length
-;
-; Input:  HL = string, DE = maxlen

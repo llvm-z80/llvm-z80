@@ -1,7 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _stpcpy
-	.globl _stpcpy_loop
+
+;===------------------------------------------------------------------------===;
+; _stpcpy - Copy string, return pointer to end of dest
+;
+; Input:  HL = dest, DE = src
+; Output: DE = pointer to null terminator in dest
+;===------------------------------------------------------------------------===;
 
 _stpcpy:
 	ex	de, hl		; HL = src, DE = dest
@@ -13,9 +19,3 @@ _stpcpy_loop:
 	inc	hl
 	inc	de
 	jr	_stpcpy_loop
-
-;===------------------------------------------------------------------------===;
-; _strcat - Concatenate strings
-;
-; Input:  HL = dest, DE = src
-; Output: DE = dest

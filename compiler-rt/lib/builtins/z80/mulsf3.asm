@@ -2,41 +2,8 @@
 	.area _CODE
 	.globl ___mulsf3_fast
 	.globl ___mulsf3
-	.globl __mul_a_ok
-	.globl __mul_b_ok
-	.globl __mul_unpack_a
-	.globl __mul_a_nrm
-	.globl __mul_a_up
-	.globl __mul_b_nrm
-	.globl __mul_b_up
-	.globl __mul_lp
-	.globl __mul_noadd
-	.globl __mul_shift
-	.globl __mul_exp_nc
-	.globl __mul_exp_denorm
-	.globl __mul_exp_neg
-	.globl __mul_norm_start
-	.globl __mul_no_pshift
-	.globl __mul_nlp
-	.globl __mul_shift1
-	.globl __mul_round
-	.globl __mul_rnd_up
-	.globl __mul_no_rnd
-	.globl __mul_denorm_res
-	.globl __mul_pack
-	.globl __mul_normal_pack
-	.globl __mul_pk0
-	.globl __mul_denorm_s1
-	.globl __mul_denorm_check
-	.globl __mul_denorm_neg
-	.globl __mul_denorm_zero
-	.globl __mul_denorm_shift
-	.globl __mul_denorm_lp
-	.globl __mul_done
-	.globl __mul_nan
-	.globl __mul_inf
-	.globl __mul_zero
 
+;===------------------------------------------------------------------------===;
 ; ___mulsf3_fast - Fast-math float multiplication (no NaN/Inf/zero checks)
 ;===------------------------------------------------------------------------===;
 ___mulsf3_fast:
@@ -471,6 +438,3 @@ __mul_zero:
 	ld	d, l
 	ld	e, l
 	jr	__mul_done
-
-;===------------------------------------------------------------------------===;
-; ___divsf3_fast - Fast-math float division (no NaN/Inf/zero checks)

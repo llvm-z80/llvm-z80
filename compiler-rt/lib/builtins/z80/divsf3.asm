@@ -2,39 +2,10 @@
 	.area _CODE
 	.globl ___divsf3_fast
 	.globl ___divsf3
-	.globl __div_a_ok
-	.globl __div_b_ok
-	.globl __div_b_nz
-	.globl __div_unpack_a
-	.globl __div_a_nrm
-	.globl __div_a_up
-	.globl __div_b_nrm
-	.globl __div_b_up
-	.globl __div_exp_pos
-	.globl __div_exp_denorm
-	.globl __div_exp_neg
-	.globl __div_pre_norm
-	.globl __div_no_pre
-	.globl __div_loop_start
-	.globl __div_lp
-	.globl __div_do_sub
-	.globl __div_no_sub
-	.globl __div_q_shift
-	.globl __div_guard1
-	.globl __div_rnd_up
-	.globl __div_no_rnd
-	.globl __div_normal_pack
-	.globl __div_pk0
-	.globl __div_denorm_s1
-	.globl __div_denorm_check
-	.globl __div_denorm_neg
-	.globl __div_denorm_zero
-	.globl __div_denorm_shift
-	.globl __div_denorm_lp
-	.globl __div_done
-	.globl __div_nan
-	.globl __div_inf
-	.globl __div_zero
+
+;===------------------------------------------------------------------------===;
+; ___divsf3_fast - Fast-math float division (no NaN/Inf/zero checks)
+;===------------------------------------------------------------------------===;
 
 ___divsf3_fast:
 	push	ix
@@ -473,13 +444,3 @@ __div_zero:
 	ld	d, l
 	ld	e, l
 	jr	__div_done
-
-;===------------------------------------------------------------------------===;
-; ___extendhfsf2 - Convert IEEE 754 half-precision (f16) to single (f32)
-;
-; Input:  HL = f16 (H=SEEEEE MM, L=MMMM MMMM)
-; Output: HLDE = f32
-;
-; f16: 1 sign + 5 exp (bias 15) + 10 mantissa
-; f32: 1 sign + 8 exp (bias 127) + 23 mantissa
-; Normal: f32_exp = f16_exp + 112, f32_mant = f16_mant << 13

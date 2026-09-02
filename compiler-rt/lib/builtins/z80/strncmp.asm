@@ -1,10 +1,6 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strncmp
-	.globl _strncmp_loop
-	.globl _strncmp_eq
-	.globl _strncmp_done
-	.globl _strncmp_ret
 
 ;===------------------------------------------------------------------------===;
 ; _strncmp - Compare two strings up to n bytes

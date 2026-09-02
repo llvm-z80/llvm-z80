@@ -1,8 +1,6 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___divhi3
-	.globl ___divhi3_pos_dividend
-	.globl ___divhi3_pos_divisor
 
 ;===------------------------------------------------------------------------===;
 ; ___divhi3 - 16-bit signed division

@@ -3,9 +3,8 @@
 	.globl __neg_de
 	.globl __neg_bc
 	.globl ___divhi3
-	.globl ___divhi3_pos_dividend
-	.globl ___divhi3_pos_divisor
 
+;===------------------------------------------------------------------------===;
 ;===------------------------------------------------------------------------===;
 __neg_de:
 	xor	a
@@ -54,10 +53,3 @@ ___divhi3_pos_divisor:
 	bit	7, a
 	ret	z		; positive result
 	jr	__neg_bc		; negate and return (tail call)
-
-;===------------------------------------------------------------------------===;
-; ___umodhi3 - 16-bit unsigned modulo
-;
-; Input:  DE = dividend, BC = divisor
-; Output: BC = remainder
-;===------------------------------------------------------------------------===;

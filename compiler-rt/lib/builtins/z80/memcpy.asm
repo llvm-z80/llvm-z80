@@ -1,7 +1,6 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memcpy
-	.globl _memcpy_done
 
 ;===------------------------------------------------------------------------===;
 ; _memcpy - Copy memory block

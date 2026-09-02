@@ -2,39 +2,10 @@
 	.area _CODE
 	.globl ___divsf3_fast
 	.globl ___divsf3
-	.globl __sm_div_a_ok
-	.globl __sm_div_b_ok
-	.globl __sm_div_b_nz
-	.globl __sm_div_unpack_a
-	.globl __sm_div_a_nrm
-	.globl __sm_div_a_up
-	.globl __sm_div_b_nrm
-	.globl __sm_div_b_up
-	.globl __sm_div_exp_denorm
-	.globl __sm_div_exp_neg
-	.globl __sm_div_pre_norm
-	.globl __sm_div_no_pre
-	.globl __sm_div_loop_start
-	.globl __sm_div_lp
-	.globl __sm_div_do_sub
-	.globl __sm_div_do_sub_ld
-	.globl __sm_div_no_sub
-	.globl __sm_div_q_shift
-	.globl __sm_div_guard1
-	.globl __sm_div_rnd_up
-	.globl __sm_div_no_rnd
-	.globl __sm_div_normal_pack
-	.globl __sm_div_pk0
-	.globl __sm_div_denorm_s1
-	.globl __sm_div_denorm_check
-	.globl __sm_div_denorm_neg
-	.globl __sm_div_denorm_zero
-	.globl __sm_div_denorm_shift
-	.globl __sm_div_denorm_lp
-	.globl __sm_div_done
-	.globl __sm_div_nan
-	.globl __sm_div_inf
-	.globl __sm_div_zero
+
+;===------------------------------------------------------------------------===;
+; ___divsf3_fast - Fast-math float division (no NaN/Inf/zero checks)
+;===------------------------------------------------------------------------===;
 
 ___divsf3_fast:
 	push	de
@@ -668,17 +639,3 @@ __sm_div_zero:
 	ld	b, e
 	ld	c, e
 	jr	__sm_div_done
-
-;===------------------------------------------------------------------------===;
-; ___fixsfsi - Convert float to signed int32
-;
-; Input:  DEBC = float (D=sign+exp_hi, E=exp_lo+mant_hi, B=mant_mid, C=mant_lo)
-; Output: DEBC = signed int32 (D=MSB, C=LSB)
-;
-; Algorithm:
-;   1. Extract sign, exponent, mantissa
-;   2. If exp < 127 (|value| < 1.0) → return 0
-;   3. If exp >= 158 → overflow (clamp to INT32_MAX/MIN)
-;   4. Set implicit bit, mantissa = 0:E:B:C (24-bit)
-;   5. shift = exp - 150: positive → left shift, negative → right shift
-;   6. Apply sign (negate if negative)

@@ -1,9 +1,14 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strcat
-	.globl _strcat_find
-	.globl _strcat_copy
-	.globl _strcat_done
+
+;===------------------------------------------------------------------------===;
+; _strcat - Concatenate strings
+;
+; Input:  DE = dest, BC = src
+; Output: BC = dest
+; Uses LDI A,(HL) for scanning dest end and copying src.
+;===------------------------------------------------------------------------===;
 
 _strcat:
 	push	de		; save dest for return
@@ -30,9 +35,3 @@ _strcat_copy:
 _strcat_done:
 	pop	bc		; BC = original dest
 	ret
-
-;===------------------------------------------------------------------------===;
-; _strchr - Find character in string
-;
-; Input:  DE = string, BC = character (C = char)
-; Output: BC = pointer to char, or 0 if not found

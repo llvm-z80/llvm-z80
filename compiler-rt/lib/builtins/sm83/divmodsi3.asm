@@ -1,17 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
-	.globl __neg32_debc
 	.globl __udiv32_loop
-	.globl __udiv32_dosub
-	.globl __udiv32_skip
 	.globl ___udivsi3
 	.globl ___umodsi3
 	.globl __neg32_on_stack
 	.globl ___divsi3
-	.globl ___divsi3_div_pos
 	.globl ___modsi3
-	.globl ___modsi3_div_pos
 
+;===------------------------------------------------------------------------===;
 ;===------------------------------------------------------------------------===;
 __neg32_debc:
 	ld	a, c
@@ -336,31 +332,3 @@ ___modsi3_div_pos:
 	pop	hl		; return address
 	add	sp, #4		; callee-cleanup: skip 4 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-;=== 64-bit Integer Arithmetic ===============================================;
-;===------------------------------------------------------------------------===;
-;
-; 64-bit division and modulo via restoring division algorithm.
-; SM83 adaptation: no IX/IY, uses ldhl sp,#n for stack-relative access.
-;
-; Calling convention (sret demotion, SDCC __sdcccall(1)):
-;   Stack (caller pushes): sret pointer (2B), dividend (8B), divisor (8B)
-;   sret pointer is at lowest address (pushed last by caller)
-;
-; Stack frame after push af; add sp,#-24:
-;   SP+0..SP+7   = quotient (8 bytes, little-endian)
-;   SP+8..SP+15  = remainder (8 bytes, little-endian)
-;   SP+16..SP+23 = divisor copy (8 bytes)
-;   SP+24,SP+25  = saved AF (sign/dummy)
-;   SP+26,SP+27  = return address
-;   SP+28,SP+29  = sret pointer (caller pushed on stack)
-;   SP+30..SP+37 = dividend (8 bytes, from caller)
-;   SP+38..SP+45 = divisor (8 bytes, from caller)
-;
-;===------------------------------------------------------------------------===;
-
-;===------------------------------------------------------------------------===;
-; __neg64_mem - Negate 8-byte value in memory (two's complement)
-; Input: HL = pointer to 8-byte little-endian value
-; Clobbers: A, DE, HL

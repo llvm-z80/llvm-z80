@@ -1,10 +1,14 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _strncmp
-	.globl _strncmp_loop
-	.globl _strncmp_eq
-	.globl _strncmp_done
-	.globl _strncmp_ret
+
+;===------------------------------------------------------------------------===;
+; _strncmp - Compare two strings up to n bytes
+;
+; Input:  DE = str1, BC = str2, stack = n (i16)
+; Output: BC = negative/zero/positive
+; Uses SUB (HL) for comparing bytes directly from memory.
+;===------------------------------------------------------------------------===;
 
 _strncmp:
 	; Load n from stack: [ret_addr(2), n_lo, n_hi]
@@ -43,10 +47,3 @@ _strncmp_ret:
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; _strcpy - Copy string
-;
-; Input:  DE = dest, BC = src
-; Output: BC = dest
-; Uses LDI A,(HL) for auto-incrementing source reads.

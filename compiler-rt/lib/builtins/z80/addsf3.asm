@@ -4,46 +4,6 @@
 	.globl ___subsf3_fast
 	.globl ___subsf3
 	.globl ___addsf3
-	.globl __add_nan_a_no
-	.globl __add_nan_b_no
-	.globl __add_unpack_a
-	.globl __add_a_norm
-	.globl __add_a_done
-	.globl __add_b_norm
-	.globl __add_b_done
-	.globl __add_no_inf_a
-	.globl __add_no_inf
-	.globl __add_a_nz
-	.globl __add_b_nz
-	.globl __add_shb_lp
-	.globl __add_shb_ns
-	.globl __add_b_gone
-	.globl __add_shift_a
-	.globl __add_sha_lp
-	.globl __add_sha_ns
-	.globl __add_a_gone
-	.globl __add_no_shift
-	.globl __add_aligned
-	.globl __add_carry_ns
-	.globl __add_sub_mant
-	.globl __add_sub_cmp
-	.globl __add_sub_bga
-	.globl __add_sub_eq
-	.globl __add_norm
-	.globl __add_nlp
-	.globl __add_denorm
-	.globl __add_round
-	.globl __add_rup
-	.globl __add_rup_ok
-	.globl __add_pack
-	.globl __add_pe0
-	.globl __add_pack_den
-	.globl __add_done
-	.globl __add_ret_nan
-	.globl __add_ret_a
-	.globl __add_ret_b
-	.globl __add_ret_inf
-	.globl __add_ret_zero
 
 ;===------------------------------------------------------------------------===;
 ; ___subsf3_fast - Fast-math float subtraction (no NaN checks)

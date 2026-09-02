@@ -12,8 +12,3 @@ ___umodhi3:
 	call	___udivhi3	; DE = quotient, HL = remainder
 	ex	de, hl		; DE = remainder
 	ret
-
-;===------------------------------------------------------------------------===;
-; ___modhi3 - 16-bit signed modulo
-;
-; Input:  HL = dividend, DE = divisor

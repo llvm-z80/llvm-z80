@@ -1,10 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memcmp
-	.globl _memcmp_loop
-	.globl _memcmp_eq
-	.globl _memcmp_done
-	.globl _memcmp_ret
+
+;===------------------------------------------------------------------------===;
+; _memcmp - Compare memory blocks
+;
+; Input:  HL = ptr1, DE = ptr2, stack = size (i16)
+; Output: DE = negative/zero/positive
+;===------------------------------------------------------------------------===;
 
 _memcmp:
 	push	ix
@@ -40,9 +43,3 @@ _memcmp_ret:
 	inc	sp		; callee-cleanup: skip 2 bytes of stack args
 	push	bc
 	ret
-
-;===------------------------------------------------------------------------===;
-; _memchr - Find byte in memory block
-;
-; Input:  HL = ptr, DE = byte (E = value), stack = size (i16)
-; Output: DE = pointer to byte, or 0 if not found

@@ -1,22 +1,13 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
-	.globl __udiv64_setup
 	.globl __udiv64_core
-	.globl __udiv64_loop
-	.globl __udiv64_skip
 	.globl __udiv64_copy_quot
 	.globl __udiv64_copy_rem
 	.globl __neg64_mem
 	.globl ___udivdi3
 	.globl ___divdi3
-	.globl __divdi3_div_pos
-	.globl __divdi3_dvs_pos
-	.globl __divdi3_done
 	.globl ___umoddi3
 	.globl ___moddi3
-	.globl __moddi3_div_pos
-	.globl __moddi3_dvs_pos
-	.globl __moddi3_done
 
 __udiv64_setup:
 	; Copy dividend (IX+6..IX+13) to quotient (IX-8..IX-1)
@@ -423,18 +414,3 @@ __moddi3_done:
 	ld	sp, ix
 	pop	ix
 	ret			; caller cleanup (i64 return > 16 bits)
-;===------------------------------------------------------------------------===;
-;
-; IEEE 754 f32 layout in HLDE:
-;   H = SEEE EEEE  (S=sign, E=exponent[7:1])
-;   L = EMMM MMMM  (E=exponent[0], M=mantissa[22:16])
-;   D = MMMM MMMM  (M=mantissa[15:8])
-;   E = MMMM MMMM  (M=mantissa[7:0])
-;
-; Exponent: bias 127. 0=zero/denorm, 255=inf/NaN.
-; Mantissa: normalized numbers have implicit leading 1 (24-bit significand).
-;
-; Calling convention (__sdcccall(1)):
-;   1st f32 arg → HLDE,  2nd f32 arg → stack
-;   f32 return  → HLDE,  i32 return → HLDE,  i16 return → DE
-;   IX callee-saved; A,BC,DE,HL caller-saved.

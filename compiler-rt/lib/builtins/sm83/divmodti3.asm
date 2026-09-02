@@ -3,21 +3,12 @@
 	.globl __neg128_mem
 	.globl __udiv128_setup_sm83
 	.globl __udiv128_core_sm83
-	.globl __udiv128_loop_sm83
-	.globl __udiv128_dosub_sm83
-	.globl __udiv128_skip_sm83
 	.globl __udiv128_copy_quot_sm83
 	.globl __udiv128_copy_rem_sm83
 	.globl ___udivti3
 	.globl ___umodti3
 	.globl ___divti3
-	.globl ___divti3_dp
-	.globl ___divti3_vp
-	.globl ___divti3_done
 	.globl ___modti3
-	.globl ___modti3_dp
-	.globl ___modti3_vp
-	.globl ___modti3_done
 
 ;===------------------------------------------------------------------------===;
 ; SM83 128-bit Integer Division and Modulo

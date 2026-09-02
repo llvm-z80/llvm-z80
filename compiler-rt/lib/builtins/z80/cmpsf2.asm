@@ -1,35 +1,16 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___unordsf2
-	.globl __unord_ck_b
-	.globl __unord_no
-	.globl __unord_yes
 	.globl ___gtsf2
 	.globl ___gesf2
-	.globl __cmpgt_nan_a_no
 	.globl ___cmpsf2_fast
-	.globl ___eqsf2_fast
-	.globl ___nesf2_fast
-	.globl ___ltsf2_fast
-	.globl ___lesf2_fast
-	.globl ___gtsf2_fast
-	.globl ___gesf2_fast
 	.globl ___cmpsf2
 	.globl ___eqsf2
 	.globl ___nesf2
 	.globl ___ltsf2
 	.globl ___lesf2
-	.globl __cmp_nan_a_no
-	.globl __cmp_begin
-	.globl __cmp_signs
-	.globl __cmp_same_sign
-	.globl __cmp_mag_diff
-	.globl __cmp_mag_pos
-	.globl __cmp_lt
-	.globl __cmp_eq
-	.globl __cmp_gt
-	.globl __cmp_ret
 
+;===------------------------------------------------------------------------===;
 ; Stack frame for two-arg float functions (after push ix; ld ix,#0; add ix,sp):
 ;   IX+0: saved IX (2 bytes)
 ;   IX+2: return address (2 bytes)
@@ -48,6 +29,7 @@
 ; NaN test: exponent=255 (0xFF) AND mantissa!=0
 ; Exponent bits: H[6:0]=exp[7:1], L[7]=exp[0]
 ; For exp=255: H[6:0]=0x7F AND L[7]=1
+;===------------------------------------------------------------------------===;
 
 
 ;===------------------------------------------------------------------------===;
@@ -290,14 +272,3 @@ __cmp_ret:
 	inc	sp
 	inc	sp		; callee-cleanup: skip 4 bytes of stack args
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-; ___fixsfsi - Convert float to signed int32
-;
-; Input:  HLDE = float
-; Output: HLDE = signed int32
-;
-; Algorithm:
-;   1. Extract sign, exponent, mantissa
-;   2. If exp < 127 (|value| < 1.0) → return 0
-;   3. If exp >= 127+31 → overflow (clamp to INT32_MAX/MIN)

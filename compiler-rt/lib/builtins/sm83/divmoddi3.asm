@@ -3,21 +3,18 @@
 	.globl __neg64_mem
 	.globl __udiv64_setup_sm83
 	.globl __udiv64_core_sm83
-	.globl __udiv64_loop_sm83
-	.globl __udiv64_dosub_sm83
-	.globl __udiv64_skip_sm83
 	.globl __udiv64_copy_quot_sm83
 	.globl __udiv64_copy_rem_sm83
 	.globl ___udivdi3
 	.globl ___umoddi3
 	.globl ___divdi3
-	.globl ___divdi3_dp
-	.globl ___divdi3_vp
-	.globl ___divdi3_done
 	.globl ___moddi3
-	.globl ___moddi3_dp
-	.globl ___moddi3_vp
-	.globl ___moddi3_done
+
+;===------------------------------------------------------------------------===;
+; __neg64_mem - Negate 8-byte value in memory (two's complement)
+; Input: HL = pointer to 8-byte little-endian value
+; Clobbers: A, DE, HL
+;===------------------------------------------------------------------------===;
 
 __neg64_mem:
 	; Complement all 8 bytes
@@ -568,32 +565,3 @@ ___moddi3_done:
 	pop	hl		; return address
 	add	sp, #18		; callee-cleanup: skip sret(2) + args(16)
 	jp	(hl)
-
-;===------------------------------------------------------------------------===;
-;
-;  IEEE 754 Single-Precision Floating Point (softfloat) for SM83
-;
-;===------------------------------------------------------------------------===;
-;
-; SM83 f32 representation in registers:
-;   DEBC = float (D=sign+exp_hi, E=exp_lo+mant_hi, B=mant_mid, C=mant_lo)
-;
-; Calling convention (__sdcccall(1) for SM83):
-;   1st f32 arg → DEBC,  2nd f32 arg → stack
-;   f32 return  → DEBC,  i16 return  → BC
-;
-; Stack layout at function entry (two-arg float functions):
-;   SP+0: return address (2 bytes)
-;   SP+2: arg2 byte 0 (C2, LSB)
-;   SP+3: arg2 byte 1 (B2)
-;   SP+4: arg2 byte 2 (E2)
-;   SP+5: arg2 byte 3 (D2, MSB)
-;
-; SM83 lacks IX/IY — uses LDHL SP,n for stack-relative access.
-;
-
-;===------------------------------------------------------------------------===;
-; ___unordsf2 - Check if either argument is NaN
-;
-; Input:  DEBC = a, stack = b
-; Output: BC = nonzero (1) if a or b is NaN, 0 if both ordered
