@@ -68,15 +68,15 @@ def LD_nnind_HL : Inst24<"ld", 0x22, DirectMode> {
 
 // LD dd,(nn) / LD (nn),dd - ED prefixed
 let mayLoad = true, mayStore = false, hasSideEffects = false in {
-def LD_BC_nnind : InstED24<"ld bc,", 0x4B, DirectMode> { let Defs = [BC]; }
-def LD_DE_nnind : InstED24<"ld de,", 0x5B, DirectMode> { let Defs = [DE]; }
-def LD_SP_nnind : InstED24<"ld sp,", 0x7B, DirectMode> { let Defs = [SP]; }
+def LD_BC_nnind : InstED24<"ld bc,", 0x4B, DirectModeAt2> { let Defs = [BC]; }
+def LD_DE_nnind : InstED24<"ld de,", 0x5B, DirectModeAt2> { let Defs = [DE]; }
+def LD_SP_nnind : InstED24<"ld sp,", 0x7B, DirectModeAt2> { let Defs = [SP]; }
 }
 
 let mayLoad = false, mayStore = true, hasSideEffects = false in {
-def LD_nnind_BC : InstED24<"ld", 0x43, DirectMode> { let AsmString = "ld ( $imm ),bc"; let Uses = [BC]; }
-def LD_nnind_DE : InstED24<"ld", 0x53, DirectMode> { let AsmString = "ld ( $imm ),de"; let Uses = [DE]; }
-def LD_nnind_SP : InstED24<"ld", 0x73, DirectMode> { let AsmString = "ld ( $imm ),sp"; let Uses = [SP]; }
+def LD_nnind_BC : InstED24<"ld", 0x43, DirectModeAt2> { let AsmString = "ld ( $imm ),bc"; let Uses = [BC]; }
+def LD_nnind_DE : InstED24<"ld", 0x53, DirectModeAt2> { let AsmString = "ld ( $imm ),de"; let Uses = [DE]; }
+def LD_nnind_SP : InstED24<"ld", 0x73, DirectModeAt2> { let AsmString = "ld ( $imm ),sp"; let Uses = [SP]; }
 }
 
 //===----------------------------------------------------------------------===//
@@ -248,8 +248,8 @@ def OTDR : InstED8<"otdr", 0xBB> { let Defs = [FLAGS]; }
 let Predicates = [HasZ80] in {
 
 // LD IX,nn / LD IY,nn
-def LD_IX_nn : InstDD24<"ld ix,", 0x21, Imm16Mode> { let Defs = [IX]; }
-def LD_IY_nn : InstFD24<"ld iy,", 0x21, Imm16Mode> { let Defs = [IY]; }
+def LD_IX_nn : InstDD24<"ld ix,", 0x21, Imm16ModeAt2> { let Defs = [IX]; }
+def LD_IY_nn : InstFD24<"ld iy,", 0x21, Imm16ModeAt2> { let Defs = [IY]; }
 
 // PUSH IX / PUSH IY
 def PUSH_IX : InstDD8<"push ix", 0xE5> { let Uses = [IX]; }

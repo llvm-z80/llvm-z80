@@ -142,9 +142,11 @@ class disp8at<int offset> : Operand<i32> {
 def disp8 : disp8at<2>;    // After DD/FD + opcode
 def disp8at3 : disp8at<3>; // After DD/FD CB + displacement
 
-/// Port number for IN/OUT
+/// Port number for IN/OUT. Without an explicit encoder a symbol operand
+/// would fall back to a data fixup at offset 0, on top of the opcode byte.
 def port8 : Operand<i32> {
   let ParserMatchClass = ImmediateAsmOperand<"Port8">;
+  let EncoderMethod = "encodeImm<Z80::Addr8, 1>";
   let DecoderMethod = "decodeUImmOperand<8>";
   let OperandType = "OPERAND_PORT8";
   let OperandNamespace = "Z80Op";
@@ -228,6 +230,18 @@ def Imm16Mode : AddressingMode {
 def DirectMode : AddressingMode {
   let OperandsStr = "( $imm )";
   let InOperandList = (ins addr16:$imm);
+}
+
+// For two-byte-opcode (prefixed) instructions: the value encodes the same
+// way, but a symbol operand's fixup must land after the prefix byte too.
+def DirectModeAt2 : AddressingMode {
+  let OperandsStr = "( $imm )";
+  let InOperandList = (ins addr16at2:$imm);
+}
+
+def Imm16ModeAt2 : AddressingMode {
+  let OperandsStr = "$imm";
+  let InOperandList = (ins imm16at2:$imm);
 }
 
 // RelativeMode uses 'imm' for encoding compatibility
@@ -410,8 +424,10 @@ class InstDD16Imm<string asmstr, bits<8> opcode> : Z80Inst<asmstr> {
   let InOperandList = (ins disp8:$disp, imm8at3:$val);
 }
 
-/// 4-byte DD-prefixed instruction with 16-bit operand
-class InstDD24<string asmstr, bits<8> opcode, AddressingMode mode = Imm16Mode>
+/// 4-byte DD-prefixed instruction with 16-bit operand (fixup at offset 2,
+/// after the prefix and opcode bytes).
+class InstDD24<string asmstr, bits<8> opcode,
+               AddressingMode mode = Imm16ModeAt2>
     : Z80Inst<asmstr> {
   let Size = 4;
   bits<16> imm;
@@ -464,7 +480,8 @@ class InstFD16Imm<string asmstr, bits<8> opcode> : Z80Inst<asmstr> {
 }
 
 /// 4-byte FD-prefixed instruction with 16-bit operand
-class InstFD24<string asmstr, bits<8> opcode, AddressingMode mode = Imm16Mode>
+class InstFD24<string asmstr, bits<8> opcode,
+               AddressingMode mode = Imm16ModeAt2>
     : Z80Inst<asmstr> {
   let Size = 4;
   bits<16> imm;
@@ -489,8 +506,11 @@ class InstED8<string asmstr, bits<8> opcode> : Z80Inst<asmstr> {
   let InOperandList = (ins);
 }
 
-/// 4-byte ED-prefixed instruction with 16-bit operand
-class InstED24<string asmstr, bits<8> opcode, AddressingMode mode = DirectMode>
+/// 4-byte ED-prefixed instruction with 16-bit operand.
+/// The immediate sits after two opcode bytes, so the addressing mode must
+/// place a symbol operand's fixup at offset 2 (the At2 variants).
+class InstED24<string asmstr, bits<8> opcode,
+               AddressingMode mode = DirectModeAt2>
     : Z80Inst<asmstr> {
   let Size = 4;
   bits<16> imm;
