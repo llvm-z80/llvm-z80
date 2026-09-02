@@ -34,6 +34,17 @@ Z80TargetInfo::Z80TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
   FloatAlign = 8;
   DoubleAlign = 8;
   LongDoubleAlign = 8;
+  // The fixed-point types (_Accum/_Fract) and the storage-only float types
+  // (__fp16, __bf16) have their own layout fields and default to their
+  // natural alignment; everything is byte-aligned here.
+  ShortAccumAlign = 8;
+  AccumAlign = 8;
+  LongAccumAlign = 8;
+  ShortFractAlign = 8;
+  FractAlign = 8;
+  LongFractAlign = 8;
+  HalfAlign = 8;
+  BFloat16Align = 8;
   SuitableAlign = 8;
   DefaultAlignForAttributeAligned = 8;
   MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 8;
