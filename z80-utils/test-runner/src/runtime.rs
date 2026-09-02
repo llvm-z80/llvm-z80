@@ -36,7 +36,10 @@ pub fn ensure_elf(paths: &Paths, target: Target, clang: &Path) -> Result<ElfRunt
     std::fs::create_dir_all(&builtins_dir)
         .map_err(|e| format!("create {}: {e}", builtins_dir.display()))?;
 
-    let crt0_src = paths.elf_crt0_src(target);
+    // The harness supplies its own startup code: it stores main's return value
+    // at `_exit_code` so the runner can read the result from a RAM dump instead
+    // of tracing every instruction. Otherwise identical to the shipped crt0.
+    let crt0_src = paths.harness_crt0(target);
     let crt0_obj = stage_dir.join("crt0.o");
     assemble_if_stale(clang, target, &crt0_src, &crt0_obj)?;
 
@@ -71,6 +74,32 @@ pub fn ensure_elf(paths: &Paths, target: Target, clang: &Path) -> Result<ElfRunt
         builtin_objs,
         linker_script,
     })
+}
+
+/// Assemble the harness's SDCC-toolchain crt0 into the build tree. The suites
+/// that link through sdldz80 need their own `.rel`, since the shipped crt0 does
+/// not record main's return value.
+pub fn ensure_sdcc_crt0(paths: &Paths, target: Target) -> Result<PathBuf, String> {
+    let src = paths.harness_crt0_sdcc(target);
+    if !src.is_file() {
+        return Err(format!("harness crt0 not found: {}", src.display()));
+    }
+    let stage = paths.elf_runtime_stage(target);
+    std::fs::create_dir_all(&stage).map_err(|e| format!("create {}: {e}", stage.display()))?;
+    let obj = stage.join("harness_crt0.rel");
+    if needs_rebuild(&src, &obj) {
+        let status = Command::new(target.assembler())
+            .arg("-g")
+            .arg("-o")
+            .arg(&obj)
+            .arg(&src)
+            .status()
+            .map_err(|e| format!("{}: {e}", target.assembler()))?;
+        if !status.success() {
+            return Err(format!("{} failed on {}", target.assembler(), src.display()));
+        }
+    }
+    Ok(obj)
 }
 
 fn assemble_if_stale(clang: &Path, target: Target, src: &Path, obj: &Path) -> Result<(), String> {

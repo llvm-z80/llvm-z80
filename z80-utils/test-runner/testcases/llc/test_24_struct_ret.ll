@@ -4,13 +4,6 @@
 ; {i8, i8, i16}, {i8, i8, i8} return types.
 ; expect 0x00FF (8 bits, all pass)
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 ; --- Callee functions that return structs ---
 
 ; {i1, i16}: Rust's Option<u16>-like type (the original crash case)

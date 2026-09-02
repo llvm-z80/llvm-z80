@@ -2,15 +2,32 @@ use std::io::{self, Write};
 
 use crate::suite::TestOutcome;
 
-const GREEN: &str = "\x1b[32m";
-const RED: &str = "\x1b[31m";
-const YELLOW: &str = "\x1b[33m";
-const MAGENTA: &str = "\x1b[35m";
-const BOLD: &str = "\x1b[1m";
-const RESET: &str = "\x1b[0m";
+pub const GREEN: &str = "\x1b[32m";
+pub const RED: &str = "\x1b[31m";
+pub const YELLOW: &str = "\x1b[33m";
+pub const MAGENTA: &str = "\x1b[35m";
+pub const BLUE: &str = "\x1b[34m";
+pub const PURPLE: &str = "\x1b[95m";
+pub const GRAY: &str = "\x1b[90m";
+pub const BOLD: &str = "\x1b[1m";
+pub const DIM: &str = "\x1b[2m";
+pub const RESET: &str = "\x1b[0m";
 
 pub fn is_tty() -> bool {
-    unsafe { libc_isatty(1) != 0 }
+    // Cached: the torture suite asks per result line, thousands of times.
+    static TTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *TTY.get_or_init(|| unsafe { libc_isatty(1) != 0 })
+}
+
+/// Wrap text in a colour, or return it unchanged when stdout is not a terminal.
+/// Suites that build their own report lines use this instead of duplicating the
+/// `if tty { ... } else { ... }` pairs in `print_test_result`.
+pub fn paint(color: &str, text: &str) -> String {
+    if is_tty() {
+        format!("{color}{text}{RESET}")
+    } else {
+        text.to_string()
+    }
 }
 
 unsafe extern "C" {
@@ -19,7 +36,7 @@ unsafe extern "C" {
 }
 
 /// Print a single test result line (for individual suite mode).
-pub fn print_test_result(outcome: &TestOutcome, tag: &str, reg_name: &str, note: Option<&str>) {
+pub fn print_test_result(outcome: &TestOutcome, tag: &str, reg_name: &str) {
     let tty = is_tty();
     match outcome {
         TestOutcome::Pass { reg_value } => {
@@ -51,17 +68,7 @@ pub fn print_test_result(outcome: &TestOutcome, tag: &str, reg_name: &str, note:
             }
         }
     }
-    print_note(note);
     let _ = io::stdout().flush();
-}
-
-/// Print captured diagnostic text indented under a result line.
-pub fn print_note(note: Option<&str>) {
-    if let Some(text) = note {
-        for line in text.lines() {
-            println!("          | {line}");
-        }
-    }
 }
 
 pub fn print_summary(total: u32, pass: u32, fail: u32, fatal: u32, skip: u32, all_ok: bool) {

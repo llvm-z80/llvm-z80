@@ -2,13 +2,6 @@
 ; These intrinsics are rarely generated from C without __builtin_*
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 declare {i16, i1} @llvm.sadd.with.overflow.i16(i16, i16)
 declare {i16, i1} @llvm.ssub.with.overflow.i16(i16, i16)
 declare {i16, i1} @llvm.uadd.with.overflow.i16(i16, i16)

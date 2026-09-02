@@ -197,13 +197,20 @@ fn run_single_bench(
         let tmp = tmp_dir.clone();
         let name = name.clone();
         let expected = expected.clone();
-        let crt0 = paths.crt0(target);
+        // The harness crt0 records main's return value at _exitcode, which is
+        // how the run reports its result.
+        let crt0 = match runtime::ensure_sdcc_crt0(paths, target) {
+            Ok(p) => Some(p),
+            // Leave the SDCC side unmeasured rather than handing the linker an
+            // empty path and reporting a confusing link failure.
+            Err(_) => None,
+        };
         let sdcc_lib = sdcc_lib.cloned();
         let bench_file = bench_file.to_path_buf();
 
         thread::spawn(move || {
             compile_and_measure_sdcc(
-                &bench_file, &tmp, &name, target, opt, &expected, &crt0,
+                &bench_file, &tmp, &name, target, opt, &expected, crt0.as_ref()?,
                 sdcc_lib.as_ref(),
             )
         })
@@ -294,11 +301,13 @@ fn compile_and_measure_clang(
     // Halt address from ELF _halt symbol
     let halt_addr = emulator::halt_addr_from_elf(&llvm_tools.join("llvm-nm"), &elf)?;
 
-    // T-states
-    let tstates = measure_tstates(&bin, target, &halt_addr).unwrap_or(0);
-
-    // Correctness
-    let reg_value = emulator::emulate(&bin, target, &halt_addr).unwrap_or_default();
+    // One run yields both the cycle count and the result value.
+    let result_addr = emulator::symbol_addr_from_elf(&llvm_tools.join("llvm-nm"), &elf, "_exitcode")?;
+    let dump = bin.with_extension("ram");
+    let run = emulator::run_program(&bin, target, &halt_addr, result_addr, &dump,
+                                    target.emu_timeout_secs()).ok();
+    let tstates = run.as_ref().map(|r| r.cycles).unwrap_or(0);
+    let reg_value = run.map(|r| r.value).unwrap_or_default();
     let correct = emulator::check_result(&reg_value, expected).is_ok();
 
     Some(CompilerResult { size, tstates, reg_value, correct })
@@ -383,10 +392,17 @@ fn compile_and_measure_sdcc(
     let map_file = tmp_dir.join(format!("{tag}.map"));
     let halt_addr = emulator::halt_addr_from_map(&map_file)?;
 
-    measure_ihx(&ihx, &bin, target, expected, &halt_addr)
+    measure_ihx(&ihx, &bin, target, expected, &halt_addr, &map_file)
 }
 
-fn measure_ihx(ihx: &Path, bin: &Path, target: Target, expected: &str, halt_addr: &str) -> Option<CompilerResult> {
+fn measure_ihx(
+    ihx: &Path,
+    bin: &Path,
+    target: Target,
+    expected: &str,
+    halt_addr: &str,
+    map_file: &Path,
+) -> Option<CompilerResult> {
     // Code size from IHX data records (actual code+data bytes, not padded binary)
     let size = ihx_code_size(ihx);
 
@@ -395,11 +411,13 @@ fn measure_ihx(ihx: &Path, bin: &Path, target: Target, expected: &str, halt_addr
         return None;
     }
 
-    // T-states (non-trace mode)
-    let tstates = measure_tstates(bin, target, halt_addr).unwrap_or(0);
-
-    // Correctness
-    let reg_value = emulator::emulate(bin, target, halt_addr).unwrap_or_default();
+    // One run yields both the cycle count and the result value.
+    let result_addr = emulator::symbol_addr_from_map(map_file, "_exitcode")?;
+    let dump = bin.with_extension("ram");
+    let run = emulator::run_program(bin, target, halt_addr, result_addr, &dump,
+                                    target.emu_timeout_secs()).ok();
+    let tstates = run.as_ref().map(|r| r.cycles).unwrap_or(0);
+    let reg_value = run.map(|r| r.value).unwrap_or_default();
     let correct = emulator::check_result(&reg_value, expected).is_ok();
 
     Some(CompilerResult { size, tstates, reg_value, correct })
@@ -439,23 +457,6 @@ fn ihx_code_size(ihx: &Path) -> u32 {
     total
 }
 
-fn measure_tstates(bin: &Path, target: Target, halt_addr: &str) -> Option<u64> {
-    let mut cmd = Command::new("z88dk-ticks");
-    for flag in target.emu_flags() {
-        cmd.arg(flag);
-    }
-    cmd.args(["-end", halt_addr]);
-    cmd.arg(bin);
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::null());
-
-    let output = cmd.output().ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
-        .lines()
-        .last()
-        .and_then(|line| line.trim().parse::<u64>().ok())
-}
 
 fn print_table(results: &[BenchResult], _config: &BenchConfig) {
     let tty = crate::display::is_tty();

@@ -2,13 +2,6 @@
 ; Rust's saturating_add/sub generate these intrinsics
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 declare i16 @llvm.uadd.sat.i16(i16, i16)
 declare i16 @llvm.usub.sat.i16(i16, i16)
 declare i16 @llvm.sadd.sat.i16(i16, i16)

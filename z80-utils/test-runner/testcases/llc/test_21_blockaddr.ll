@@ -2,13 +2,6 @@
 ; Tests blockaddress materialization and indirectbr
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 ; dispatch via computed goto: selects operation based on index
 define i16 @do_op(i16 %idx, i16 %a, i16 %b) {
 entry:

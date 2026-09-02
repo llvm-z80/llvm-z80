@@ -1,13 +1,6 @@
 ; Test 10: function calls with multiple arguments (tests calling convention)
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 define i16 @add_i16(i16 %a, i16 %b) {
   %r = add i16 %a, %b
   ret i16 %r

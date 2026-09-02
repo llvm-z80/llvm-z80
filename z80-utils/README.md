@@ -105,13 +105,45 @@ cargo run llc -target sm83 -opt O0        # SM83, O0 only
 
 #### utils — elf2rel/rel2elf Converter Tests
 Tests the ELF ↔ SDCC .rel format converters through roundtrip and cross-link scenarios.
-Six test groups run in parallel: ELF roundtrip, REL roundtrip, elf2rel crosslink,
-rel2elf crosslink, ELF archive roundtrip, REL archive roundtrip.
+Test groups run in parallel: shipped crt0, ELF roundtrip, REL roundtrip,
+elf2rel crosslink, rel2elf crosslink, ELF archive roundtrip, REL archive
+roundtrip. The first links the way a user does, letting the clang driver pick
+the startup code, so the crt0 that actually ships stays covered.
 
 ```bash
 cargo run utils                           # Z80, O1
 cargo run utils -target sm83              # SM83
 ```
+
+#### torture — GCC C Torture Suite
+Runs `gcc.c-torture` from the `vendor/gcc-torture` submodule. Not part of the
+default run: it stays red while any backend bug is outstanding, which is the
+point. Nothing else needs the submodule, so a plain clone does not carry it:
+
+```bash
+git submodule update --init vendor/gcc-torture
+```
+
+```bash
+cargo run torture                          # both tiers, Z80, O1
+cargo run torture -tier execute -target sm83
+cargo run torture -emu-timeout 60          # tell a hang from a slow test
+cargo run torture -run-skipped             # re-check what the manifest skips
+```
+
+Two tiers. `compile` only asserts that clang accepts the input, which is where
+compiler crashes surface most cheaply. `execute` runs self-checking tests, so
+the expected result is always zero and no `expect` directive is needed.
+
+Outcomes are `PASS`, `XFAIL` (a `dg-error` test rejected as upstream expects),
+`SKIP`, `ICE`, `CLANG` (a failure the manifest attributes to clang, still run so
+it turns green when clang fixes it), `FAIL`, `OPTIM` (an optimization that
+should have deleted a call did not), `TIMEOUT`, `COMPILE`, `LINK`, `TOOBIG`.
+
+`test-runner/torture/manifest.txt` lists only what the target structurally
+cannot do. A backend bug never belongs there: it keeps failing until it is
+fixed. Upstream's own `dg-skip-if`, `dg-require-effective-target` and
+`dg-options` are read straight from the test sources instead.
 
 #### custom — Ad-hoc Compile Check
 Checks that files in `test-runner/testcases/custom/` compile without errors (no emulation).
@@ -173,3 +205,16 @@ define i16 @main() {
 * [`test-runner/testcases/llc/`](test-runner/testcases/llc/) — LLVM IR tests for LLC
 * [`test-runner/testcases/sdcc/`](test-runner/testcases/sdcc/) — SDCC cross-build compatibility test pairs
 * [`test-runner/testcases/custom/`](test-runner/testcases/custom/) — User-supplied files for compile checking
+* [`vendor/gcc-torture/`](vendor/gcc-torture/) — GCC C torture suite (submodule)
+
+### Harness Runtime
+
+`test-runner/harness/{z80,sm83}/` holds the startup code the suites link, kept
+separate from the crt0 in `compiler-rt` because it records `main`'s return value
+at a symbol named `_exitcode`. The runner reads the result from there out of a
+RAM dump (`z88dk-ticks -output`) rather than from a register: registers are only
+visible under `-trace`, which prints every executed instruction and slows
+emulation by more than two orders of magnitude.
+
+`test-runner/torture/shim/` adds `abort`, `exit` and `link_error` for the
+torture tests, which are self-checking and call `abort()` on failure.

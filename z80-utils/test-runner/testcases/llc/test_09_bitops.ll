@@ -1,13 +1,6 @@
 ; Test 09: bitwise operations (and, or, xor, not) on i8 and i16
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 define i16 @main() {
   %status = alloca i16
   store i16 0, ptr %status

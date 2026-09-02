@@ -2,13 +2,6 @@
 ; Tests G_GEP, G_LOAD, G_STORE with array/struct addressing
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 define i16 @main() {
   %status = alloca i16
   %arr = alloca [4 x i8]

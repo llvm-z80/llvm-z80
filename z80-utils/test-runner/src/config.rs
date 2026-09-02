@@ -30,13 +30,6 @@ impl Target {
         }
     }
 
-    pub fn reg_grep(&self) -> &'static str {
-        match self {
-            Target::Z80 => "de",
-            Target::SM83 => "bc",
-        }
-    }
-
     pub fn emu_flags(&self) -> &'static [&'static str] {
         match self {
             Target::Z80 => &[],
@@ -180,11 +173,6 @@ impl Paths {
         self.project_dir.join("testcases/llc")
     }
 
-    pub fn crt0(&self, target: Target) -> PathBuf {
-        let t = target.triple();
-        self.build_dir.join(format!("lib/{t}/{t}_crt0.rel"))
-    }
-
     pub fn rt_lib(&self, target: Target) -> PathBuf {
         let t = target.triple();
         self.build_dir.join(format!("lib/{t}/{t}_rt.lib"))
@@ -206,9 +194,37 @@ impl Paths {
         self.elf_builtins_src(target).join(format!("{t}.ld"))
     }
 
-    /// crt0.asm source path.
-    pub fn elf_crt0_src(&self, target: Target) -> PathBuf {
-        self.elf_builtins_src(target).join("crt0.asm")
+    /// Startup code owned by the test harness. Separate from the shipped crt0
+    /// because it records main's return value for the runner to read back.
+    pub fn harness_crt0(&self, target: Target) -> PathBuf {
+        self.project_dir.join("harness").join(target.triple()).join("crt0.asm")
+    }
+
+    /// Harness startup for the SDCC toolchain path.
+    pub fn harness_crt0_sdcc(&self, target: Target) -> PathBuf {
+        self.project_dir.join("harness").join(target.triple()).join("crt0_sdcc.asm")
+    }
+
+    /// Assets for the torture suite (shim, headers, manifest).
+    pub fn torture_dir(&self) -> PathBuf {
+        self.project_dir.join("torture")
+    }
+
+    /// The gcc-c-torture submodule checkout.
+    pub fn torture_src_dir(&self) -> PathBuf {
+        self.project_dir.join("../vendor/gcc-torture")
+    }
+
+    pub fn torture_manifest(&self) -> PathBuf {
+        self.torture_dir().join("manifest.txt")
+    }
+
+    pub fn torture_include(&self) -> PathBuf {
+        self.torture_dir().join("include")
+    }
+
+    pub fn torture_shim(&self, target: Target) -> PathBuf {
+        self.torture_dir().join("shim").join(target.triple()).join("shim.asm")
     }
 
     /// Staging directory for assembled crt0.o + builtin .o files.

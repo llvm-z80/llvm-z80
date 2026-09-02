@@ -56,6 +56,7 @@ pub fn run(paths: &Paths, config: &LlcConfig, on_result: &mut OnResult) -> Suite
             }
 
             let r = run_single(
+                paths,
                 &llc,
                 test_file,
                 &tag,
@@ -73,6 +74,7 @@ pub fn run(paths: &Paths, config: &LlcConfig, on_result: &mut OnResult) -> Suite
 }
 
 fn run_single(
+    paths: &Paths,
     llc: &PathBuf,
     test_file: &PathBuf,
     tag: &str,
@@ -135,9 +137,19 @@ fn run_single(
         let rt_dir = rt_lib.parent().unwrap();
         let rt_name = rt_lib.file_stem().unwrap();
 
+        // The fixtures define only main; startup comes from the harness crt0,
+        // which also records main's return value for the runner to read back.
+        let crt0 = match crate::runtime::ensure_sdcc_crt0(paths, target) {
+            Ok(p) => p,
+            Err(e) => {
+                remove_tmp_dir(&tmp_dir);
+                return TestResult::fatal(tag, format!("harness crt0: {e}"));
+            }
+        };
         let mut cmd = Command::new(target.linker());
         cmd.args(["-m", "-i"]);
         cmd.arg(&out_base);
+        cmd.arg(&crt0);
         cmd.arg(&rel_out);
         cmd.arg("-k");
         cmd.arg(rt_dir);
@@ -167,18 +179,15 @@ fn run_single(
             return TestResult::fatal(tag, "_halt symbol not found in map file");
         }
     };
-    let result = match emulator::emulate(&bin, target, &halt_addr) {
-        Err(e) => TestResult::fatal(tag, e),
-        Ok(got) => {
-            let expected = emulator::parse_expected(source);
-            match emulator::check_result(&got, &expected) {
-                Ok(()) => TestResult::pass(tag, format!("0x{got}")),
-                Err((got_padded, exp_padded)) => {
-                    TestResult::fail(tag, format!("0x{got_padded}"), format!("0x{exp_padded}"))
-                }
-            }
+    let result_addr = match emulator::symbol_addr_from_map(&map_file, "_exitcode") {
+        Some(a) => a,
+        None => {
+            remove_tmp_dir(&tmp_dir);
+            return TestResult::fatal(tag, "_exitcode symbol not found in map file");
         }
     };
+    let dump = tmp_dir.join(format!("{tag}.ram"));
+    let result = crate::suite::judge(tag, &bin, target, &halt_addr, result_addr, &dump, source);
     remove_tmp_dir(&tmp_dir);
     result
 }

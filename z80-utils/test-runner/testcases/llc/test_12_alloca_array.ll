@@ -2,13 +2,6 @@
 ; Tests alloca with array sizes, GEP indexing, and store/load patterns
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 define i16 @main() {
   ; All allocas in entry block (static frame allocation)
   %status = alloca i16

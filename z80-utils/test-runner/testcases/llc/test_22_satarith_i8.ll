@@ -2,13 +2,6 @@
 ; Tests uadd.sat, usub.sat, sadd.sat, ssub.sat for i8
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 declare i8 @llvm.uadd.sat.i8(i8, i8)
 declare i8 @llvm.usub.sat.i8(i8, i8)
 declare i8 @llvm.sadd.sat.i8(i8, i8)

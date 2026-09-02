@@ -345,12 +345,10 @@ fn run_single(
     }
 
     // A flat binary larger than the 64 KB Z80/SM83 address space cannot be
-    // loaded by z88dk-ticks (it rejects it with "Incorrect length", which the
-    // emulate() path would surface as a cryptic "no register value" FATAL).
-    // This is an environmental limit, not a test failure: the auto-generated
-    // test_90/91_edge_* stress fixtures compile to a ~113 KB main() at -O0 and
-    // only fit under -O1+ optimization.  Classify as SKIP so they still run
-    // (and assert) at every opt level where they fit.
+    // loaded by z88dk-ticks, which rejects it with "Incorrect length". That is
+    // an environmental limit rather than a test failure, so it is a SKIP: a
+    // fixture too large at -O0 still runs and asserts at every level where it
+    // fits.
     if let Ok(meta) = std::fs::metadata(&bin) {
         if meta.len() > 0x1_0000 {
             remove_tmp_dir(&tmp_dir);
@@ -362,29 +360,17 @@ fn run_single(
     }
 
     // Emulate
-    let halt_addr = match emulator::halt_addr_from_elf(
-        &clang.parent().unwrap().join("llvm-nm"), &elf) {
+    let nm = clang.parent().unwrap().join("llvm-nm");
+    let halt_addr = match emulator::halt_addr_from_elf(&nm, &elf) {
         Some(addr) => addr,
         None => return TestResult::fatal(tag, "_halt symbol not found in ELF"),
     };
-    let result = match emulator::emulate(&bin, target, &halt_addr) {
-        Err(e) => TestResult::fatal(tag, e),
-        Ok(got) => {
-            let expected = emulator::parse_expected(source);
-            match emulator::check_result(&got, &expected) {
-                Ok(()) => TestResult::pass(tag, format!("0x{got}")),
-                Err((got_padded, exp_padded)) => {
-                    // ravn/llvm-z80#137: re-run capturing port-1 console output
-                    // so multi-CHECK fixtures (test_90/91_edge_*) reveal WHICH
-                    // sub-check failed (`FAIL @<line> got=.. exp=..`), not just
-                    // the aggregate DE count.  Best-effort; only on failure.
-                    let note = emulator::capture_port_output(&bin, target, &halt_addr, 1);
-                    TestResult::fail(tag, format!("0x{got_padded}"), format!("0x{exp_padded}"))
-                        .with_note(note)
-                }
-            }
-        }
+    let result_addr = match emulator::symbol_addr_from_elf(&nm, &elf, "_exitcode") {
+        Some(a) => a,
+        None => return TestResult::fatal(tag, "_exitcode symbol not found in ELF"),
     };
+    let dump = tmp_dir.join(format!("{tag}.ram"));
+    let result = crate::suite::judge(tag, &bin, target, &halt_addr, result_addr, &dump, source);
     // Keep temp files on failure for debugging; clean up on pass.
     if result.is_pass() {
         remove_tmp_dir(&tmp_dir);

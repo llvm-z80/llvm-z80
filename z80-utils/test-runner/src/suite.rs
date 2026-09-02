@@ -16,11 +16,6 @@ pub enum TestOutcome {
 pub struct TestResult {
     pub tag: String,
     pub outcome: TestOutcome,
-    /// Optional diagnostic text printed under the result line (e.g. the
-    /// captured port-1 `FAIL @<line>` strings for a failing multi-CHECK
-    /// fixture — ravn/llvm-z80#137).  Sibling to `outcome` so existing
-    /// `match &outcome` sites are unaffected.
-    pub note: Option<String>,
 }
 
 impl TestResult {
@@ -28,7 +23,6 @@ impl TestResult {
         TestResult {
             tag: tag.into(),
             outcome: TestOutcome::Pass { reg_value: reg_value.into() },
-            note: None,
         }
     }
 
@@ -36,7 +30,6 @@ impl TestResult {
         TestResult {
             tag: tag.into(),
             outcome: TestOutcome::Fail { got: got.into(), expected: expected.into() },
-            note: None,
         }
     }
 
@@ -44,7 +37,6 @@ impl TestResult {
         TestResult {
             tag: tag.into(),
             outcome: TestOutcome::Fatal { reason: reason.into() },
-            note: None,
         }
     }
 
@@ -52,18 +44,38 @@ impl TestResult {
         TestResult {
             tag: tag.into(),
             outcome: TestOutcome::Skip { reason: reason.into() },
-            note: None,
         }
-    }
-
-    /// Attach diagnostic text rendered under the result line.
-    pub fn with_note(mut self, note: Option<String>) -> Self {
-        self.note = note;
-        self
     }
 
     pub fn is_pass(&self) -> bool {
         matches!(self.outcome, TestOutcome::Pass { .. })
+    }
+}
+
+/// Run a built program and judge it against the `expect` directive in its
+/// source. Every suite that checks a program's return value does exactly this,
+/// so the four copies of it live here.
+pub fn judge(
+    tag: &str,
+    bin: &Path,
+    target: crate::config::Target,
+    halt_addr: &str,
+    result_addr: u32,
+    dump: &Path,
+    source: &str,
+) -> TestResult {
+    let got = match crate::emulator::run_program(
+        bin, target, halt_addr, result_addr, dump, target.emu_timeout_secs())
+    {
+        Ok(r) => r.value,
+        Err(e) => return TestResult::fatal(tag, e),
+    };
+    let expected = crate::emulator::parse_expected(source);
+    match crate::emulator::check_result(&got, &expected) {
+        Ok(()) => TestResult::pass(tag, format!("0x{got}")),
+        Err((got_padded, exp_padded)) => {
+            TestResult::fail(tag, format!("0x{got_padded}"), format!("0x{exp_padded}"))
+        }
     }
 }
 
@@ -343,7 +355,16 @@ pub fn run_cmd_timeout(
         match child.try_wait() {
             Ok(Some(status)) => {
                 let stderr = stderr_reader.join().unwrap_or_default();
-                return Ok((status.code().unwrap_or(1), String::new(), stderr));
+                // A process killed by a signal has no exit code. Report the
+                // signal negated so callers can tell a crash from a compiler
+                // that merely rejected its input; a deep enough nesting makes
+                // clang's parser overflow the stack and die without printing
+                // anything at all.
+                let code = match status.code() {
+                    Some(c) => c,
+                    None => -std::os::unix::process::ExitStatusExt::signal(&status).unwrap_or(1),
+                };
+                return Ok((code, String::new(), stderr));
             }
             Ok(None) => {
                 if start.elapsed() > timeout {

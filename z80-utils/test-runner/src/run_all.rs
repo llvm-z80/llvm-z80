@@ -166,7 +166,6 @@ pub fn run(mode: Mode, paths: &Paths) -> bool {
                     match &t.outcome {
                         crate::suite::TestOutcome::Fail { got, expected } => {
                             println!("  FAIL  {}  (got {got}, expected {expected})", t.tag);
-                            crate::display::print_note(t.note.as_deref());
                         }
                         crate::suite::TestOutcome::Fatal { reason } => {
                             println!("  FATAL {}  ({reason})", t.tag);

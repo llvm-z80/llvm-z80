@@ -2,13 +2,6 @@
 ; Tests multiply and shifts that wrap around, common in Rust
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 define i16 @main() {
   %status = alloca i16
   store i16 0, ptr %status

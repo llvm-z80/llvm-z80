@@ -61,6 +61,7 @@ pub fn run(paths: &Paths, config: &UtilsConfig, on_result: &mut OnResult) -> Sui
     let pattern = config.pattern.as_deref();
     let mut result = SuiteResult::default();
 
+    result.merge(run_group_shipped_crt0(paths, target, opt, pattern, on_result));
     result.merge(run_group_elf_roundtrip(paths, target, opt, pattern, on_result));
     result.merge(run_group_rel_roundtrip(paths, target, opt, pattern, on_result));
     result.merge(run_group_elf_crosslink(paths, target, opt, pattern, on_result));
@@ -71,7 +72,7 @@ pub fn run(paths: &Paths, config: &UtilsConfig, on_result: &mut OnResult) -> Sui
     result
 }
 
-/// Run all 6 test groups in parallel with a progress display.
+/// Run all test groups in parallel with a progress display.
 /// Returns true if all tests passed.
 pub fn run_parallel(paths: &Paths, config: &UtilsConfig) -> bool {
     let groups = build_groups(config);
@@ -274,6 +275,7 @@ fn build_groups(config: &UtilsConfig) -> Vec<GroupDef> {
         }};
     }
 
+    add_group!("shipped crt0", run_group_shipped_crt0, pattern);
     add_group!("elf roundtrip", run_group_elf_roundtrip, pattern);
     add_group!("rel roundtrip", run_group_rel_roundtrip, pattern);
     add_group!("elf2rel crosslink", run_group_elf_crosslink, pattern);
@@ -325,11 +327,18 @@ fn clang_to_elf(
     }
 }
 
+/// Link through the clang driver, but with the harness's startup code instead
+/// of the shipped one: the runner reads a test's result from `_exitcode`, which
+/// only the harness crt0 records. `-nostartfiles` keeps the driver from adding
+/// its own and colliding on `_start`.
 fn link_with_clang(
     clang: &Path, target: Target, objs: &[&Path], extra_libs: &[&Path], output: &Path,
+    crt0: &Path,
 ) -> Result<(), String> {
     let mut cmd = Command::new(clang);
     cmd.arg(format!("--target={}", target.triple()));
+    cmd.arg("-nostartfiles");
+    cmd.arg(crt0);
     for obj in objs { cmd.arg(obj); }
     for lib in extra_libs { cmd.arg(lib); }
     cmd.arg("-o").arg(output);
@@ -360,21 +369,17 @@ fn run_elf_binary(clang: &Path, elf: &Path, source: &str, target: Target, tag: &
     if let Err(e) = emulator::elf_to_bin(&objcopy, elf, &bin) {
         return TestResult::fatal(tag, e);
     }
-    let halt_addr = match emulator::halt_addr_from_elf(
-        &clang.parent().unwrap().join("llvm-nm"), elf) {
+    let nm = clang.parent().unwrap().join("llvm-nm");
+    let halt_addr = match emulator::halt_addr_from_elf(&nm, elf) {
         Some(addr) => addr,
         None => return TestResult::fatal(tag, "_halt symbol not found in ELF"),
     };
-    match emulator::emulate(&bin, target, &halt_addr) {
-        Err(e) => TestResult::fatal(tag, e),
-        Ok(got) => {
-            let expected = emulator::parse_expected(source);
-            match emulator::check_result(&got, &expected) {
-                Ok(()) => TestResult::pass(tag, format!("0x{got}")),
-                Err((g, e)) => TestResult::fail(tag, format!("0x{g}"), format!("0x{e}")),
-            }
-        }
-    }
+    let result_addr = match emulator::symbol_addr_from_elf(&nm, elf, "_exitcode") {
+        Some(a) => a,
+        None => return TestResult::fatal(tag, "_exitcode symbol not found in ELF"),
+    };
+    let dump = bin.with_extension("ram");
+    crate::suite::judge(tag, &bin, target, &halt_addr, result_addr, &dump, source)
 }
 
 fn sdcc_to_rel(
@@ -410,7 +415,9 @@ fn link_rels_with_custom_lib(
     custom_rt_lib: Option<&Path>,
 ) -> Result<PathBuf, String> {
     let ihx = out_base.with_extension("ihx");
-    let crt0 = paths.crt0(target);
+    // The harness crt0 records main's return value at _exitcode.
+    let crt0 = crate::runtime::ensure_sdcc_crt0(paths, target)
+        .map_err(|e| format!("harness crt0: {e}"))?;
     let sdcc_lib = config::find_sdcc_lib(target);
 
     let mut cmd = Command::new(target.linker());
@@ -451,16 +458,12 @@ fn run_ihx_binary(ihx: &Path, source: &str, target: Target, tag: &str) -> TestRe
         Some(addr) => addr,
         None => return TestResult::fatal(tag, "_halt symbol not found in map file"),
     };
-    match emulator::emulate(&bin, target, &halt_addr) {
-        Err(e) => TestResult::fatal(tag, e),
-        Ok(got) => {
-            let expected = emulator::parse_expected(source);
-            match emulator::check_result(&got, &expected) {
-                Ok(()) => TestResult::pass(tag, format!("0x{got}")),
-                Err((g, e)) => TestResult::fail(tag, format!("0x{g}"), format!("0x{e}")),
-            }
-        }
-    }
+    let result_addr = match emulator::symbol_addr_from_map(&map_file, "_exitcode") {
+        Some(a) => a,
+        None => return TestResult::fatal(tag, "_exitcode symbol not found in map file"),
+    };
+    let dump = bin.with_extension("ram");
+    crate::suite::judge(tag, &bin, target, &halt_addr, result_addr, &dump, source)
 }
 
 fn clang_to_rel(
@@ -483,6 +486,112 @@ fn clang_to_rel(
 
 // ── Group 1: ELF roundtrip ─────────────────────────────────────────────────
 
+/// Link through the clang driver with no overrides and check that the result
+/// boots.
+///
+/// Every other group replaces the startup code with the harness's, which
+/// records a result the runner can read back. That leaves the crt0 the driver
+/// actually ships with nothing exercising it, so this group links the way a
+/// user does: the driver picks the linker script, the runtime archive and its
+/// own crt0. Without `_exitcode` there is no value to compare, but reaching
+/// `_halt` still proves the shipped startup code set up the stack, terminated
+/// its .bss loop, and called main.
+fn run_group_shipped_crt0(
+    paths: &Paths, target: Target, opt: OptLevel, pattern: Option<&str>,
+    cb: &mut OnResult,
+) -> SuiteResult {
+    let test_dir = paths.clang_test_dir();
+    let clang = paths.clang();
+    let tests = discover_tests(&test_dir, "test_", "c");
+    let reg_name = target.reg_name();
+    let mut result = SuiteResult::default();
+
+    for test_file in &tests {
+        let name = test_file.file_stem().unwrap().to_string_lossy().to_string();
+        if let Some(pat) = pattern {
+            if !name.contains(pat) { continue; }
+        }
+        let source = std::fs::read_to_string(test_file).unwrap_or_default();
+        let tag = format!("{name}_shipped_crt0");
+        if let Some(reason) = check_skip_c(&source, target, &[], "") {
+            result.add(TestResult::skip(&tag, &reason), cb, reg_name);
+            continue;
+        }
+        result.add(
+            test_shipped_crt0(&clang, test_file, &tag, target, opt, &source, &test_dir),
+            cb,
+            reg_name,
+        );
+    }
+    result
+}
+
+fn test_shipped_crt0(
+    clang: &Path, src: &Path, tag: &str, target: Target, opt: OptLevel,
+    source: &str, work_dir: &Path,
+) -> TestResult {
+    let tmp = unique_tmp_dir(work_dir);
+    let _ = std::fs::create_dir_all(&tmp);
+
+    let obj = tmp.join(format!("{tag}.o"));
+    let elf = tmp.join(format!("{tag}.elf"));
+    let bin = tmp.join(format!("{tag}.bin"));
+    let extra_flags = parse_extra_flags_c(source);
+    if let Err(e) = clang_to_elf(clang, src, &obj, target, opt, &extra_flags) {
+        remove_tmp_dir(&tmp);
+        return TestResult::fatal(tag, e);
+    }
+
+    // No -nostartfiles and no explicit crt0: this is the driver's own link.
+    let mut cmd = Command::new(clang);
+    cmd.arg(format!("--target={}", target.triple()));
+    cmd.arg(&obj).arg("-o").arg(&elf);
+    match run_cmd_timeout(&mut cmd, COMPILE_TIMEOUT) {
+        Err(e) => {
+            remove_tmp_dir(&tmp);
+            return TestResult::fatal(tag, format!("driver link: {e}"));
+        }
+        Ok((code, _, stderr)) if code != 0 => {
+            let e = extract_error(&stderr);
+            remove_tmp_dir(&tmp);
+            return TestResult::fatal(tag, format!("driver link: {e}"));
+        }
+        _ => {}
+    }
+
+    let nm = clang.parent().unwrap().join("llvm-nm");
+    // _start comes only from the crt0 the driver chose, so its presence is what
+    // proves the driver linked one at all.
+    if emulator::symbol_addr_from_elf(&nm, &elf, "_start").is_none() {
+        remove_tmp_dir(&tmp);
+        return TestResult::fatal(tag, "driver linked no crt0: _start is undefined");
+    }
+    let halt_addr = match emulator::halt_addr_from_elf(&nm, &elf) {
+        Some(a) => a,
+        None => {
+            remove_tmp_dir(&tmp);
+            return TestResult::fatal(tag, "_halt symbol not found in ELF");
+        }
+    };
+
+    let objcopy = clang.parent().unwrap().join("llvm-objcopy");
+    if let Err(e) = emulator::elf_to_bin(&objcopy, &elf, &bin) {
+        remove_tmp_dir(&tmp);
+        return TestResult::fatal(tag, e);
+    }
+    if std::fs::metadata(&bin).map(|m| m.len() > 0x1_0000).unwrap_or(false) {
+        remove_tmp_dir(&tmp);
+        return TestResult::skip(tag, "binary exceeds the 64 KB address space");
+    }
+
+    let r = match emulator::run_to_halt(&bin, target, &halt_addr, target.emu_timeout_secs()) {
+        Ok(()) => TestResult::pass(tag, "booted"),
+        Err(e) => TestResult::fail(tag, e, "reaches _halt"),
+    };
+    remove_tmp_dir(&tmp);
+    r
+}
+
 fn run_group_elf_roundtrip(
     paths: &Paths, target: Target, opt: OptLevel, pattern: Option<&str>,
     cb: &mut OnResult,
@@ -492,6 +601,13 @@ fn run_group_elf_roundtrip(
     let tests = discover_tests(&test_dir, "test_", "c");
     let reg_name = target.reg_name();
     let mut result = SuiteResult::default();
+    let harness_crt0 = match crate::runtime::ensure_elf(paths, target, &clang) {
+        Ok(rt) => rt.crt0_obj,
+        Err(e) => {
+            result.add(TestResult::fatal("utils_runtime", e), cb, reg_name);
+            return result;
+        }
+    };
 
     for test_file in &tests {
         let name = test_file.file_stem().unwrap().to_string_lossy().to_string();
@@ -507,7 +623,7 @@ fn run_group_elf_roundtrip(
         }
 
         let tag = format!("{name}_elf_rt");
-        let r = test_elf_roundtrip(&clang, test_file, &tag, target, opt, &source, &test_dir);
+        let r = test_elf_roundtrip(&clang, test_file, &tag, target, opt, &source, &test_dir, &harness_crt0);
         result.add(r, cb, reg_name);
     }
 
@@ -516,7 +632,7 @@ fn run_group_elf_roundtrip(
 
 fn test_elf_roundtrip(
     clang: &Path, src: &Path, tag: &str, target: Target, opt: OptLevel,
-    source: &str, work_dir: &Path,
+    source: &str, work_dir: &Path, crt0: &Path,
 ) -> TestResult {
     let tmp = unique_tmp_dir(work_dir);
     let _ = std::fs::create_dir_all(&tmp);
@@ -538,7 +654,7 @@ fn test_elf_roundtrip(
     }
 
     let elf = tmp.join(format!("{tag}.elf"));
-    if let Err(e) = link_with_clang(clang, target, &[rt_o.as_path()], &[], &elf) {
+    if let Err(e) = link_with_clang(clang, target, &[rt_o.as_path()], &[], &elf, crt0) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, format!("link: {e}"));
     }
 
@@ -702,6 +818,13 @@ fn run_group_rel_crosslink(
     let test_names = discover_sdcc_test_names(&test_dir);
     let reg_name = target.reg_name();
     let mut result = SuiteResult::default();
+    let harness_crt0 = match crate::runtime::ensure_elf(paths, target, &clang) {
+        Ok(rt) => rt.crt0_obj,
+        Err(e) => {
+            result.add(TestResult::fatal("utils_runtime", e), cb, reg_name);
+            return result;
+        }
+    };
 
     for test_name in &test_names {
         if let Some(pat) = pattern {
@@ -714,7 +837,7 @@ fn run_group_rel_crosslink(
 
         let tag = format!("{test_name}_rel_cross");
         let r = test_rel_crosslink(
-            &clang, &clang_src, &sdcc_src, &tag, test_name,
+            &harness_crt0, &clang, &clang_src, &sdcc_src, &tag, test_name,
             target, opt, &test_dir,
         );
         result.add(r, cb, reg_name);
@@ -724,6 +847,7 @@ fn run_group_rel_crosslink(
 }
 
 fn test_rel_crosslink(
+    crt0: &Path,
     clang: &Path, clang_src: &Path, sdcc_src: &Path, tag: &str, test_name: &str,
     target: Target, opt: OptLevel, work_dir: &Path,
 ) -> TestResult {
@@ -762,7 +886,7 @@ fn test_rel_crosslink(
     };
 
     let elf = tmp.join(format!("{tag}.elf"));
-    if let Err(e) = link_with_clang(clang, target, &[main_o, lib_o], &extra_libs, &elf) {
+    if let Err(e) = link_with_clang(clang, target, &[main_o, lib_o], &extra_libs, &elf, crt0) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, format!("link: {e}"));
     }
 
@@ -785,6 +909,13 @@ fn run_group_elf_ar_roundtrip(
     let tests = discover_tests(&test_dir, "test_", "c");
     let reg_name = target.reg_name();
     let mut result = SuiteResult::default();
+    let harness_crt0 = match crate::runtime::ensure_elf(paths, target, &clang) {
+        Ok(rt) => rt.crt0_obj,
+        Err(e) => {
+            result.add(TestResult::fatal("utils_runtime", e), cb, reg_name);
+            return result;
+        }
+    };
 
     // Roundtrip the runtime archive: .a (ELF) → elf2rel → .lib → rel2elf → .a
     let tmp_ar = unique_tmp_dir(&test_dir);
@@ -858,7 +989,7 @@ fn run_group_elf_ar_roundtrip(
 
         let tag = format!("{name}_elf_ar");
         let r = test_elf_ar_roundtrip(
-            &clang, test_file, &tag, target, opt, &source, &test_dir,
+            &harness_crt0, &clang, test_file, &tag, target, opt, &source, &test_dir,
             roundtripped_a.as_deref(),
         );
         result.add(r, cb, reg_name);
@@ -869,6 +1000,7 @@ fn run_group_elf_ar_roundtrip(
 }
 
 fn test_elf_ar_roundtrip(
+    crt0: &Path,
     clang: &Path, src: &Path, tag: &str, target: Target, opt: OptLevel,
     source: &str, work_dir: &Path, roundtripped_a: Option<&Path>,
 ) -> TestResult {
@@ -883,7 +1015,7 @@ fn test_elf_ar_roundtrip(
 
     let elf = tmp.join(format!("{tag}.elf"));
     let extra_libs: Vec<&Path> = roundtripped_a.into_iter().collect();
-    if let Err(e) = link_with_clang(clang, target, &[elf_o.as_path()], &extra_libs, &elf) {
+    if let Err(e) = link_with_clang(clang, target, &[elf_o.as_path()], &extra_libs, &elf, crt0) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, format!("link: {e}"));
     }
 

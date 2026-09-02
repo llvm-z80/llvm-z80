@@ -2,13 +2,6 @@
 ; C generates switch but with limited patterns; tests jump table lowering
 ; expect 0x000F
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 ; Helper: maps input to output via switch
 define i16 @classify(i16 %x) {
 entry:

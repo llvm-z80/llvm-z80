@@ -9,6 +9,8 @@ mod run_all;
 mod runtime;
 mod sdcc;
 mod suite;
+mod torture;
+mod torture_data;
 mod utils;
 
 use std::process::ExitCode;
@@ -39,6 +41,7 @@ fn main() -> ExitCode {
         "clang" => cmd_clang(&args[1..]),
         "custom" => cmd_custom(&args[1..]),
         "sdcc" => cmd_sdcc(&args[1..]),
+        "torture" => cmd_torture(&args[1..]),
         "llc" => cmd_llc(&args[1..]),
         "utils" => cmd_utils(&args[1..]),
         "help" | "--help" | "-h" => {
@@ -56,7 +59,7 @@ fn main() -> ExitCode {
 /// Create a callback that prints each test result immediately to stdout.
 fn print_callback() -> OnResult {
     Box::new(|result, reg_name| {
-        display::print_test_result(&result.outcome, &result.tag, reg_name, result.note.as_deref());
+        display::print_test_result(&result.outcome, &result.tag, reg_name);
     })
 }
 
@@ -71,6 +74,7 @@ Commands:
   clang      Run Clang C test suite
   custom     Compile-check arbitrary .c or .ll files
   sdcc       Run SDCC compatibility test suite
+  torture    Run the GCC C torture suite (not part of the default run)
   llc        Run LLC (LLVM IR) test suite
   utils      Run elf2rel/rel2elf roundtrip and crosslink tests
   help       Show this help
@@ -87,6 +91,7 @@ Clang-specific:
   -fast-math           Enable -ffast-math
   -omit-frame-pointer  Enable -fomit-frame-pointer
   -static-stack        Enable +static-stack (BSS locals)
+  -freestanding        Add -ffreestanding (GCC does not; it also hides alloca)
   -verify              Add -mllvm -verify-machineinstrs (fail on invalid MIR;
                        catches the peephole-liveness family, e.g. ravn/llvm-z80#199).
                        Use BUILD_DIR=<assertions build> to add internal asserts.
@@ -97,6 +102,24 @@ Clang-specific:
                        cc/clang/gcc): flag any test whose Z80 result disagrees
                        with the host's computed value (catches consistently-wrong
                        values; reference is computed, not a hand-written expect).
+
+Torture-specific:
+  -tier <compile|execute|all>  Which tier to run (default: all)
+  -jobs <N>            Parallel workers (default: 20)
+  -std <name>          C standard passed to clang (default: gnu17)
+  -emu-timeout <SECS>  Emulator budget per test (default: 5). Raise it to tell
+                       a real hang apart from a merely slow test.
+  -run-skipped         Run ONLY the manifest's skipped tests and report any
+                       that now pass, so a stale or wrong skip= cannot hide a
+                       working test forever.
+  -list-failures <f>   Write the failure list to a file, for diffing two runs.
+  -verify              Add -mllvm -verify-machineinstrs
+
+  The torture suite has no expected-failure mechanism on purpose. The manifest
+  skips only what the target structurally cannot do (no libc, no 64-bit double,
+  16-bit int, 64 KB address space); a backend bug keeps failing until fixed, so
+  this suite stays red while any bug is outstanding and is excluded from the
+  default run.
 
 Environment:
   BUILD_DIR            Build directory (default: ../build)"
@@ -464,4 +487,115 @@ fn cmd_bench(args: &[String]) -> ExitCode {
     let config = bench::BenchConfig { target, opt, pattern };
     bench::run(&paths, &config);
     ExitCode::SUCCESS
+}
+
+fn cmd_torture(args: &[String]) -> ExitCode {
+    let mut target = Target::Z80;
+    let mut opt_filter = "O1".to_string();
+    let mut tiers = vec![torture::Tier::Compile, torture::Tier::Execute];
+    let mut jobs = 20usize;
+    let mut std_name = "gnu17".to_string();
+    let mut emu_timeout = torture::EMU_TIMEOUT;
+    let mut freestanding = false;
+    let mut verify = false;
+    let mut run_skipped = false;
+    let mut list_failures = None;
+    let mut pattern = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-target" => target = parse_target(args, &mut i),
+            "-opt" => {
+                i += 1;
+                if i < args.len() {
+                    opt_filter = args[i].clone();
+                }
+            }
+            "-tier" => {
+                i += 1;
+                match args.get(i).and_then(|s| torture::Tier::parse(s)) {
+                    Some(t) => tiers = t,
+                    None => {
+                        eprintln!("-tier expects compile, execute or all");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            "-jobs" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<usize>().ok()) {
+                    Some(n) if n > 0 => jobs = n,
+                    _ => {
+                        eprintln!("-jobs expects a positive number");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            "-std" => {
+                i += 1;
+                if i < args.len() {
+                    std_name = args[i].clone();
+                }
+            }
+            "-list-failures" => {
+                i += 1;
+                match args.get(i) {
+                    Some(p) => list_failures = Some(std::path::PathBuf::from(p)),
+                    None => {
+                        eprintln!("-list-failures expects a path");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            "-emu-timeout" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<u64>().ok()) {
+                    Some(n) if n > 0 => emu_timeout = n,
+                    _ => {
+                        eprintln!("-emu-timeout expects a positive number of seconds");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            "-freestanding" => freestanding = true,
+            "-verify" => verify = true,
+            "-run-skipped" => run_skipped = true,
+            // `cargo run torture -- -tier ...` forwards the separator too.
+            "--" => {}
+            s if !s.starts_with('-') => pattern = Some(s.to_string()),
+            other => {
+                eprintln!("unknown option: {other}");
+                return ExitCode::FAILURE;
+            }
+        }
+        i += 1;
+    }
+
+    let opt_levels = suite::expand_opt_levels(&opt_filter);
+    if opt_levels.is_empty() {
+        eprintln!("invalid opt level: {opt_filter}");
+        return ExitCode::FAILURE;
+    }
+
+    let paths = Paths::resolve();
+    let config = torture::TortureConfig {
+        target,
+        opt_levels,
+        tiers,
+        jobs,
+        pattern,
+        freestanding,
+        verify,
+        run_skipped,
+        list_failures,
+        std: std_name,
+        emu_timeout,
+    };
+
+    if torture::run(&paths, &config) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }

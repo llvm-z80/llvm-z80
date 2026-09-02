@@ -6,13 +6,6 @@
 @v1 = global i8 0
 @v2 = global i8 0
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 define i16 @main() {
 entry:
   %status = alloca i16

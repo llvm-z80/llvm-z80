@@ -3,13 +3,6 @@
 ; Uses 8.8 fixed-point format (scale=8): 1.0 = 256, 0.5 = 128.
 ; expect 0x000F (4 bits, all pass)
 
-define void @_start() {
-  call void asm sideeffect "ld sp, #0xFFFE", ""()
-  %r = call i16 @main()
-  call void asm sideeffect ".globl _halt\0A_halt:\0Ahalt", ""()
-  ret void
-}
-
 declare i16 @llvm.smul.fix.i16(i16, i16, i32)
 declare i16 @llvm.umul.fix.i16(i16, i16, i32)
 declare i16 @llvm.sdiv.fix.i16(i16, i16, i32)

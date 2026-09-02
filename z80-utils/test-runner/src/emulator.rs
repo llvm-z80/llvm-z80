@@ -1,24 +1,43 @@
-use std::io::{BufRead, Read};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::config::Target;
 
-/// Find the `_halt` symbol address from an SDCC linker map file (.map).
+/// Find a symbol's address in an SDCC linker map file (.map).
 /// Map entries are separated by `|`, each formatted as "  ADDR  SYMBOL  ".
-pub fn halt_addr_from_map(map_file: &Path) -> Option<String> {
+pub fn symbol_addr_from_map(map_file: &Path, name: &str) -> Option<u32> {
     let content = std::fs::read_to_string(map_file).ok()?;
     for line in content.lines() {
         for entry in line.split('|') {
             let parts: Vec<&str> = entry.split_whitespace().collect();
-            if parts.len() >= 2 && parts[1] == "_halt" {
-                if let Ok(addr) = u32::from_str_radix(parts[0], 16) {
-                    return Some(format!("0x{:04X}", addr));
-                }
+            // The map truncates names to nine characters, so a longer symbol
+            // only ever appears as a prefix of itself.
+            if parts.len() >= 2 && (parts[1] == name || name.starts_with(parts[1]) && parts[1].len() >= 9) {
+                return u32::from_str_radix(parts[0], 16).ok();
             }
+        }
+    }
+    None
+}
+
+/// Find the `_halt` symbol address from an SDCC linker map file (.map).
+pub fn halt_addr_from_map(map_file: &Path) -> Option<String> {
+    symbol_addr_from_map(map_file, "_halt").map(|a| format!("0x{a:04X}"))
+}
+
+/// Find a symbol's address in an ELF using llvm-nm.
+pub fn symbol_addr_from_elf(llvm_nm: &Path, elf: &Path, name: &str) -> Option<u32> {
+    let output = std::process::Command::new(llvm_nm).arg(elf).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // llvm-nm output: "0000001c T _halt"
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 && parts[2] == name {
+            return u32::from_str_radix(parts[0], 16).ok();
         }
     }
     None
@@ -26,22 +45,7 @@ pub fn halt_addr_from_map(map_file: &Path) -> Option<String> {
 
 /// Find the `_halt` symbol address from an ELF using llvm-nm.
 pub fn halt_addr_from_elf(llvm_nm: &Path, elf: &Path) -> Option<String> {
-    let output = std::process::Command::new(llvm_nm)
-        .arg(elf)
-        .output()
-        .ok()?;
-    if !output.status.success() { return None; }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // llvm-nm output: "0000001c T _halt"
-    for line in stdout.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 3 && parts[2] == "_halt" {
-            if let Ok(addr) = u32::from_str_radix(parts[0], 16) {
-                return Some(format!("0x{:04X}", addr));
-            }
-        }
-    }
-    None
+    symbol_addr_from_elf(llvm_nm, elf, "_halt").map(|a| format!("0x{a:04X}"))
 }
 
 /// Run makebin to convert .ihx to .bin.
@@ -75,192 +79,152 @@ pub fn elf_to_bin(objcopy: &Path, elf: &Path, bin: &Path) -> Result<(), String> 
     }
 }
 
-/// Run z88dk-ticks emulator and extract the result register value.
+/// Cycle budget handed to z88dk-ticks.
 ///
-/// `-trace` generates huge stdout (every instruction). We drain it in a
-/// background thread using `BufReader::read_line` with a large internal
-/// buffer, scanning each line for the register pattern.
-/// Only the last matched value is kept.
-pub fn emulate(bin: &Path, target: Target, halt_addr: &str) -> Result<String, String> {
-    let timeout = Duration::from_secs(target.emu_timeout_secs());
+/// Reaching it means the program never got to its halt address. This has to be
+/// checked: at its own default limit the emulator exits *successfully*, so a
+/// spinning program would otherwise look like a clean run whose `_exitcode` is
+/// still the zero the .bss loop left there, and report as a pass.
+const CYCLE_LIMIT: u64 = 2_000_000_000;
 
+/// What a program left behind when it stopped.
+pub struct RunResult {
+    /// The 16-bit value at `_exitcode`, formatted like the register scrape this
+    /// replaced (four uppercase hex digits).
+    pub value: String,
+    /// Cycles between the start and end triggers, which z88dk-ticks prints on
+    /// its last line.
+    pub cycles: u64,
+}
+
+/// Run a program to its halt address and read its result out of a RAM dump.
+///
+/// `-trace` is the only way z88dk-ticks reports registers, and it prints every
+/// executed instruction: emulation slows by more than two orders of magnitude,
+/// enough to turn tests that finish in a third of a second into timeouts. The
+/// harness crt0 instead stores main's return value at `_exitcode`, so the run
+/// needs no trace at all and the value comes from `-output`, which dumps the
+/// 64 KB address space at exit.
+pub fn run_program(
+    bin: &Path,
+    target: Target,
+    halt_addr: &str,
+    result_addr: u32,
+    dump: &Path,
+    timeout_secs: u64,
+) -> Result<RunResult, String> {
     let mut cmd = Command::new("z88dk-ticks");
     for flag in target.emu_flags() {
         cmd.arg(flag);
     }
-    cmd.args(["-trace", "-end", halt_addr]);
+    cmd.args(["-end", halt_addr]);
+    cmd.args(["-counter", &CYCLE_LIMIT.to_string()]);
+    cmd.arg("-output").arg(dump);
     cmd.arg(bin);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::null());
 
     let mut child = cmd.spawn().map_err(|e| format!("z88dk-ticks: {e}"))?;
-
-    // Take stdout pipe — drain in a reader thread to prevent pipe deadlock.
-    let stdout = child.stdout.take().unwrap();
-    let needle = format!("{}=", target.reg_grep()); // "de=" or "bc="
-    let killed = Arc::new(AtomicBool::new(false));
-    let killed2 = Arc::clone(&killed);
-
+    let mut stdout = child.stdout.take().unwrap();
     let reader = std::thread::spawn(move || {
-        drain_for_register(stdout, &needle, &killed2)
+        let mut buf = String::new();
+        let _ = std::io::Read::read_to_string(&mut stdout, &mut buf);
+        buf
     });
 
-    // Timeout loop
     let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {
                 if start.elapsed() > timeout {
-                    killed.store(true, Ordering::Relaxed);
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("emulator timeout/{}s", timeout.as_secs()));
+                    return Err(format!("emulator timeout/{timeout_secs}s"));
                 }
-                std::thread::sleep(Duration::from_millis(5));
+                std::thread::sleep(Duration::from_millis(2));
             }
             Err(e) => return Err(format!("wait: {e}")),
         }
     }
-
-    let value = reader.join().map_err(|_| "reader thread panicked".to_string())?;
-    match value {
-        Some(v) => Ok(v),
-        None => Err(format!("no register value in emulator output")),
-    }
-}
-
-/// Drain emulator stdout line by line, extracting the last register value.
-/// Uses BufReader with a 512 KB internal buffer. Reuses a single String
-/// buffer for read_line to avoid per-line heap allocation.
-fn drain_for_register(
-    reader: impl Read,
-    needle: &str,
-    killed: &AtomicBool,
-) -> Option<String> {
-    let mut buf_reader = std::io::BufReader::with_capacity(512 * 1024, reader);
-    let mut line_buf = String::with_capacity(256);
-    let mut last_value: Option<String> = None;
-    let needle_lower = needle.to_lowercase();
-
-    loop {
-        if killed.load(Ordering::Relaxed) {
-            break;
-        }
-        line_buf.clear();
-        match buf_reader.read_line(&mut line_buf) {
-            Ok(0) => break, // EOF
-            Ok(_) => {}
-            Err(_) => break,
-        }
-
-        let lower = line_buf.to_lowercase();
-        if let Some(pos) = lower.find(&needle_lower) {
-            let hex_start = pos + needle_lower.len();
-            let hex: String = lower[hex_start..]
-                .chars()
-                .take_while(|c| c.is_ascii_hexdigit())
-                .collect();
-            if !hex.is_empty() {
-                last_value = Some(hex.to_uppercase());
-            }
-        }
+    let cycles = reader
+        .join()
+        .ok()
+        .and_then(|out| out.lines().last().and_then(|l| l.trim().parse::<u64>().ok()))
+        .unwrap_or(0);
+    if cycles >= CYCLE_LIMIT {
+        return Err("never reached _halt (cycle limit)".to_string());
     }
 
-    last_value
+    let data = std::fs::read(dump).map_err(|e| format!("RAM dump: {e}"))?;
+    let at = result_addr as usize;
+    if at + 1 >= data.len() {
+        return Err(format!("_exitcode at 0x{result_addr:04X} is outside the dump"));
+    }
+    // Little endian.
+    let value = format!("{:04X}", u16::from(data[at]) | u16::from(data[at + 1]) << 8);
+    Ok(RunResult { value, cycles })
 }
 
-/// Re-run the binary capturing port-1 console output for failure diagnosis
-/// (ravn/llvm-z80#137).  The auto-generated `test_90_edge_*` / `test_91_*`
-/// fixtures emit per-CHECK diagnostics (`FAIL @<line> got=.. exp=..`) via
-/// `out (0x01),a`; z88dk-ticks routes that port to stdout when given
-/// `-iochar <port>`.  We run WITHOUT `-trace` so stdout is exactly the
-/// printed text (the `-trace` register/disasm firehose would otherwise
-/// glue the chars into ~30k disassembly lines).
+
+
+
+/// Run a program and report only that it reached its halt address.
 ///
-/// Best-effort: returns the captured text (trailing cycle-count line
-/// stripped) or None if nothing was printed / the run failed.  Intended to
-/// be called only on a failing test, so the extra emulation cost is rare.
-pub fn capture_port_output(bin: &Path, target: Target, halt_addr: &str, port: u8) -> Option<String> {
-    let timeout = Duration::from_secs(target.emu_timeout_secs());
-
+/// The shipped crt0 does not record a result anywhere, so a program linked with
+/// it can only be checked for booting: reaching `_halt` means the stack was set
+/// up, the .bss loop terminated, and main was called and returned.
+pub fn run_to_halt(
+    bin: &Path,
+    target: Target,
+    halt_addr: &str,
+    timeout_secs: u64,
+) -> Result<(), String> {
     let mut cmd = Command::new("z88dk-ticks");
     for flag in target.emu_flags() {
         cmd.arg(flag);
     }
-    // No -trace: stdout is just the port-1 bytes + the final cycle count.
-    cmd.args(["-iochar", &port.to_string(), "-end", halt_addr]);
+    cmd.args(["-end", halt_addr]);
+    cmd.args(["-counter", &CYCLE_LIMIT.to_string()]);
     cmd.arg(bin);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::null());
 
-    let mut child = cmd.spawn().ok()?;
-    let stdout = child.stdout.take().unwrap();
-    let killed = Arc::new(AtomicBool::new(false));
-    let killed2 = Arc::clone(&killed);
-
-    // Drain in a thread (cap at 64 KB to bound a runaway fixture).
+    let mut child = cmd.spawn().map_err(|e| format!("z88dk-ticks: {e}"))?;
+    let mut stdout = child.stdout.take().unwrap();
     let reader = std::thread::spawn(move || {
-        let mut buf_reader = std::io::BufReader::with_capacity(64 * 1024, stdout);
-        let mut out = String::new();
-        let mut chunk = [0u8; 4096];
-        loop {
-            if killed2.load(Ordering::Relaxed) || out.len() >= 64 * 1024 {
-                break;
-            }
-            match buf_reader.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(n) => out.push_str(&String::from_utf8_lossy(&chunk[..n])),
-                Err(_) => break,
-            }
-        }
-        out
+        let mut buf = String::new();
+        let _ = std::io::Read::read_to_string(&mut stdout, &mut buf);
+        buf
     });
-
     let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(_)) => {
+                // Exiting on the cycle counter is not the same as stopping at
+                // the halt address; the emulator reports success either way.
+                let cycles = reader
+                    .join()
+                    .ok()
+                    .and_then(|o| o.lines().last().and_then(|l| l.trim().parse::<u64>().ok()))
+                    .unwrap_or(0);
+                return if cycles >= CYCLE_LIMIT {
+                    Err("never reached _halt (cycle limit)".to_string())
+                } else {
+                    Ok(())
+                };
+            }
             Ok(None) => {
                 if start.elapsed() > timeout {
-                    killed.store(true, Ordering::Relaxed);
                     let _ = child.kill();
                     let _ = child.wait();
-                    break;
+                    return Err(format!("never reached _halt within {timeout_secs}s"));
                 }
-                std::thread::sleep(Duration::from_millis(5));
+                std::thread::sleep(Duration::from_millis(2));
             }
-            Err(_) => break,
-        }
-    }
-
-    let raw = reader.join().ok()?;
-    let text = strip_trailing_cycle_count(&raw);
-    if text.trim().is_empty() { None } else { Some(text) }
-}
-
-/// Drop the trailing cycle-count line z88dk-ticks prints at `-end`
-/// (`printf("%llu\n", st)`): the last non-empty line if it is all digits.
-/// The fixtures always end their diagnostic stream with '\n', so the cycle
-/// count lands on its own line.
-fn strip_trailing_cycle_count(raw: &str) -> String {
-    let trimmed = raw.trim_end_matches(['\n', '\r', ' ', '\t']);
-    match trimmed.rfind('\n') {
-        Some(nl) => {
-            let last = &trimmed[nl + 1..];
-            if !last.is_empty() && last.bytes().all(|b| b.is_ascii_digit()) {
-                trimmed[..nl].to_string()
-            } else {
-                trimmed.to_string()
-            }
-        }
-        None => {
-            // Single line: strip it only if it is purely the cycle count.
-            if !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit()) {
-                String::new()
-            } else {
-                trimmed.to_string()
-            }
+            Err(e) => return Err(format!("wait: {e}")),
         }
     }
 }
