@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
@@ -207,6 +208,211 @@ namespace {
 /// callbr) and would otherwise surface as an internal backend error; the
 /// callbr is replaced with its fallthrough edge so compilation reaches the
 /// diagnostic cleanly.
+// True when one of the constraint's alternative codes lets the operand live
+// in a register.
+static bool hasRegisterAlternative(const InlineAsm::ConstraintInfo &C) {
+  for (const std::string &Code : C.Codes)
+    if (Code == "r" || Code == "R" || Code == "X" || Code[0] == '{' ||
+        (Code.size() == 1 && StringRef("abcdehl").contains(Code[0])))
+      return true;
+  return false;
+}
+
+static bool hasMemoryAlternative(const InlineAsm::ConstraintInfo &C) {
+  for (const std::string &Code : C.Codes)
+    if (Code == "m" || Code == "o" || Code == "V")
+      return true;
+  return false;
+}
+
+static bool isImmediateOnly(const InlineAsm::ConstraintInfo &C) {
+  for (const std::string &Code : C.Codes)
+    if (Code.size() != 1 || !StringRef("insEF").contains(Code[0]))
+      return false;
+  return !C.Codes.empty();
+}
+
+// GlobalISel's inline asm lowering does not implement register outputs that
+// are stored through a pointer, which is what clang emits for "+g"- and
+// "=X"-style constraints. When such an output may live in a register,
+// rewrite it into a plain register output followed by an explicit store, so
+// the asm call only carries operand shapes the lowering implements.
+static bool rewriteIndirectAsmOutputs(Function &F) {
+  SmallVector<CallInst *, 4> Worklist;
+  for (BasicBlock &BB : F)
+    for (Instruction &I : BB)
+      if (auto *CI = dyn_cast<CallInst>(&I))
+        if (CI->isInlineAsm())
+          Worklist.push_back(CI);
+
+  bool Changed = false;
+  for (CallInst *CI : Worklist) {
+    auto *IA = cast<InlineAsm>(CI->getCalledOperand());
+    InlineAsm::ConstraintInfoVector CV = IA->ParseConstraints();
+
+    SmallVector<bool, 8> Rewrite(CV.size(), false);
+    bool Any = false;
+    unsigned ArgIdx = 0;
+    for (unsigned I = 0; I != CV.size(); ++I) {
+      const InlineAsm::ConstraintInfo &C = CV[I];
+      bool ConsumesArg = C.Type == InlineAsm::isInput ||
+                         (C.Type == InlineAsm::isOutput && C.isIndirect);
+      // An aggregate cannot become a direct asm result; leave it indirect
+      // (a register-only aggregate is then diagnosed as unsupported).
+      if (C.Type == InlineAsm::isOutput && C.isIndirect &&
+          hasRegisterAlternative(C) &&
+          !CI->getParamElementType(ArgIdx)->isAggregateType()) {
+        Rewrite[I] = true;
+        Any = true;
+      }
+      if (ConsumesArg)
+        ++ArgIdx;
+    }
+    if (!Any)
+      continue;
+
+    // Constraint string segments map 1:1 to the parsed constraints.
+    SmallVector<StringRef, 8> Segments;
+    StringRef ConstraintStr = IA->getConstraintString();
+    ConstraintStr.split(Segments, ',');
+    if (Segments.size() != CV.size())
+      continue;
+
+    Type *OldRet = CI->getType();
+    auto OldRetElt = [&](unsigned Idx) -> Type * {
+      if (auto *ST = dyn_cast<StructType>(OldRet))
+        return ST->getElementType(Idx);
+      return OldRet;
+    };
+
+    unsigned OldRetIdx = 0, ArgNo = 0;
+    SmallVector<Type *, 4> NewRetTypes;
+    SmallVector<Value *, 8> NewArgs;
+    SmallVector<AttributeSet, 8> NewArgAttrs;
+    std::string NewConstraints;
+    // Pointer to store through and the result index that feeds it.
+    SmallVector<std::pair<Value *, unsigned>, 4> Stores;
+    // New result index of each old direct output, in output order.
+    SmallVector<unsigned, 4> OldToNewRet;
+
+    for (unsigned I = 0; I != CV.size(); ++I) {
+      const InlineAsm::ConstraintInfo &C = CV[I];
+      if (!NewConstraints.empty())
+        NewConstraints += ',';
+      if (Rewrite[I]) {
+        Stores.push_back({CI->getArgOperand(ArgNo), NewRetTypes.size()});
+        NewRetTypes.push_back(CI->getParamElementType(ArgNo));
+        ++ArgNo;
+        NewConstraints += C.isEarlyClobber ? "=&r" : "=r";
+        continue;
+      }
+      NewConstraints += Segments[I];
+      if (C.Type == InlineAsm::isOutput && !C.isIndirect) {
+        OldToNewRet.push_back(NewRetTypes.size());
+        NewRetTypes.push_back(OldRetElt(OldRetIdx++));
+      }
+      if (C.Type == InlineAsm::isInput ||
+          (C.Type == InlineAsm::isOutput && C.isIndirect)) {
+        NewArgs.push_back(CI->getArgOperand(ArgNo));
+        NewArgAttrs.push_back(CI->getAttributes().getParamAttrs(ArgNo));
+        ++ArgNo;
+      }
+    }
+
+    LLVMContext &Ctx = F.getContext();
+    Type *NewRet = NewRetTypes.empty()      ? Type::getVoidTy(Ctx)
+                   : NewRetTypes.size() == 1 ? NewRetTypes[0]
+                                             : StructType::get(Ctx, NewRetTypes);
+    SmallVector<Type *, 8> ParamTys;
+    for (Value *V : NewArgs)
+      ParamTys.push_back(V->getType());
+    FunctionType *NewFTy = FunctionType::get(NewRet, ParamTys, false);
+    InlineAsm *NewIA =
+        InlineAsm::get(NewFTy, IA->getAsmString(), NewConstraints,
+                       IA->hasSideEffects(), IA->isAlignStack(),
+                       IA->getDialect(), IA->canThrow());
+    CallInst *NewCall =
+        CallInst::Create(NewFTy, NewIA, NewArgs, "", CI->getIterator());
+    NewCall->copyMetadata(*CI);
+    NewCall->setAttributes(AttributeList::get(
+        Ctx, CI->getAttributes().getFnAttrs(), AttributeSet(), NewArgAttrs));
+
+    auto ExtractRet = [&](unsigned Idx) -> Value * {
+      if (NewRetTypes.size() == 1)
+        return NewCall;
+      return ExtractValueInst::Create(NewCall, {Idx}, "", CI->getIterator());
+    };
+
+    for (const auto &[Ptr, Idx] : Stores)
+      new StoreInst(ExtractRet(Idx), Ptr, CI->getIterator());
+
+    if (!OldRet->isVoidTy()) {
+      Value *Repl;
+      if (auto *ST = dyn_cast<StructType>(OldRet)) {
+        Repl = PoisonValue::get(ST);
+        for (unsigned I = 0; I != OldToNewRet.size(); ++I)
+          Repl = InsertValueInst::Create(Repl, ExtractRet(OldToNewRet[I]), {I},
+                                         "", CI->getIterator());
+      } else {
+        Repl = ExtractRet(OldToNewRet[0]);
+      }
+      CI->replaceAllUsesWith(Repl);
+    }
+    CI->eraseFromParent();
+    Changed = true;
+  }
+  return Changed;
+}
+
+// A value wider than a 16-bit register pair cannot be placed in registers,
+// and the lowering also has no way to split a wide direct output. Wide
+// operands are only viable through memory.
+static bool hasWideDirectOperand(const CallBase &CB, const DataLayout &DL) {
+  const auto *IA = cast<InlineAsm>(CB.getCalledOperand());
+  Type *Ret = CB.getType();
+  unsigned RetIdx = 0, ArgNo = 0;
+  for (const InlineAsm::ConstraintInfo &C : IA->ParseConstraints()) {
+    if (C.Type == InlineAsm::isClobber || C.Type == InlineAsm::isLabel)
+      continue;
+    if (C.Type == InlineAsm::isOutput) {
+      if (C.isIndirect) {
+        // Register-only indirect outputs survive the rewrite only when the
+        // pointee is an aggregate, which no register sequence can carry.
+        if (hasRegisterAlternative(C) && !hasMemoryAlternative(C))
+          return true;
+        ++ArgNo;
+        continue;
+      }
+      Type *Ty = isa<StructType>(Ret)
+                     ? cast<StructType>(Ret)->getElementType(RetIdx)
+                     : Ret;
+      ++RetIdx;
+      if (DL.getTypeSizeInBits(Ty) > 16)
+        return true;
+      continue;
+    }
+    Value *Op = CB.getArgOperand(ArgNo++);
+    if (C.isIndirect) {
+      // Same for indirect inputs: only memory can carry them.
+      if (hasRegisterAlternative(C) && !hasMemoryAlternative(C))
+        return true;
+      continue;
+    }
+    if (DL.getTypeSizeInBits(Op->getType()) <= 16)
+      continue;
+    // A tied input mirrors its output, which was already checked.
+    if (!C.Codes.empty() && isDigit(C.Codes[0][0]))
+      continue;
+    // The lowering spills these to a stack slot itself.
+    if (hasMemoryAlternative(C))
+      continue;
+    if (isImmediateOnly(C) && isa<Constant>(Op))
+      continue;
+    return true;
+  }
+  return false;
+}
+
 class Z80CheckUnsupported : public FunctionPass {
 public:
   static char ID;
@@ -238,7 +444,27 @@ public:
       UncondBrInst::Create(DefaultDest, CBR->getIterator());
       CBR->eraseFromParent();
     }
-    return !AsmGotos.empty();
+
+    bool Changed = !AsmGotos.empty();
+    Changed |= rewriteIndirectAsmOutputs(F);
+
+    const DataLayout &DL = F.getParent()->getDataLayout();
+    SmallVector<CallInst *, 2> WideAsm;
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        if (auto *CI = dyn_cast<CallInst>(&I))
+          if (CI->isInlineAsm() && hasWideDirectOperand(*CI, DL))
+            WideAsm.push_back(CI);
+    for (CallInst *CI : WideAsm) {
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F, "unsupported inline asm operand: value wider than 16 bits",
+          CI->getDebugLoc()));
+      if (!CI->getType()->isVoidTy())
+        CI->replaceAllUsesWith(PoisonValue::get(CI->getType()));
+      CI->eraseFromParent();
+      Changed = true;
+    }
+    return Changed;
   }
 };
 char Z80CheckUnsupported::ID = 0;
