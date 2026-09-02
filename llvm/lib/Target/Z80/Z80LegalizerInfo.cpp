@@ -450,6 +450,12 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .libcallForCartesianProduct({S1}, {S64})
       .minScalar(1, S32);
 
+  // modf decomposition → libcall (modff/modf), same reference-compiles
+  // policy as the other unimplemented float routines. Custom because the
+  // generic path's stack temporary for the integral part is size-aligned,
+  // which the byte-aligned stack rejects.
+  getActionDefinitionsBuilder(G_FMODF).customFor({S32, S64});
+
   // Float constant → custom (bitcast FP bits to integer constant)
   getActionDefinitionsBuilder(G_FCONSTANT).customFor({S64, S32, S16});
 
@@ -635,6 +641,35 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     // No cache to prefetch into.
     MI.eraseFromParent();
     return true;
+
+  case TargetOpcode::G_FMODF: {
+    // Same libcall the generic path would emit, but with a byte-aligned
+    // slot for the integral part.
+    Register DstFrac = MI.getOperand(0).getReg();
+    Register DstInt = MI.getOperand(1).getReg();
+    Register Src = MI.getOperand(2).getReg();
+    LLT Ty = MRI.getType(DstFrac);
+    MachineFunction &MF = MIRBuilder.getMF();
+    LLVMContext &Ctx = MF.getFunction().getContext();
+    bool IsF64 = Ty == LLT::scalar(64);
+    Type *FltTy = IsF64 ? Type::getDoubleTy(Ctx) : Type::getFloatTy(Ctx);
+    int FI =
+        MF.getFrameInfo().CreateStackObject(Ty.getSizeInBytes(), Align(1),
+                                            /*isSpillSlot=*/false);
+    auto Slot = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
+    RTLIB::Libcall LC = IsF64 ? RTLIB::MODF_F64 : RTLIB::MODF_F32;
+    if (Helper.createLibcall(LC, {DstFrac, FltTy, 0},
+                             {{Src, FltTy, 0},
+                              {Slot.getReg(0), PointerType::get(Ctx, 0), 1}},
+                             LocObserver, &MI) != LegalizerHelper::Legalized)
+      return false;
+    auto *MMO = MF.getMachineMemOperand(
+        MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOLoad,
+        Ty.getSizeInBytes(), Align(1));
+    MIRBuilder.buildLoad(DstInt, Slot, *MMO);
+    MI.eraseFromParent();
+    return true;
+  }
 
   case TargetOpcode::G_EXTRACT_VECTOR_ELT:
   case TargetOpcode::G_INSERT_VECTOR_ELT: {
