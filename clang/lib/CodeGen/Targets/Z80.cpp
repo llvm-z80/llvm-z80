@@ -13,10 +13,32 @@ using namespace clang;
 using namespace clang::CodeGen;
 
 namespace {
+class Z80ABIInfo : public DefaultABIInfo {
+public:
+  Z80ABIInfo(CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
+
+  RValue EmitVAArg(CodeGenFunction &CGF, Address VAListAddr, QualType Ty,
+                   AggValueSlot Slot) const override {
+    // A byval aggregate's bytes are copied into the argument area by the
+    // caller, so va_arg must read them in place; the default emission
+    // would read a pointer that was never stored. Arguments are packed on
+    // the stack, so the slot unit is one byte. Everything else (scalars,
+    // and C++ records that really do pass a pointer) keeps the default
+    // path, mirroring the caller's classification.
+    ABIArgInfo AI = classifyArgumentType(Ty);
+    if (AI.isIndirect() && AI.getIndirectByVal())
+      return emitVoidPtrVAArg(CGF, VAListAddr, Ty, /*IsIndirect=*/false,
+                              getContext().getTypeInfoInChars(Ty),
+                              CharUnits::One(), /*AllowHigherAlign=*/false,
+                              Slot);
+    return DefaultABIInfo::EmitVAArg(CGF, VAListAddr, Ty, Slot);
+  }
+};
+
 class Z80TargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   Z80TargetCodeGenInfo(CodeGenTypes &CGT)
-      : TargetCodeGenInfo(std::make_unique<DefaultABIInfo>(CGT)) {}
+      : TargetCodeGenInfo(std::make_unique<Z80ABIInfo>(CGT)) {}
 
   void setTargetAttributes(const Decl *D, llvm::GlobalValue *GV,
                            CodeGen::CodeGenModule &CGM) const override {
