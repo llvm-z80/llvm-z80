@@ -259,6 +259,7 @@ bool Z80ExpandPseudo::expandMul8(MachineBasicBlock &MBB, MachineInstr &MI,
   //     add a, a      ; A <<= 1
   //     rl d          ; D <<= 1, MSB -> carry
   //     jr nc, SkipMBB
+  //   AddMBB:
   //     add a, e      ; A += multiplicand
   //   SkipMBB:
   //     djnz LoopMBB  ; B--; loop if B != 0
@@ -270,11 +271,13 @@ bool Z80ExpandPseudo::expandMul8(MachineBasicBlock &MBB, MachineInstr &MI,
   DebugLoc DL = MI.getDebugLoc();
 
   MachineBasicBlock *LoopMBB = MF->CreateMachineBasicBlock();
+  MachineBasicBlock *AddMBB = MF->CreateMachineBasicBlock();
   MachineBasicBlock *SkipMBB = MF->CreateMachineBasicBlock();
   MachineBasicBlock *TailMBB = MF->CreateMachineBasicBlock();
 
   MachineFunction::iterator InsertPos = std::next(MBB.getIterator());
   MF->insert(InsertPos, LoopMBB);
+  MF->insert(InsertPos, AddMBB);
   MF->insert(InsertPos, SkipMBB);
   MF->insert(InsertPos, TailMBB);
 
@@ -289,13 +292,16 @@ bool Z80ExpandPseudo::expandMul8(MachineBasicBlock &MBB, MachineInstr &MI,
   BuildMI(&MBB, DL, TII.get(Z80::LD_B_n)).addImm(8); // B = 8
   MBB.addSuccessor(LoopMBB);
 
-  // LoopMBB: shift and conditionally add
+  // LoopMBB: shift, then conditionally skip the add
   BuildMI(LoopMBB, DL, TII.get(Z80::ADD_A_A)); // A <<= 1
   BuildMI(LoopMBB, DL, TII.get(Z80::RL_D));    // D <<= 1, MSB -> carry
   BuildMI(LoopMBB, DL, TII.get(Z80::JR_NC_e)).addMBB(SkipMBB);
-  BuildMI(LoopMBB, DL, TII.get(Z80::ADD_A_E)); // A += multiplicand
-  LoopMBB->addSuccessor(SkipMBB);              // jr nc taken
-  LoopMBB->addSuccessor(SkipMBB);              // fall through (after add)
+  LoopMBB->addSuccessor(SkipMBB); // jr nc taken
+  LoopMBB->addSuccessor(AddMBB);  // fall through
+
+  // AddMBB: add the multiplicand when the shifted-out bit was set
+  BuildMI(AddMBB, DL, TII.get(Z80::ADD_A_E)); // A += multiplicand
+  AddMBB->addSuccessor(SkipMBB);
 
   // SkipMBB: loop back
   if (STI.hasSM83()) {
@@ -326,6 +332,7 @@ bool Z80ExpandPseudo::expandUDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
   //     rla           ; remainder = remainder*2 + carry
   //     cp e          ; compare remainder with divisor
   //     jr c, SkipMBB ; if remainder < divisor, skip
+  //   SubMBB:
   //     sub e         ; remainder -= divisor
   //     inc d         ; set quotient bit 0
   //   SkipMBB:
@@ -338,11 +345,13 @@ bool Z80ExpandPseudo::expandUDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
   DebugLoc DL = MI.getDebugLoc();
 
   MachineBasicBlock *LoopMBB = MF->CreateMachineBasicBlock();
+  MachineBasicBlock *SubMBB = MF->CreateMachineBasicBlock();
   MachineBasicBlock *SkipMBB = MF->CreateMachineBasicBlock();
   MachineBasicBlock *TailMBB = MF->CreateMachineBasicBlock();
 
   MachineFunction::iterator InsertPos = std::next(MBB.getIterator());
   MF->insert(InsertPos, LoopMBB);
+  MF->insert(InsertPos, SubMBB);
   MF->insert(InsertPos, SkipMBB);
   MF->insert(InsertPos, TailMBB);
 
@@ -361,10 +370,13 @@ bool Z80ExpandPseudo::expandUDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
   BuildMI(LoopMBB, DL, TII.get(Z80::RLA));   // remainder = remainder*2 + carry
   BuildMI(LoopMBB, DL, TII.get(Z80::CP_E));  // compare remainder vs divisor
   BuildMI(LoopMBB, DL, TII.get(Z80::JR_C_e)).addMBB(SkipMBB);
-  BuildMI(LoopMBB, DL, TII.get(Z80::SUB_E)); // remainder -= divisor
-  BuildMI(LoopMBB, DL, TII.get(Z80::INC_D)); // set quotient bit
-  LoopMBB->addSuccessor(SkipMBB);            // jr c taken
-  LoopMBB->addSuccessor(SkipMBB);            // fall through
+  LoopMBB->addSuccessor(SkipMBB); // jr c taken
+  LoopMBB->addSuccessor(SubMBB);  // fall through
+
+  // SubMBB: subtract and record the quotient bit
+  BuildMI(SubMBB, DL, TII.get(Z80::SUB_E)); // remainder -= divisor
+  BuildMI(SubMBB, DL, TII.get(Z80::INC_D)); // set quotient bit
+  SubMBB->addSuccessor(SkipMBB);
 
   // SkipMBB: loop back
   if (STI.hasSM83()) {
