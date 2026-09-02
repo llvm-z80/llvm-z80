@@ -272,7 +272,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       unsigned LdLoOp = (DestReg == Z80::BC) ? Z80::LD_C_L : Z80::LD_E_L;
       if (FlagsLive)
         BuildMI(MBB, I, DL, get(Z80::PUSH_AF));
-      BuildMI(MBB, I, DL, get(Z80::PUSH_HL));
+      Z80::emitHLSavePush(MBB, I, DL, *this);
       BuildMI(MBB, I, DL, get(Z80::LD_HL_nn)).addImm(SPComp + 2);
       BuildMI(MBB, I, DL, get(Z80::ADD_HL_SP));
       BuildMI(MBB, I, DL, get(LdHiOp));
@@ -320,7 +320,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
           BuildMI(MBB, I, DL, get(Z80::POP_DE));
         }
       } else {
-        BuildMI(MBB, I, DL, get(Z80::PUSH_HL));
+        Z80::emitHLSavePush(MBB, I, DL, *this);
         BuildMI(MBB, I, DL, get(PushOp));
         BuildMI(MBB, I, DL, get(Z80::POP_HL));
         unsigned LdOp = Z80::getLD8RegOpcode(DestReg, ExtractReg);
@@ -348,7 +348,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
         BuildMI(MBB, I, DL, get(Z80::PUSH_AF));
         unsigned LdASrc = Z80::getLD8RegOpcode(Z80::A, SrcReg);
         BuildMI(MBB, I, DL, get(LdASrc));
-        BuildMI(MBB, I, DL, get(Z80::PUSH_HL));
+        Z80::emitHLSavePush(MBB, I, DL, *this);
         BuildMI(MBB, I, DL, get(PushIR));
         BuildMI(MBB, I, DL, get(Z80::POP_HL));
         unsigned LdTargetA = Z80::getLD8RegOpcode(TargetReg, Z80::A);
@@ -360,7 +360,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
         return;
       }
 
-      BuildMI(MBB, I, DL, get(Z80::PUSH_HL));
+      Z80::emitHLSavePush(MBB, I, DL, *this);
       BuildMI(MBB, I, DL, get(PushIR));
       BuildMI(MBB, I, DL, get(Z80::POP_HL));
       unsigned LdOp = Z80::getLD8RegOpcode(TargetReg, SrcReg);

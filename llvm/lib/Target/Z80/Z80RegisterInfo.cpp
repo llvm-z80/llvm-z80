@@ -269,38 +269,9 @@ static void emitFlagSavePush(MachineBasicBlock &MBB,
     Z80::markUndefUse(Push, Z80::A);
 }
 
-// Emit a PUSH HL that saves HL across an inserted sequence. Register
-// allocation may have marked an earlier use of HL as a kill (or its def as
-// dead); this late insertion reads HL after that point, so the stale flag
-// on the nearest HL access must be cleared. If the block never touches HL
-// and it is not live-in, the read carries no value and is marked undef.
-static void emitHLSavePush(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator InsertBefore,
-                           const DebugLoc &DL, const TargetInstrInfo &TII) {
-  const TargetRegisterInfo *TRI =
-      MBB.getParent()->getSubtarget().getRegisterInfo();
-  MachineInstrBuilder Push =
-      BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_HL));
-  for (MachineBasicBlock::iterator I = Push->getIterator();
-       I != MBB.begin();) {
-    --I;
-    bool Touched = false;
-    for (MachineOperand &MO : I->operands()) {
-      if (!MO.isReg() || !MO.getReg().isValid() ||
-          !TRI->regsOverlap(MO.getReg(), Z80::HL))
-        continue;
-      Touched = true;
-      if (MO.isDef())
-        MO.setIsDead(false);
-      else if (MO.isKill())
-        MO.setIsKill(false);
-    }
-    if (Touched)
-      return;
-  }
-  if (!MBB.isLiveIn(Z80::HL) && !MBB.isLiveIn(Z80::L) && !MBB.isLiveIn(Z80::H))
-    Z80::markUndefUse(Push, Z80::HL);
-}
+// The HL-saving push and its liveness bookkeeping live in Z80InstrInfo.h
+// (Z80::emitHLSavePush), shared with copyPhysReg.
+using Z80::emitHLSavePush;
 
 // Emit: PUSH IX; POP HL; LD <TempReg>,offset; ADD HL,<TempReg>
 // After this, HL = IX + offset. TempReg must be BC or DE.

@@ -14,6 +14,9 @@
 // Use the register classes defined in Z80RegisterInfo.td:
 // - GR8 (8-bit GPRs)
 // - GR16 (16-bit register pairs)
+// - HLI (HL/IX/IY — the class a stack pointer copy constrains to; a bank
+//   only covers the classes listed here, and a constrain to an uncovered
+//   class fails silently)
 // - Flags (flag pseudo-registers)
 // - Fakei32, Fakei64 (for multi-word values)
-def AnyRegBank : RegisterBank<"Any", [GR8, GR16, Fakei32, Fakei64]>;
+def AnyRegBank : RegisterBank<"Any", [GR8, GR16, HLI, Fakei32, Fakei64]>;
