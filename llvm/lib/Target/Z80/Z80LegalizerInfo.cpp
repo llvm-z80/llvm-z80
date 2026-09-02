@@ -472,15 +472,17 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Float↔int conversions:
   //   f32↔i32: libcall (__fixsfsi, __floatsisf, etc.)
   //   f64↔i32/i64: libcall (__fixdfsi, __fixdfdi, etc.) — unimplemented
+  // i128 endpoints (__fixsfti, __floattisf, ...) follow the same
+  // reference-compiles policy as the f64 routines.
   getActionDefinitionsBuilder({G_FPTOSI, G_FPTOUI})
       .scalarize(0)
-      .libcallForCartesianProduct({S32, S64}, {S32, S64})
+      .libcallForCartesianProduct({S32, S64, S128}, {S32, S64})
       .minScalar(0, S32)
       .minScalar(1, S32);
 
   getActionDefinitionsBuilder({G_SITOFP, G_UITOFP})
       .scalarize(0)
-      .libcallForCartesianProduct({S32, S64}, {S32, S64})
+      .libcallForCartesianProduct({S32, S64}, {S32, S64, S128})
       .minScalar(0, S32)
       .minScalar(1, S32);
 
