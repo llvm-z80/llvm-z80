@@ -21,6 +21,8 @@
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
@@ -199,7 +201,51 @@ TargetPassConfig *Z80TargetMachine::createPassConfig(PassManagerBase &PM) {
   return new Z80PassConfig(*this, PM);
 }
 
+namespace {
+/// Report IR constructs this backend does not support as proper errors.
+/// asm goto has no GlobalISel lowering (the IR translator refuses inline-asm
+/// callbr) and would otherwise surface as an internal backend error; the
+/// callbr is replaced with its fallthrough edge so compilation reaches the
+/// diagnostic cleanly.
+class Z80CheckUnsupported : public FunctionPass {
+public:
+  static char ID;
+  Z80CheckUnsupported() : FunctionPass(ID) {}
+  StringRef getPassName() const override {
+    return "Z80 unsupported construct check";
+  }
+  bool runOnFunction(Function &F) override {
+    SmallVector<CallBrInst *, 2> AsmGotos;
+    for (BasicBlock &BB : F)
+      if (auto *CBR = dyn_cast<CallBrInst>(BB.getTerminator()))
+        if (CBR->isInlineAsm())
+          AsmGotos.push_back(CBR);
+
+    for (CallBrInst *CBR : AsmGotos) {
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F, "asm goto is not supported", CBR->getDebugLoc()));
+
+      BasicBlock *Parent = CBR->getParent();
+      BasicBlock *DefaultDest = CBR->getDefaultDest();
+      // Every entry in the indirect list is its own edge with its own PHI
+      // entry, even when it repeats a block or the default destination.
+      // The replacing branch keeps exactly one edge (the default), so drop
+      // one PHI entry per indirect entry.
+      for (BasicBlock *Ind : CBR->getIndirectDests())
+        Ind->removePredecessor(Parent);
+      if (!CBR->getType()->isVoidTy())
+        CBR->replaceAllUsesWith(PoisonValue::get(CBR->getType()));
+      UncondBrInst::Create(DefaultDest, CBR->getIterator());
+      CBR->eraseFromParent();
+    }
+    return !AsmGotos.empty();
+  }
+};
+char Z80CheckUnsupported::ID = 0;
+} // namespace
+
 void Z80PassConfig::addIRPasses() {
+  addPass(new Z80CheckUnsupported());
   addPass(createAtomicExpandLegacyPass());
 
   TargetPassConfig::addIRPasses();
