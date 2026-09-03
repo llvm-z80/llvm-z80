@@ -413,6 +413,44 @@ static bool hasWideDirectOperand(const CallBase &CB, const DataLayout &DL) {
   return false;
 }
 
+// The legalizer can erase the last definition of a wide value (a scalarized
+// vector, a split integer) while a debug operand still refers to it.
+// RegBankSelect maps debug operands like any other, and no 8/16-bit bank can
+// carry the wide dangling type. The value no longer exists, so mark it as
+// unavailable instead.
+class Z80DanglingDebugCleanup : public MachineFunctionPass {
+public:
+  static char ID;
+  Z80DanglingDebugCleanup() : MachineFunctionPass(ID) {}
+  StringRef getPassName() const override {
+    return "Z80 dangling debug value cleanup";
+  }
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    MachineRegisterInfo &MRI = MF.getRegInfo();
+    bool Changed = false;
+    auto IsDangling = [&](const MachineOperand &MO) {
+      return MO.isReg() && MO.getReg().isVirtual() &&
+             !MRI.getVRegDef(MO.getReg());
+    };
+    for (MachineBasicBlock &MBB : MF)
+      for (MachineInstr &MI : MBB) {
+        if (!MI.isDebugInstr() || none_of(MI.debug_operands(), IsDangling))
+          continue;
+        // A location with an unavailable operand cannot be evaluated at all,
+        // so the canonical form marks the whole value undef.
+        if (MI.isDebugValue())
+          MI.setDebugValueUndef();
+        else
+          for (MachineOperand &MO : MI.debug_operands())
+            if (IsDangling(MO))
+              MO.setReg(Register());
+        Changed = true;
+      }
+    return Changed;
+  }
+};
+char Z80DanglingDebugCleanup::ID = 0;
+
 class Z80CheckUnsupported : public FunctionPass {
 public:
   static char ID;
@@ -505,6 +543,7 @@ void Z80PassConfig::addPreRegBankSelect() {
   // that are required for instruction selection to succeed.
   addPass(createZ80PostLegalizerCombiner());
   addPass(createZ80LowerSelectPass());
+  addPass(new Z80DanglingDebugCleanup());
 }
 
 bool Z80PassConfig::addRegBankSelect() {
