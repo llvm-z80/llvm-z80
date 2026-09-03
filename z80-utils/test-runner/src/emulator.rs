@@ -85,7 +85,18 @@ pub fn elf_to_bin(objcopy: &Path, elf: &Path, bin: &Path) -> Result<(), String> 
 /// checked: at its own default limit the emulator exits *successfully*, so a
 /// spinning program would otherwise look like a clean run whose `_exitcode` is
 /// still the zero the .bss loop left there, and report as a pass.
-const CYCLE_LIMIT: u64 = 2_000_000_000;
+///
+/// The budget is derived from the caller's wall-clock timeout rather than being
+/// a constant of its own: a fixed cycle cap silently overrides `-emu-timeout`,
+/// so raising the timeout to let a slow test finish has no effect. Measured
+/// throughput is around 435M cycles/s, so deriving at 400M leaves the cycle
+/// cap slightly inside the wall clock: exhaustion then reports deterministically
+/// as a cycle limit instead of racing the timeout for which one fires.
+const CYCLES_PER_SEC: u64 = 400_000_000;
+
+fn cycle_limit(timeout_secs: u64) -> u64 {
+    timeout_secs.saturating_mul(CYCLES_PER_SEC)
+}
 
 /// What a program left behind when it stopped.
 pub struct RunResult {
@@ -118,7 +129,7 @@ pub fn run_program(
         cmd.arg(flag);
     }
     cmd.args(["-end", halt_addr]);
-    cmd.args(["-counter", &CYCLE_LIMIT.to_string()]);
+    cmd.args(["-counter", &cycle_limit(timeout_secs).to_string()]);
     cmd.arg("-output").arg(dump);
     cmd.arg(bin);
     cmd.stdout(Stdio::piped());
@@ -153,7 +164,7 @@ pub fn run_program(
         .ok()
         .and_then(|out| out.lines().last().and_then(|l| l.trim().parse::<u64>().ok()))
         .unwrap_or(0);
-    if cycles >= CYCLE_LIMIT {
+    if cycles >= cycle_limit(timeout_secs) {
         return Err("never reached _halt (cycle limit)".to_string());
     }
 
@@ -186,7 +197,7 @@ pub fn run_to_halt(
         cmd.arg(flag);
     }
     cmd.args(["-end", halt_addr]);
-    cmd.args(["-counter", &CYCLE_LIMIT.to_string()]);
+    cmd.args(["-counter", &cycle_limit(timeout_secs).to_string()]);
     cmd.arg(bin);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::null());
@@ -210,7 +221,7 @@ pub fn run_to_halt(
                     .ok()
                     .and_then(|o| o.lines().last().and_then(|l| l.trim().parse::<u64>().ok()))
                     .unwrap_or(0);
-                return if cycles >= CYCLE_LIMIT {
+                return if cycles >= cycle_limit(timeout_secs) {
                     Err("never reached _halt (cycle limit)".to_string())
                 } else {
                     Ok(())

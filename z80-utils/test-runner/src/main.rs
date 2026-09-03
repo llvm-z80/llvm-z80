@@ -107,8 +107,8 @@ Torture-specific:
   -tier <compile|execute|all>  Which tier to run (default: all)
   -jobs <N>            Parallel workers (default: 20)
   -std <name>          C standard passed to clang (default: gnu17)
-  -emu-timeout <SECS>  Emulator budget per test (default: 5). Raise it to tell
-                       a real hang apart from a merely slow test.
+  -emu-timeout <SECS>  Emulator budget per test (default: 30). Also sets the
+                       cycle budget, so lowering it makes slow tests time out.
   -run-skipped         Run ONLY the manifest's skipped tests and report any
                        that now pass, so a stale or wrong skip= cannot hide a
                        working test forever.

@@ -31,6 +31,11 @@ pub fn discover_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// Results the suite will emit: one per file handed to it.
+pub fn count(config: &CustomConfig) -> u32 {
+    config.files.len() as u32
+}
+
 pub fn run(paths: &Paths, config: &CustomConfig, on_result: &mut OnResult) -> SuiteResult {
     let mut result = SuiteResult::default();
     let reg_name = config.target.reg_name();

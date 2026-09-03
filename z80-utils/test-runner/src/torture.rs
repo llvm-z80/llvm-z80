@@ -35,11 +35,15 @@ use crate::torture_data::{self, Manifest};
 
 const COMPILE_TIMEOUT: u64 = 20;
 const LINK_TIMEOUT: u64 = 20;
-/// Default emulator budget. Shorter than the other suites' 30s: in the torture
-/// suite a hang is itself a miscompile signal, and there are thousands of tests
-/// to get through. Raise it with -emu-timeout to tell a real hang apart from a
-/// test that is merely slow under emulation.
-pub const EMU_TIMEOUT: u64 = 5;
+/// Default emulator budget, which also sets the cycle budget. Wide enough for
+/// the slowest tests that legitimately finish: arith-rand-ll runs 10000 rounds
+/// of 64-bit div/mod and needs some 9.4e9 cycles, 920501-6 sieves three large
+/// primes with 64-bit modulo and needs 2.7e9. A tighter budget reported those
+/// as TIMEOUT, which reads as a failure and would have cost the coverage they
+/// carry. The price is that a test that really does hang now burns this long
+/// before it is reported; tests run in parallel, so the effect on a full run
+/// is small.
+pub const EMU_TIMEOUT: u64 = 30;
 
 /// Stack budget advertised to the tests, in bytes. The stack starts at the top
 /// of the address space and grows down toward .bss, so this is a self-imposed
@@ -715,7 +719,11 @@ fn link_and_run(
         &bin, config.target, &halt, result_addr, &dump, config.emu_timeout)
         .map(|r| r.value)
     {
-        Err(e) if e.contains("timeout") => Verdict::Timeout,
+        // A cycle-limit stop is a timeout too: the program never reached
+        // _halt within its budget. Left as a LinkFail it would report as a
+        // link error, and which of the two fires is a race with the wall
+        // clock rather than a property of the test.
+        Err(e) if e.contains("timeout") || e.contains("cycle limit") => Verdict::Timeout,
         Err(e) => Verdict::LinkFail { detail: e },
         // Every torture execute test succeeds by leaving 0 in the return
         // register, so there is no per-test expected value to parse.
@@ -788,6 +796,7 @@ pub fn run(paths: &Paths, config: &TortureConfig) -> bool {
             let dg_flags: Vec<String> = dg
                 .flags
                 .into_iter()
+                .chain(torture_data::dot_x_flags(&path))
                 .filter(|f| !flag_is_rejected(f))
                 .collect();
             dg_candidates.extend(dg_flags.iter().cloned());
@@ -919,9 +928,11 @@ pub fn run(paths: &Paths, config: &TortureConfig) -> bool {
                     let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                     let tty = display::is_tty();
                     if n == total || n % if tty { 10 } else { 250 } == 0 {
+                        // No ETA: it would be a linear extrapolation from the
+                        // average, but a single test can sit on the emulator
+                        // budget for 30s, so the estimate is noise.
                         let el = start.elapsed().as_secs_f64();
-                        let eta = if n > 0 { el / n as f64 * (total - n) as f64 } else { 0.0 };
-                        let line = format!("  {n}/{total}  {el:.0}s elapsed  {eta:.0}s left");
+                        let line = format!("  {n}/{total}  {el:.0}s elapsed");
                         if tty {
                             // Repaint in place; erased once the run finishes.
                             print!("\r{}\x1b[K", display::paint(display::DIM, &line));

@@ -53,7 +53,49 @@ fn progress_callback(state: SharedState, idx: usize) -> OnResult {
     })
 }
 
-/// Run all 6 test groups sequentially, collecting results into a single SuiteResult.
+/// Which corpus a group walks, so the progress count and the run itself read
+/// from the same list.
+#[derive(Clone, Copy, PartialEq)]
+enum Corpus {
+    Clang,
+    Sdcc,
+}
+
+type GroupFn = fn(&Paths, Target, OptLevel, Option<&str>, &mut OnResult) -> SuiteResult;
+
+/// The groups, in display order. Adding one here is all it takes: both
+/// `run`/`run_parallel` and `count` are derived from this table.
+const GROUPS: &[(&str, GroupFn, Corpus)] = &[
+    ("shipped crt0", run_group_shipped_crt0, Corpus::Clang),
+    ("elf roundtrip", run_group_elf_roundtrip, Corpus::Clang),
+    ("rel roundtrip", run_group_rel_roundtrip, Corpus::Clang),
+    ("elf2rel crosslink", run_group_elf_crosslink, Corpus::Sdcc),
+    ("rel2elf crosslink", run_group_rel_crosslink, Corpus::Sdcc),
+    ("elf archive roundtrip", run_group_elf_ar_roundtrip, Corpus::Clang),
+    ("rel archive roundtrip", run_group_rel_ar_roundtrip, Corpus::Clang),
+];
+
+/// How many results the suite will produce, counted from the same corpora the
+/// groups walk rather than from a multiplier that has to be kept in step.
+pub fn count(paths: &Paths, config: &UtilsConfig) -> u32 {
+    let matches = |name: &str| {
+        config.pattern.as_deref().is_none_or(|p| name.contains(p))
+    };
+    let clang = crate::suite::discover_tests(&paths.clang_test_dir(), "test_", "c")
+        .iter()
+        .filter(|t| matches(&t.file_stem().unwrap().to_string_lossy()))
+        .count() as u32;
+    let sdcc = discover_sdcc_test_names(&paths.sdcc_test_dir())
+        .iter()
+        .filter(|n| matches(n))
+        .count() as u32;
+    GROUPS
+        .iter()
+        .map(|(_, _, corpus)| if *corpus == Corpus::Clang { clang } else { sdcc })
+        .sum()
+}
+
+/// Run every group sequentially, collecting results into a single SuiteResult.
 /// Used by run_all to integrate utils as one suite.
 pub fn run(paths: &Paths, config: &UtilsConfig, on_result: &mut OnResult) -> SuiteResult {
     let target = config.target;
@@ -61,13 +103,9 @@ pub fn run(paths: &Paths, config: &UtilsConfig, on_result: &mut OnResult) -> Sui
     let pattern = config.pattern.as_deref();
     let mut result = SuiteResult::default();
 
-    result.merge(run_group_shipped_crt0(paths, target, opt, pattern, on_result));
-    result.merge(run_group_elf_roundtrip(paths, target, opt, pattern, on_result));
-    result.merge(run_group_rel_roundtrip(paths, target, opt, pattern, on_result));
-    result.merge(run_group_elf_crosslink(paths, target, opt, pattern, on_result));
-    result.merge(run_group_rel_crosslink(paths, target, opt, pattern, on_result));
-    result.merge(run_group_elf_ar_roundtrip(paths, target, opt, pattern, on_result));
-    result.merge(run_group_rel_ar_roundtrip(paths, target, opt, pattern, on_result));
+    for (_, func, _) in GROUPS {
+        result.merge(func(paths, target, opt, pattern, on_result));
+    }
 
     result
 }
@@ -261,13 +299,14 @@ fn build_groups(config: &UtilsConfig) -> Vec<GroupDef> {
     let mut groups = Vec::new();
 
     macro_rules! add_group {
-        ($label:expr, $func:ident, $pat:expr) => {{
+        ($label:expr, $func:expr, $pat:expr) => {{
             let pat = $pat.clone();
             groups.push(GroupDef {
                 label: $label.into(),
                 runner: Box::new(move |paths, state, idx| {
                     let mut cb = progress_callback(state.clone(), idx);
-                    let result = $func(paths, target, opt, pat.as_deref(), &mut cb);
+                    let f: GroupFn = $func;
+                    let result = f(paths, target, opt, pat.as_deref(), &mut cb);
                     state.lock().unwrap()[idx].total = result.total;
                     state.lock().unwrap()[idx].result = Some(result);
                 }),
@@ -275,13 +314,9 @@ fn build_groups(config: &UtilsConfig) -> Vec<GroupDef> {
         }};
     }
 
-    add_group!("shipped crt0", run_group_shipped_crt0, pattern);
-    add_group!("elf roundtrip", run_group_elf_roundtrip, pattern);
-    add_group!("rel roundtrip", run_group_rel_roundtrip, pattern);
-    add_group!("elf2rel crosslink", run_group_elf_crosslink, pattern);
-    add_group!("rel2elf crosslink", run_group_rel_crosslink, pattern);
-    add_group!("elf archive roundtrip", run_group_elf_ar_roundtrip, pattern);
-    add_group!("rel archive roundtrip", run_group_rel_ar_roundtrip, pattern);
+    for (label, func, _) in GROUPS {
+        add_group!(*label, *func, pattern);
+    }
 
     groups
 }

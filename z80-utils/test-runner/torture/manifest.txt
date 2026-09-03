@@ -9,6 +9,7 @@
 #   gcc            depends on GCC: a builtin or language extension clang does not implement
 #   unsupported    uses a feature this target deliberately refuses
 #   softfloat-f64  needs 64-bit double
+#   callbr         uses asm goto; no GlobalISel lowering upstream
 #   int16          the test assumes a 32-bit int
 #   size           does not fit in the 64 KB address space
 #   nonportable    written for another architecture
@@ -20,7 +21,7 @@
 # that now pass, so a wrong entry cannot hide a working test.
 
 
-# libc (62)
+# libc (65)
 execute/20000914-1.c                        : skip=libc
 execute/20020406-1.c                        : skip=libc
 execute/20021120-3.c                        : skip=libc
@@ -30,7 +31,9 @@ execute/20071018-1.c                        : skip=libc
 execute/20121108-1.c                        : skip=libc
 execute/20141022-1.c                        : skip=libc
 execute/20210505-1.c                        : skip=libc
+execute/20221006-1.c z80                    : skip=libc
 execute/920501-8.c                          : skip=libc
+execute/920501-9.c                          : skip=libc
 execute/920726-1.c                          : skip=libc
 execute/920810-1.c                          : skip=libc
 execute/930513-1.c                          : skip=libc
@@ -42,6 +45,7 @@ execute/builtin-bitops-1.c                  : skip=libc
 execute/fprintf-1.c                         : skip=libc
 execute/fprintf-2.c                         : skip=libc
 execute/fprintf-chk-1.c                     : skip=libc
+execute/ieee/20041213-1.c                   : skip=libc
 execute/ieee/fp-cmp-1.c                     : skip=libc
 execute/ieee/fp-cmp-2.c                     : skip=libc
 execute/ieee/fp-cmp-3.c                     : skip=libc
@@ -84,7 +88,7 @@ execute/vfprintf-chk-1.c                    : skip=libc
 execute/vprintf-1.c                         : skip=libc
 execute/vprintf-chk-1.c                     : skip=libc
 
-# gcc (110)
+# gcc (126)
 compile/20001116-1.c                        : skip=gcc
 compile/20010226-1.c                        : skip=gcc
 compile/20010327-1.c                        : skip=gcc
@@ -92,6 +96,8 @@ compile/20010605-1.c                        : skip=gcc
 compile/20010903-2.c                        : skip=gcc
 compile/20011023-1.c                        : skip=gcc
 compile/20011114-1.c                        : skip=gcc
+compile/20011119-1.c                        : skip=gcc
+compile/20011119-2.c                        : skip=gcc
 compile/20020210-1.c                        : skip=gcc
 compile/20020309-1.c                        : skip=gcc
 compile/20021204-1.c                        : skip=gcc
@@ -135,6 +141,7 @@ compile/pr30984.c                           : skip=gcc
 compile/pr35006.c                           : skip=gcc
 compile/pr39394.c                           : skip=gcc
 compile/pr42956.c                           : skip=gcc
+compile/pr44197.c                           : skip=gcc
 compile/pr52750.c                           : skip=gcc
 compile/pr58164.c                           : skip=gcc
 compile/pr77754-6.c                         : skip=gcc
@@ -163,12 +170,23 @@ execute/20241029-1.c                        : skip=gcc
 execute/920415-1.c                          : skip=gcc
 execute/920721-4.c                          : skip=gcc
 execute/921202-1.c                          : skip=gcc
+execute/990208-1.c                          : skip=gcc
 execute/alias-1.c                           : skip=gcc
 execute/align-nest.c                        : skip=gcc
+execute/bitfld-3.c                          : skip=gcc
+execute/bitfld-5.c                          : skip=gcc
+execute/builtins/abs-2.c                    : skip=gcc
 execute/builtins/abs-3.c                    : skip=gcc
 execute/builtins/fprintf.c                  : skip=gcc
 execute/builtins/fputs.c                    : skip=gcc
+execute/builtins/memops-asm.c               : skip=gcc
 execute/builtins/printf.c                   : skip=gcc
+execute/builtins/strchr.c                   : skip=gcc
+execute/builtins/strncat.c                  : skip=gcc
+execute/builtins/strrchr.c                  : skip=gcc
+execute/builtins/strstr-asm.c               : skip=gcc
+execute/builtins/uabs-1.c                   : skip=gcc
+execute/builtins/uabs-2.c                   : skip=gcc
 execute/builtins/uabs-3.c                   : skip=gcc
 execute/nest-align-1.c                      : skip=gcc
 execute/nest-stdar-1.c                      : skip=gcc
@@ -186,6 +204,8 @@ execute/pr22061-3.c                         : skip=gcc
 execute/pr22061-4.c                         : skip=gcc
 execute/pr28865.c                           : skip=gcc
 execute/pr30314.c                           : skip=gcc
+execute/pr32244-1.c                         : skip=gcc
+execute/pr34971.c                           : skip=gcc
 execute/pr39228.c                           : skip=gcc
 execute/pr41935.c                           : skip=gcc
 execute/pr47237.c                           : skip=gcc
@@ -196,31 +216,49 @@ execute/pr82210.c                           : skip=gcc
 execute/pr94591.c                           : skip=gcc
 execute/pr98304-2.c                         : skip=gcc
 
-# unsupported (57)
+# unsupported (77)
+compile/20000804-1.c                        : skip=unsupported
+compile/20001205-1.c                        : skip=unsupported
 compile/20011029-1.c                        : skip=unsupported
+compile/20011205-1.c                        : skip=unsupported
+compile/20020312-1.c                        : skip=unsupported
+compile/20061005-1.c                        : skip=unsupported
 compile/20071108-1.c sm83                   : skip=unsupported
 compile/20071117-1.c sm83                   : skip=unsupported
 compile/900313-1.c sm83                     : skip=unsupported
+compile/920520-1.c                          : skip=unsupported
 compile/complex-6.c                         : skip=unsupported
 compile/limits-declparen.c                  : skip=unsupported
 compile/limits-fndefn.c                     : skip=unsupported
+compile/pr103682.c                          : skip=unsupported
+compile/pr122588-1.c                        : skip=unsupported
+compile/pr123365.c                          : skip=unsupported
 compile/pr17397.c sm83                      : skip=unsupported
+compile/pr35318.c                           : skip=unsupported
 compile/pr51354.c                           : skip=unsupported
 compile/pr55851.c sm83                      : skip=unsupported
+compile/pr55921.c                           : skip=unsupported
+compile/pr67143.c                           : skip=unsupported
 compile/pr71109.c                           : skip=unsupported
 compile/pr77754-1.c sm83                    : skip=unsupported
 compile/pr77754-2.c sm83                    : skip=unsupported
 compile/pr77754-3.c sm83                    : skip=unsupported
 compile/pr77754-4.c sm83                    : skip=unsupported
 compile/pr78439.c sm83                      : skip=unsupported
+compile/pr82096.c                           : skip=unsupported
 compile/pr82337.c                           : skip=unsupported
 compile/pr89280.c                           : skip=unsupported
 compile/pr90139.c                           : skip=unsupported
+compile/sync-1.c                            : skip=unsupported
+compile/sync-2.c                            : skip=unsupported
+compile/sync-3.c                            : skip=unsupported
+compile/vector-dup-1.c                      : skip=unsupported
 compile/vla-const-1.c sm83                  : skip=unsupported
 execute/20000706-1.c                        : skip=unsupported
 execute/20000706-2.c                        : skip=unsupported
 execute/20000706-5.c                        : skip=unsupported
 execute/20010518-2.c                        : skip=unsupported
+execute/20030222-1.c                        : skip=unsupported
 execute/20070824-1.c sm83                   : skip=unsupported
 execute/20081103-1.c                        : skip=unsupported
 execute/20171008-1.c                        : skip=unsupported
@@ -243,7 +281,9 @@ execute/builtins/strncpy-chk.c              : skip=unsupported
 execute/builtins/vsnprintf-chk.c            : skip=unsupported
 execute/builtins/vsprintf-chk.c             : skip=unsupported
 execute/complex-5.c                         : skip=unsupported
+execute/ieee/compare-fp-3.c                 : skip=unsupported
 execute/pr108064.c                          : skip=unsupported
+execute/pr52286.c                           : skip=unsupported
 execute/pr60003.c                           : skip=unsupported
 execute/pr64242.c                           : skip=unsupported
 execute/pr65369.c                           : skip=unsupported
@@ -255,7 +295,7 @@ execute/pr94524-2.c sm83                    : skip=unsupported
 execute/strct-pack-3.c                      : skip=unsupported
 execute/vla-dealloc-1.c sm83                : skip=unsupported
 
-# size (19)
+# size (20)
 compile/20080625-1.c                        : skip=size
 compile/930621-1.c                          : skip=size
 compile/991214-2.c                          : skip=size
@@ -275,19 +315,24 @@ execute/memcpy-a2.c                         : skip=size
 execute/memcpy-a4.c                         : skip=size
 execute/memcpy-a8.c                         : skip=size
 execute/pr28982b.c                          : skip=size
+execute/pr53645-2.c                         : skip=size
 
-# int16 (8)
+# int16 (11)
+compile/limits-externdecl.c                 : skip=int16
 compile/pr40204.c                           : skip=int16
 compile/pr43191.c                           : skip=int16
 compile/pr49029.c                           : skip=int16
 compile/pr49163.c                           : skip=int16
 compile/pr98199.c                           : skip=int16
+execute/20071211-1.c                        : skip=int16
 execute/20180131-1.c                        : skip=int16
 execute/divmod-1.c                          : skip=int16
+execute/pr53645.c                           : skip=int16
 execute/pr79286.c                           : skip=int16
 
-# softfloat-f64 (109)
+# softfloat-f64 (114)
 execute/20000603-1.c                        : skip=softfloat-f64
+execute/20000731-1.c                        : skip=softfloat-f64
 execute/20010605-2.c                        : skip=softfloat-f64
 execute/20020314-1.c                        : skip=softfloat-f64
 execute/20020413-1.c                        : skip=softfloat-f64
@@ -382,8 +427,12 @@ execute/pr58574.c                           : skip=softfloat-f64
 execute/pr59643.c                           : skip=softfloat-f64
 execute/pr64979.c                           : skip=softfloat-f64
 execute/pr68390.c                           : skip=softfloat-f64
+execute/pr92618.c                           : skip=softfloat-f64
 execute/pr93434.c                           : skip=softfloat-f64
 execute/regstack-1.c                        : skip=softfloat-f64
+execute/scal-to-vec1.c                      : skip=softfloat-f64
+execute/scal-to-vec3.c                      : skip=softfloat-f64
+execute/stdarg-1.c                          : skip=softfloat-f64
 execute/stdarg-2.c                          : skip=softfloat-f64
 execute/stdarg-3.c                          : skip=softfloat-f64
 execute/stdarg-4.c                          : skip=softfloat-f64
@@ -396,6 +445,23 @@ execute/va-arg-26.c                         : skip=softfloat-f64
 execute/va-arg-5.c                          : skip=softfloat-f64
 execute/va-arg-6.c                          : skip=softfloat-f64
 execute/va-arg-pack-1.c                     : skip=softfloat-f64
+
+# callbr (15)
+compile/asmgoto-1.c                         : skip=callbr
+compile/asmgoto-2.c                         : skip=callbr
+compile/asmgoto-5.c                         : skip=callbr
+compile/asmgoto-6.c                         : skip=callbr
+compile/pr106751.c                          : skip=callbr
+compile/pr107997.c                          : skip=callbr
+compile/pr108596.c                          : skip=callbr
+compile/pr116600.c                          : skip=callbr
+compile/pr123386.c                          : skip=callbr
+compile/pr51767.c                           : skip=callbr
+compile/pr63282.c                           : skip=callbr
+compile/pr81262.c                           : skip=callbr
+compile/pr98096.c                           : skip=callbr
+execute/pr121957.c                          : skip=callbr
+execute/pr123625-3.c                        : skip=callbr
 
 # nonportable (15)
 compile/20040101-1.c                        : skip=nonportable
@@ -417,4 +483,5 @@ execute/990413-2.c                          : skip=nonportable
 # clang bugs, still run (3)
 compile/limits-exprparen.c                  : clang=clang's parser overflows the stack on deeply nested parentheses
 compile/limits-structnest.c                 : clang=clang's parser overflows the stack on deeply nested struct definitions
+compile/pr117358.c                          : clang=LLVM stacks conflicting attributes on a bogus const snprintf and rejects the module
 compile/pr46534.c                           : clang=clang does not diagnose an over-large string literal on a 16-bit target

@@ -14,6 +14,16 @@ pub struct SdccConfig {
     pub pattern: Option<String>,
 }
 
+/// Results the suite will emit: each discovered test pair, once per
+/// optimisation level.
+pub fn count(paths: &Paths, config: &SdccConfig) -> u32 {
+    crate::utils::discover_sdcc_test_names(&paths.sdcc_test_dir())
+        .iter()
+        .filter(|n| config.pattern.as_deref().is_none_or(|p| n.contains(p)))
+        .count() as u32
+        * config.opt_levels.len() as u32
+}
+
 pub fn run(paths: &Paths, config: &SdccConfig, on_result: &mut OnResult) -> SuiteResult {
     let test_dir = paths.sdcc_test_dir();
     let clang = paths.clang();
@@ -23,20 +33,7 @@ pub fn run(paths: &Paths, config: &SdccConfig, on_result: &mut OnResult) -> Suit
     let sdcc_lib = config::find_sdcc_lib(config.target);
 
     // Discover test pairs: test_*_clang.c
-    let mut test_names: Vec<String> = std::fs::read_dir(&test_dir)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with("test_") && name.ends_with("_clang.c") {
-                Some(name.strip_suffix("_clang.c")?.to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
-    test_names.sort();
+    let test_names = crate::utils::discover_sdcc_test_names(&test_dir);
 
     for test_name in &test_names {
         if let Some(ref pat) = config.pattern {

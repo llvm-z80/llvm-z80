@@ -93,6 +93,20 @@ impl ClangConfig {
     }
 }
 
+/// Results the suite will emit: every discovered test that survives the name
+/// filter, once per optimisation level. Counted here, next to the loop it
+/// mirrors, so the progress total tracks the run.
+pub fn count(paths: &Paths, config: &ClangConfig) -> u32 {
+    discover_tests(&paths.clang_test_dir(), "test_", "c")
+        .iter()
+        .filter(|t| {
+            let name = t.file_stem().unwrap().to_string_lossy().to_string();
+            config.pattern.as_deref().is_none_or(|p| name.contains(p))
+        })
+        .count() as u32
+        * config.opt_levels.len() as u32
+}
+
 pub fn run(paths: &Paths, config: &ClangConfig, on_result: &mut OnResult) -> SuiteResult {
     let test_dir = paths.clang_test_dir();
     let clang = paths.clang();

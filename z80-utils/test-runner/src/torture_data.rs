@@ -29,9 +29,9 @@ pub const REASONS: &[&str] = &[
     "gcc",           // uses a GCC builtin clang does not implement
     "unsupported",   // uses a feature this target deliberately refuses
     "softfloat-f64", // needs 64-bit double; compiler-rt/z80 ships float only
+    "callbr",        // uses asm goto; the GlobalISel translator has no lowering
     "int16",         // the test assumes a 32-bit int
     "size",          // does not fit in the 64 KB address space
-    "too-slow",      // correct, but beyond any reasonable emulator budget
     "nonportable",   // relies on host properties the target does not have
 ];
 
@@ -365,6 +365,42 @@ pub fn dg_skip_if(source: &str, opt_flag: &str) -> Option<(String, &'static str)
         return Some((format!("dg-skip-if: {why}"), "unsupported"));
     }
     None
+}
+
+/// Per-test flags from the DejaGnu `.x` file beside a test.
+///
+/// These carry options the test cannot express in its own source, and without
+/// them the test measures something else: `builtins/abs-1` asks for
+/// `-fno-builtin-abs` so that `labs` folds and `abs` does not, and its
+/// companion library aborts unless exactly that happens.
+pub fn dot_x_flags(test: &std::path::Path) -> Vec<String> {
+    let x = test.with_extension("x");
+    let text = match std::fs::read_to_string(&x) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let mut flags = Vec::new();
+    for line in text.lines() {
+        // Only unindented lines: an indented one sits inside a TCL conditional
+        // this parser does not evaluate.
+        if line.starts_with(char::is_whitespace) {
+            continue;
+        }
+        let rest = match line.strip_prefix("set additional_flags") {
+            Some(r) => r,
+            None => match line.strip_prefix("lappend additional_flags") {
+                Some(r) => r,
+                None => continue,
+            },
+        };
+        for tok in rest.split_whitespace() {
+            let tok = tok.trim_matches('"');
+            if !tok.is_empty() {
+                flags.push(tok.to_string());
+            }
+        }
+    }
+    flags
 }
 
 pub fn parse_dg(source: &str) -> Dg {

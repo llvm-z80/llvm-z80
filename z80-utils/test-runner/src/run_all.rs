@@ -336,16 +336,7 @@ fn add_clang_filtered(
         label: label.clone(),
         runner: Box::new(move |paths, state, idx| {
             let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, static_stack: false, verify: false, diff_opt: false, native_oracle: false, pattern };
-            // Pre-count tests for progress display
-            let test_dir = paths.clang_test_dir();
-            let tests = crate::suite::discover_tests(&test_dir, "test_", "c");
-            let count = tests.iter()
-                .filter(|t| {
-                    let name = t.file_stem().unwrap().to_string_lossy();
-                    config.pattern.as_ref().map_or(true, |p| name.contains(p.as_str()))
-                })
-                .count() as u32 * config.opt_levels.len() as u32;
-            state.lock().unwrap()[idx].total = count;
+            state.lock().unwrap()[idx].total = clang::count(paths, &config);
 
             let mut cb = progress_callback(state.clone(), idx);
             let result = clang::run(paths, &config, &mut cb);
@@ -368,10 +359,7 @@ fn add_clang_inline_rt(
                 target, opt_levels: opts, fast_math: false, omit_fp: false,
                 inline_runtime: true, static_stack: false, verify: false, diff_opt: false, native_oracle: false, pattern: None,
             };
-            let test_dir = paths.clang_test_dir();
-            let tests = crate::suite::discover_tests(&test_dir, "test_", "c");
-            let count = tests.len() as u32 * config.opt_levels.len() as u32;
-            state.lock().unwrap()[idx].total = count;
+            state.lock().unwrap()[idx].total = clang::count(paths, &config);
 
             let mut cb = progress_callback(state.clone(), idx);
             let result = clang::run(paths, &config, &mut cb);
@@ -388,27 +376,14 @@ fn add_sdcc(
     omit_fp: bool,
 ) {
     let label = label.to_string();
-    let num_opts = opts.len() as u32;
     suites.push(SuiteDef {
         label: label.clone(),
         runner: Box::new(move |paths, state, idx| {
-            // Pre-count: test_*_clang.c files × opt levels
-            let test_dir = paths.sdcc_test_dir();
-            let count = std::fs::read_dir(&test_dir)
-                .into_iter().flatten().filter_map(|e| e.ok())
-                .filter(|e| {
-                    let n = e.file_name().to_string_lossy().to_string();
-                    n.starts_with("test_") && n.ends_with("_clang.c")
-                })
-                .count() as u32 * num_opts;
-            state.lock().unwrap()[idx].total = count;
+            let config = SdccConfig { target, opt_levels: opts, omit_fp, pattern: None };
+            state.lock().unwrap()[idx].total = sdcc::count(paths, &config);
 
             let mut cb = progress_callback(state.clone(), idx);
-            let result = sdcc::run(
-                paths,
-                &SdccConfig { target, opt_levels: opts, omit_fp, pattern: None },
-                &mut cb,
-            );
+            let result = sdcc::run(paths, &config, &mut cb);
             state.lock().unwrap()[idx].result = Some(result);
         }),
     });
@@ -421,21 +396,14 @@ fn add_llc(
     opts: Vec<OptLevel>,
 ) {
     let label = label.to_string();
-    let num_opts = opts.len() as u32;
     suites.push(SuiteDef {
         label: label.clone(),
         runner: Box::new(move |paths, state, idx| {
-            // Pre-count: test_*.ll files × opt levels
-            let test_dir = paths.llc_test_dir();
-            let count = crate::suite::discover_tests(&test_dir, "test_", "ll").len() as u32 * num_opts;
-            state.lock().unwrap()[idx].total = count;
+            let config = LlcConfig { target, opt_levels: opts, pattern: None };
+            state.lock().unwrap()[idx].total = llc::count(paths, &config);
 
             let mut cb = progress_callback(state.clone(), idx);
-            let result = llc::run(
-                paths,
-                &LlcConfig { target, opt_levels: opts, pattern: None },
-                &mut cb,
-            );
+            let result = llc::run(paths, &config, &mut cb);
             state.lock().unwrap()[idx].result = Some(result);
         }),
     });
@@ -450,24 +418,18 @@ fn add_custom(
     suites.push(SuiteDef {
         label: label.clone(),
         runner: Box::new(move |paths, state, idx| {
-            let dir = paths.custom_test_dir();
-            let files = custom::discover_files(&dir);
-            let count = files.len() as u32;
-            state.lock().unwrap()[idx].total = count;
-
+            let files = custom::discover_files(&paths.custom_test_dir());
             if files.is_empty() {
                 state.lock().unwrap()[idx].result = Some(SuiteResult::default());
                 return;
             }
 
-            let file_strs: Vec<String> = files.iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
             let config = CustomConfig {
                 target,
                 opt: OptLevel::O1,
-                files: file_strs,
+                files: files.iter().map(|p| p.to_string_lossy().to_string()).collect(),
             };
+            state.lock().unwrap()[idx].total = custom::count(&config);
             let mut cb = progress_callback(state.clone(), idx);
             let result = custom::run(paths, &config, &mut cb);
             state.lock().unwrap()[idx].result = Some(result);
@@ -484,15 +446,9 @@ fn add_utils(
     suites.push(SuiteDef {
         label: label.clone(),
         runner: Box::new(move |paths, state, idx| {
-            // Pre-count: 4 groups iterate the clang tests; the 2 crosslink
-            // groups iterate the (smaller) sdcc cross-validation test set.
-            let clang_count =
-                crate::suite::discover_tests(&paths.clang_test_dir(), "test_", "c").len() as u32;
-            let sdcc_count =
-                crate::utils::discover_sdcc_test_names(&paths.sdcc_test_dir()).len() as u32;
-            state.lock().unwrap()[idx].total = clang_count * 4 + sdcc_count * 2;
-
             let config = UtilsConfig { target, opt: OptLevel::O1, pattern: None };
+            state.lock().unwrap()[idx].total = utils::count(paths, &config);
+
             let mut cb = progress_callback(state.clone(), idx);
             let result = utils::run(paths, &config, &mut cb);
             state.lock().unwrap()[idx].result = Some(result);

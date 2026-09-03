@@ -13,6 +13,19 @@ pub struct LlcConfig {
     pub pattern: Option<String>,
 }
 
+/// Results the suite will emit: each discovered `.ll` test that survives the
+/// name filter, once per optimisation level.
+pub fn count(paths: &Paths, config: &LlcConfig) -> u32 {
+    discover_tests(&paths.llc_test_dir(), "test_", "ll")
+        .iter()
+        .filter(|t| {
+            let name = t.file_stem().unwrap().to_string_lossy().to_string();
+            config.pattern.as_deref().is_none_or(|p| name.contains(p))
+        })
+        .count() as u32
+        * config.opt_levels.len() as u32
+}
+
 pub fn run(paths: &Paths, config: &LlcConfig, on_result: &mut OnResult) -> SuiteResult {
     let test_dir = paths.llc_test_dir();
     let llc = paths.llc();

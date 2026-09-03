@@ -127,7 +127,7 @@ git submodule update --init vendor/gcc-torture
 ```bash
 cargo run torture                          # both tiers, Z80, O1
 cargo run torture -tier execute -target sm83
-cargo run torture -emu-timeout 60          # tell a hang from a slow test
+cargo run torture -emu-timeout 60          # widen the budget for a slow test
 cargo run torture -run-skipped             # re-check what the manifest skips
 ```
 
@@ -139,6 +139,15 @@ Outcomes are `PASS`, `XFAIL` (a `dg-error` test rejected as upstream expects),
 `SKIP`, `ICE`, `CLANG` (a failure the manifest attributes to clang, still run so
 it turns green when clang fixes it), `FAIL`, `OPTIM` (an optimization that
 should have deleted a call did not), `TIMEOUT`, `COMPILE`, `LINK`, `TOOBIG`.
+
+`TIMEOUT` covers two different failures and can hide a miscompile. One is a
+test that is merely slower than the emulation budget, which `-emu-timeout`
+settles. The other is a program that reached `__builtin_trap()`: that lowers to
+`HALT`, which stops the CPU somewhere other than `_halt`, so the run burns its
+whole budget and looks identical to a slow test. A test that traps got a wrong
+answer. z88dk-ticks does not report the final PC, so the runner cannot tell the
+two apart; treat a newly appearing `TIMEOUT` as something to investigate rather
+than as a slow test.
 
 `test-runner/torture/manifest.txt` lists only what the target structurally
 cannot do. A backend bug never belongs there: it keeps failing until it is
