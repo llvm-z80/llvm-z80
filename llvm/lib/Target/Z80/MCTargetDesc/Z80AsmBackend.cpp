@@ -108,13 +108,56 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   if (Fixup.getKind() == Z80::LDH8)
     Value -= 0xFF00;
 
-  // A resolved 8-bit PC-relative displacement outside the JR range would be
-  // silently truncated into a branch to the wrong place; branch relaxation
-  // should have widened it, so refuse loudly instead.
-  if (IsResolved && Fixup.getKind() == Z80::PCRel8 &&
-      !isInt<8>(static_cast<int64_t>(Value)))
-    getContext().reportError(Fixup.getLoc(),
-                             "relative branch target out of range");
+  // A resolved fixup is encoded directly and emits no relocation, so the
+  // linker's range checks never see it; an out-of-range value would be
+  // silently truncated (an LDH to a symbol outside 0xFF00-0xFFFF would
+  // quietly poke a different hardware register). Refuse loudly instead,
+  // mirroring the checks lld applies to the unresolved ones.
+  if (IsResolved) {
+    int64_t SVal = static_cast<int64_t>(Value);
+    bool InRange = true;
+    const char *Msg = "fixup value out of range";
+    switch (Fixup.getKind()) {
+    default:
+      break; // Addr16_Low/High style byte extractions truncate by design.
+    case Z80::PCRel8:
+      InRange = isInt<8>(SVal);
+      Msg = "relative branch target out of range";
+      break;
+    case Z80::PCRel16:
+      InRange = isInt<16>(SVal);
+      break;
+    case Z80::Disp8:
+      InRange = isInt<8>(SVal);
+      Msg = "index displacement out of range";
+      break;
+    case Z80::LDH8:
+      // Value already has the 0xFF00 base subtracted.
+      InRange = isUInt<8>(Value);
+      Msg = "LDH address must be in the range 0xFF00 to 0xFFFF";
+      break;
+    case FK_Data_1:
+    case Z80::Imm8:
+    case Z80::Addr8:
+      InRange = isInt<8>(SVal) || isUInt<8>(Value);
+      break;
+    case FK_Data_2:
+    case Z80::Imm16:
+    case Z80::Addr16:
+    case Z80::Addr24_Segment:
+    case Z80::AddrAsciz:
+      InRange = isInt<16>(SVal) || isUInt<16>(Value);
+      break;
+    case Z80::Addr13:
+      InRange = isUInt<13>(Value);
+      break;
+    case Z80::Addr24:
+      InRange = isInt<24>(SVal) || isUInt<24>(Value);
+      break;
+    }
+    if (!InRange)
+      getContext().reportError(Fixup.getLoc(), Msg);
+  }
 
   maybeAddReloc(F, Fixup, Target, Value, IsResolved);
 
