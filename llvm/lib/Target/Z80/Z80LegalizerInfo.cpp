@@ -559,6 +559,41 @@ bool Z80LegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
     // These intrinsics are legal and will be selected directly
     return true;
 
+  case Intrinsic::frameaddress:
+  case Intrinsic::returnaddress: {
+    MachineIRBuilder &MIRBuilder = Helper.MIRBuilder;
+    MachineFunction &MF = MIRBuilder.getMF();
+    MachineFrameInfo &MFI = MF.getFrameInfo();
+    Register Dst = MI.getOperand(0).getReg();
+    LLT P0 = LLT::pointer(0, 16);
+    if (MI.getOperand(2).getImm() != 0) {
+      // There is no frame chain to walk; the documented fallback for an
+      // unreachable frame is a null pointer.
+      auto Zero = MIRBuilder.buildConstant(LLT::scalar(16), 0);
+      MIRBuilder.buildIntToPtr(Dst, Zero);
+      MI.eraseFromParent();
+      return true;
+    }
+    // The frame base doubles as both answers: a fixed object at offset zero
+    // is where the return address was pushed, and its address is where the
+    // caller's stack ends.
+    if (IntrinsicID == Intrinsic::frameaddress) {
+      MFI.setFrameAddressIsTaken(true);
+      int FI = MFI.CreateFixedObject(2, 0, /*IsImmutable=*/false);
+      MIRBuilder.buildFrameIndex(Dst, FI);
+    } else {
+      MFI.setReturnAddressIsTaken(true);
+      int FI = MFI.CreateFixedObject(2, 0, /*IsImmutable=*/true);
+      auto Addr = MIRBuilder.buildFrameIndex(P0, FI);
+      auto *MMO = MF.getMachineMemOperand(
+          MachinePointerInfo::getFixedStack(MF, FI),
+          MachineMemOperand::MOLoad, P0, Align(1));
+      MIRBuilder.buildLoad(Dst, Addr, *MMO);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
+
   case Intrinsic::clear_cache:
     // No instruction cache to synchronize.
     MI.eraseFromParent();
