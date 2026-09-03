@@ -459,6 +459,25 @@ public:
     return "Z80 unsupported construct check";
   }
   bool runOnFunction(Function &F) override {
+    // Atomic read-modify-write has no honest implementation here: nothing
+    // stops an interrupt handler between the load and the store, and the
+    // interrupt state cannot be reliably saved and restored to close that
+    // window (IFF1 is unreadable without the NMI erratum, SM83's IME is
+    // unreadable entirely). Refuse rather than pretend.
+    SmallVector<Instruction *, 2> Atomics;
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        if (isa<AtomicRMWInst>(I) || isa<AtomicCmpXchgInst>(I))
+          Atomics.push_back(&I);
+    for (Instruction *I : Atomics) {
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F, "atomic read-modify-write operations are not supported",
+          I->getDebugLoc()));
+      if (!I->getType()->isVoidTy())
+        I->replaceAllUsesWith(PoisonValue::get(I->getType()));
+      I->eraseFromParent();
+    }
+
     SmallVector<CallBrInst *, 2> AsmGotos;
     for (BasicBlock &BB : F)
       if (auto *CBR = dyn_cast<CallBrInst>(BB.getTerminator()))
@@ -483,7 +502,7 @@ public:
       CBR->eraseFromParent();
     }
 
-    bool Changed = !AsmGotos.empty();
+    bool Changed = !Atomics.empty() || !AsmGotos.empty();
     Changed |= rewriteIndirectAsmOutputs(F);
 
     const DataLayout &DL = F.getParent()->getDataLayout();
