@@ -1,0 +1,47 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# A value stored to a frame slot can answer a later load from it, but only
+# when the program did not ask for the access to happen. The memory operand
+# is what says which, so it has to survive selection and expansion to get
+# here.
+
+--- |
+  define void @spill_forwards() { ret void }
+  define void @volatile_kept() { ret void }
+...
+---
+name:            spill_forwards
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $c, $ix
+    LD_IXd_C -2, implicit $c :: (store (s8) into %stack.0)
+    LD_L_IXd -2, implicit-def $l :: (load (s8) from %stack.0)
+    RET implicit $l
+
+# CHECK-LABEL: name: spill_forwards
+# CHECK:      LD_IXd_C -2
+# CHECK-NEXT: LD_L_C
+# CHECK-NEXT: RET
+
+...
+---
+name:            volatile_kept
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $c, $ix
+    LD_IXd_C -2, implicit $c :: (volatile store (s8) into %stack.0)
+    LD_L_IXd -2, implicit-def $l :: (volatile load (s8) from %stack.0)
+    RET implicit $l
+
+# CHECK-LABEL: name: volatile_kept
+# CHECK:      LD_IXd_C -2
+# CHECK-NEXT: LD_L_IXd -2
+# CHECK-NEXT: RET
+
+...

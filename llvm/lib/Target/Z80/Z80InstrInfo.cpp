@@ -563,7 +563,34 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   }
 }
 
+// A frame slot access says whether it is volatile in its memory operand, and
+// the pseudo selection built carries it. Whatever performs the access in the
+// pseudo's place has to keep saying so, or a volatile local is
+// indistinguishable from a spill slot.
 bool Z80InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  SmallVector<MachineMemOperand *, 2> MMOs(MI.memoperands_begin(),
+                                           MI.memoperands_end());
+  // The expansion inserts before the pseudo and erases it, so whatever it
+  // produced ends up between these two points.
+  bool AtStart = MI.getIterator() == MBB.begin();
+  MachineBasicBlock::iterator Prev =
+      AtStart ? MBB.end() : std::prev(MI.getIterator());
+  MachineBasicBlock::iterator Next = std::next(MI.getIterator());
+
+  bool Changed = expandPostRAPseudoImpl(MI);
+
+  if (Changed && !MMOs.empty())
+    for (auto It = AtStart ? MBB.begin() : std::next(Prev); It != Next; ++It)
+      if (It->mayLoadOrStore() && It->memoperands_empty() &&
+          getSPAdjust(*It) == 0)
+        It->setMemRefs(MF, MMOs);
+
+  return Changed;
+}
+
+bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   MachineBasicBlock &MBB = *MI.getParent();
   const TargetRegisterInfo *TRI = STI->getRegisterInfo();
   DebugLoc DL = MI.getDebugLoc();

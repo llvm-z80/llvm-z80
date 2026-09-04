@@ -83,7 +83,9 @@ def LD_nnind_SP : InstED24<"ld", 0x73, DirectModeAt2> { let AsmString = "ld ( $i
 //  Exchange Group
 //===----------------------------------------------------------------------===//
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def EX_DE_HL : Inst8<"ex de,hl", 0xEB> { let Uses = [DE, HL]; let Defs = [DE, HL]; }
+}
 def EX_AF_AF : Inst8<"ex af,af'", 0x08>;
 def EXX : Inst8<"exx", 0xD9>;
 let mayLoad = true, mayStore = true, hasSideEffects = false in
@@ -127,15 +129,19 @@ def IM_2 : InstED8<"im 2", 0x5E>;
 //===----------------------------------------------------------------------===//
 
 // ADC HL,ss (ED prefixed) - Add with carry (reads carry flag)
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADC_HL_BC : InstED8<"adc hl,bc", 0x4A> { let Uses = [HL, BC, FLAGS]; let Defs = [HL, FLAGS]; }
 def ADC_HL_DE : InstED8<"adc hl,de", 0x5A> { let Uses = [HL, DE, FLAGS]; let Defs = [HL, FLAGS]; }
 def ADC_HL_HL : InstED8<"adc hl,hl", 0x6A> { let Uses = [HL, FLAGS]; let Defs = [HL, FLAGS]; }
+}
 def ADC_HL_SP : InstED8<"adc hl,sp", 0x7A> { let Uses = [HL, SP, FLAGS]; let Defs = [HL, FLAGS]; }
 
 // SBC HL,ss (ED prefixed) - Subtract with carry (reads carry flag)
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def SBC_HL_BC : InstED8<"sbc hl,bc", 0x42> { let Uses = [HL, BC, FLAGS]; let Defs = [HL, FLAGS]; }
 def SBC_HL_DE : InstED8<"sbc hl,de", 0x52> { let Uses = [HL, DE, FLAGS]; let Defs = [HL, FLAGS]; }
 def SBC_HL_HL : InstED8<"sbc hl,hl", 0x62> { let Uses = [HL, FLAGS]; let Defs = [HL, FLAGS]; }
+}
 def SBC_HL_SP : InstED8<"sbc hl,sp", 0x72> { let Uses = [HL, SP, FLAGS]; let Defs = [HL, FLAGS]; }
 
 //===----------------------------------------------------------------------===//

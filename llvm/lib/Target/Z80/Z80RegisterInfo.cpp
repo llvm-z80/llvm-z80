@@ -964,9 +964,34 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
 // eliminateFrameIndex
 //===----------------------------------------------------------------------===//
 
+// See the note on expandPostRAPseudo: the pseudo says whether the access it
+// stands for is volatile, and whatever performs it has to keep saying so.
 bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                                           int SPAdj, unsigned FIOperandNum,
                                           RegScavenger *RS) const {
+  MachineBasicBlock &MBB = *MI->getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  SmallVector<MachineMemOperand *, 2> MMOs(MI->memoperands_begin(),
+                                           MI->memoperands_end());
+  bool AtStart = MI == MBB.begin();
+  MachineBasicBlock::iterator Prev = AtStart ? MBB.end() : std::prev(MI);
+  MachineBasicBlock::iterator Next = std::next(MI);
+
+  bool Res = eliminateFrameIndexImpl(MI, SPAdj, FIOperandNum, RS);
+
+  if (!MMOs.empty())
+    for (auto It = AtStart ? MBB.begin() : std::next(Prev); It != Next; ++It)
+      if (It->mayLoadOrStore() && It->memoperands_empty() &&
+          TII.getSPAdjust(*It) == 0)
+        It->setMemRefs(MF, MMOs);
+
+  return Res;
+}
+
+bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
+                                              int SPAdj, unsigned FIOperandNum,
+                                              RegScavenger *RS) const {
   // RS is unused — we use isRegLiveAt() for accurate liveness checks
   // instead of RegScavenger, which is unreliable with forward frame index
   // elimination (eliminateFrameIndicesBackwards=false).

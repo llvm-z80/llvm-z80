@@ -62,6 +62,12 @@ public:
 
   // Return the name of a register for inline assembly
   StringRef getRegAsmName(MCRegister Reg) const override;
+
+private:
+  /// The elimination itself. The public entry point wraps it to carry the
+  /// pseudo's memory operands onto whatever performs the access.
+  bool eliminateFrameIndexImpl(MachineBasicBlock::iterator MI, int SPAdj,
+                               unsigned FIOperandNum, RegScavenger *RS) const;
 };
 
 } // namespace llvm

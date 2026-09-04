@@ -318,24 +318,26 @@ def EI : Inst8<"ei", 0xFB>;
 //===----------------------------------------------------------------------===//
 
 // ADD HL,ss - Uses HL and the source register pair, defines HL (sets carry, H)
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADD_HL_BC : ADDHLrr<REGPAIR_BC> { let Uses = [HL, BC]; let Defs = [HL, FLAGS]; }
 def ADD_HL_DE : ADDHLrr<REGPAIR_DE> { let Uses = [HL, DE]; let Defs = [HL, FLAGS]; }
 def ADD_HL_HL : ADDHLrr<REGPAIR_HL> { let Uses = [HL]; let Defs = [HL, FLAGS]; }
 def ADD_HL_SP : ADDHLrr<REGPAIR_SP> { let Uses = [HL, SP]; let Defs = [HL, FLAGS]; }
+}
 
 // INC/DEC ss
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def INC_BC : INCrr<REGPAIR_BC> { let Uses = [BC]; let Defs = [BC]; }
 def INC_DE : INCrr<REGPAIR_DE> { let Uses = [DE]; let Defs = [DE]; }
-}
 def INC_HL : INCrr<REGPAIR_HL> { let Uses = [HL]; let Defs = [HL]; }
+}
 def INC_SP : INCrr<REGPAIR_SP> { let Uses = [SP]; let Defs = [SP]; }
 
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def DEC_BC : DECrr<REGPAIR_BC> { let Uses = [BC]; let Defs = [BC]; }
 def DEC_DE : DECrr<REGPAIR_DE> { let Uses = [DE]; let Defs = [DE]; }
-}
 def DEC_HL : DECrr<REGPAIR_HL> { let Uses = [HL]; let Defs = [HL]; }
+}
 def DEC_SP : DECrr<REGPAIR_SP> { let Uses = [SP]; let Defs = [SP]; }
 
 //===----------------------------------------------------------------------===//

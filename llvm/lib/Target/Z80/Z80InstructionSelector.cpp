@@ -1536,6 +1536,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     MIB.addFrameIndex(FIInfo.FI);
     if (FIInfo.Offset)
       MIB.addImm(FIInfo.Offset);
+    // The pseudo performs the load the fold is about to erase.
+    MIB.cloneMemRefs(*FIInfo.LoadMI);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
         .addReg(Z80::HL);
     moveLifetimeEnd(FIInfo.LoadMI, MI,
@@ -1807,7 +1809,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             return false;
           BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR8), DstReg)
               .addFrameIndex(FI)
-              .addImm(Disp);
+              .addImm(Disp)
+              .cloneMemRefs(MI);
           MI.eraseFromParent();
           return true;
         }
@@ -1816,7 +1819,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             return false;
           BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR16), DstReg)
               .addFrameIndex(FI)
-              .addImm(Disp);
+              .addImm(Disp)
+              .cloneMemRefs(MI);
           MI.eraseFromParent();
           return true;
         }
@@ -1834,7 +1838,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           return false;
         BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR8), DstReg)
             .addFrameIndex(FI)
-            .addImm(0);
+            .addImm(0)
+            .cloneMemRefs(MI);
         MI.eraseFromParent();
         return true;
       }
@@ -1843,7 +1848,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           return false;
         BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR16), DstReg)
             .addFrameIndex(FI)
-            .addImm(0);
+            .addImm(0)
+            .cloneMemRefs(MI);
         MI.eraseFromParent();
         return true;
       }
@@ -1948,7 +1954,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_IMM8))
                 .addImm(Val & 0xFF)
                 .addFrameIndex(FI)
-                .addImm(ExtraOffset);
+                .addImm(ExtraOffset)
+                .cloneMemRefs(MI);
             MI.eraseFromParent();
             return true;
           }
@@ -1957,7 +1964,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_GR8))
               .addReg(SrcReg)
               .addFrameIndex(FI)
-              .addImm(ExtraOffset);
+              .addImm(ExtraOffset)
+              .cloneMemRefs(MI);
           MI.eraseFromParent();
           return true;
         }
@@ -1967,7 +1975,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_GR16))
               .addReg(SrcReg)
               .addFrameIndex(FI)
-              .addImm(ExtraOffset);
+              .addImm(ExtraOffset)
+              .cloneMemRefs(MI);
           MI.eraseFromParent();
           return true;
         }

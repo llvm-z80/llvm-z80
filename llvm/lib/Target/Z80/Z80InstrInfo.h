@@ -132,6 +132,10 @@ public:
   getSerializableDirectMachineOperandTargetFlags() const override;
 
 private:
+  /// The expansion itself. The public entry point wraps it to carry the
+  /// pseudo's memory operands onto whatever performs the access.
+  bool expandPostRAPseudoImpl(MachineInstr &MI) const;
+
   const Z80Subtarget *STI;
 };
 

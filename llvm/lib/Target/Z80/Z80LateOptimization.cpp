@@ -73,6 +73,18 @@ static Register getStoreIXdSrcReg(unsigned Opc) {
   }
 }
 
+// Whether a stack access may be reasoned about as an ordinary read or write
+// of a frame slot. The memory operand rides on the frame index pseudo from
+// selection through expansion, so an access with none left is one this pass
+// did not follow and should not draw conclusions from, and a volatile one is
+// an access the program asked to actually perform.
+static bool isPlainSlotAccess(const MachineInstr &MI) {
+  return !MI.memoperands_empty() &&
+         llvm::all_of(MI.memoperands(), [](const MachineMemOperand *MMO) {
+           return MMO->isUnordered() && !MMO->isVolatile();
+         });
+}
+
 // Get the destination register for an IX-indexed load instruction.
 // Returns the physical register being loaded, or Register() if not an
 // IX-indexed load.
@@ -1582,14 +1594,27 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         }
 
         // Match LDHL SP,#N followed by store or load pattern.
-        // (Check before side-effects: LDHL inherits hasSideEffects=1
-        // from the conservative Z80Inst base but is actually safe.)
         if (Opc == Z80::LDHL_SP_e) {
           int8_t Imm = (int8_t)(MI.getOperand(0).getImm() & 0xFF);
           int AbsOff = SPDelta + Imm;
 
           auto It1 = std::next(MII);
           if (It1 == MIE) {
+            ++MII;
+            continue;
+          }
+
+          // The accesses this address is about to be used for have to be
+          // ordinary frame traffic. The longest sequence matched below is
+          // three instructions, so that is as far as this has to look.
+          bool Plain = true;
+          unsigned Look = 3;
+          for (auto L = It1; L != MIE && Look; ++L, --Look)
+            if (L->mayLoadOrStore() && !isPlainSlotAccess(*L))
+              Plain = false;
+          if (!Plain) {
+            SPSlots.erase(AbsOff);
+            SPSlots.erase(AbsOff + 1);
             ++MII;
             continue;
           }
@@ -1966,13 +1991,10 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       Register StoreSrc = getStoreIXdSrcReg(Opc);
       if (StoreSrc.isValid()) {
         int Offset = MI.getOperand(0).getImm();
-        if (MI.memoperands_empty()) {
-          // Spill expansion — track the value.
+        if (isPlainSlotAccess(MI))
           AvailValues[Offset] = StoreSrc;
-        } else {
-          // User code (possibly volatile) — invalidate this slot.
+        else
           AvailValues.erase(Offset);
-        }
         continue;
       }
 
@@ -1981,7 +2003,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       if (LoadDst.isValid()) {
         int Offset = MI.getOperand(0).getImm();
 
-        if (MI.memoperands_empty()) {
+        if (isPlainSlotAccess(MI)) {
           auto It = AvailValues.find(Offset);
           if (It != AvailValues.end()) {
             MCPhysReg SrcReg = It->second;
@@ -2013,7 +2035,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         // Invalidate entries pointing to R' (they're stale).
         invalidateReg(AvailValues, TRI, LoadDst);
         // R' now holds the value at offset d.
-        if (MI.memoperands_empty())
+        if (isPlainSlotAccess(MI))
           AvailValues[Offset] = LoadDst;
         continue;
       }

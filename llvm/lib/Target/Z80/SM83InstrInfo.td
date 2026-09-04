@@ -36,6 +36,9 @@ def SM83_RETI : Inst8<"reti", 0xD9>, InstReturn;
 def LDHL_SP_e : Inst16SImm<"ldhl sp,", 0xF8> {
   let Uses = [SP];
   let Defs = [HL, FLAGS];
+  let mayLoad = 0;
+  let mayStore = 0;
+  let hasSideEffects = 0;
 }
 
 // ADD SP,e - Add signed 8-bit immediate to SP (opcode 0xE8)
