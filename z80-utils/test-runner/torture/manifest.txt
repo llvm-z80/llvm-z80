@@ -21,13 +21,14 @@
 # that now pass, so a wrong entry cannot hide a working test.
 
 
-# libc (65)
+# libc (66)
 execute/20000914-1.c                        : skip=libc
 execute/20020406-1.c                        : skip=libc
 execute/20021120-3.c                        : skip=libc
 execute/20051113-1.c                        : skip=libc
 execute/20070201-1.c                        : skip=libc
 execute/20071018-1.c                        : skip=libc
+execute/20071120-1.c                        : skip=libc
 execute/20121108-1.c                        : skip=libc
 execute/20141022-1.c                        : skip=libc
 execute/20210505-1.c                        : skip=libc
