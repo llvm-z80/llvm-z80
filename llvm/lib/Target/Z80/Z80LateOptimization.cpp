@@ -421,6 +421,76 @@ static bool eraseDeadFrameReloads(MachineBasicBlock &MBB,
   return Changed;
 }
 
+// SM83 reloads a 16-bit frame slot through HL, which doubles as the address
+// register: LD A,(HL+); LD H,(HL); LD L,A. When the value was wanted in
+// another pair the copy out of HL follows, and the two halves can simply be
+// loaded where they belong instead.
+//
+//   ld a,(hl+) ; ld h,(hl) ; ld l,a ; ld c,l ; ld b,h
+//     ->  ld a,(hl+) ; ld b,(hl) ; ld c,a
+//
+// Only when HL itself is dead afterwards, since the rewrite stops writing it.
+static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
+                                   const TargetInstrInfo *TII,
+                                   const TargetRegisterInfo *TRI) {
+  static const struct {
+    MCPhysReg Lo, Hi;
+    unsigned LoadHiOpc;
+  } Pairs[] = {{Z80::C, Z80::B, Z80::LD_B_HLind},
+               {Z80::E, Z80::D, Z80::LD_D_HLind}};
+
+  bool Changed = false;
+  for (auto MII = MBB.begin(); MII != MBB.end();) {
+    auto Load = MII;
+    if (Load->getOpcode() != Z80::LD_A_HLI) {
+      ++MII;
+      continue;
+    }
+    auto LoadHi = std::next(Load);
+    if (LoadHi == MBB.end() || LoadHi->getOpcode() != Z80::LD_H_HLind) {
+      ++MII;
+      continue;
+    }
+    auto SetL = std::next(LoadHi);
+    if (SetL == MBB.end() || SetL->getOpcode() != Z80::LD_L_A) {
+      ++MII;
+      continue;
+    }
+    auto SetLo = std::next(SetL);
+    if (SetLo == MBB.end()) {
+      ++MII;
+      continue;
+    }
+    auto SetHi = std::next(SetLo);
+    if (SetHi == MBB.end()) {
+      ++MII;
+      continue;
+    }
+
+    const auto *P = llvm::find_if(Pairs, [&](const auto &P) {
+      return SetLo->getOpcode() == getLD8Opcode(P.Lo, Z80::L) &&
+             SetHi->getOpcode() == getLD8Opcode(P.Hi, Z80::H);
+    });
+    if (P == std::end(Pairs) ||
+        !isRegDeadAfter(std::next(SetHi), MBB, TRI, Z80::HL)) {
+      ++MII;
+      continue;
+    }
+
+    LLVM_DEBUG(dbgs() << "  Reload straight into pair: " << *SetLo);
+    BuildMI(MBB, LoadHi, LoadHi->getDebugLoc(), TII->get(P->LoadHiOpc))
+        .cloneMemRefs(*LoadHi);
+    BuildMI(MBB, LoadHi, LoadHi->getDebugLoc(),
+            TII->get(getLD8Opcode(P->Lo, Z80::A)));
+    MII = std::next(SetHi);
+    MBB.erase(LoadHi, MII);
+    Changed = true;
+  }
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
 // Get the destination register of a LD r,A instruction, or Register().
 static Register getLDrADstReg(unsigned Opc) {
   switch (Opc) {
@@ -2109,6 +2179,9 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       // After address reuse: it creates the INC HL neighbors these fuse with.
       Changed |= materializeConstantStores(MBB, TII, TRI);
       Changed |= fusePostIncAccess(MBB, TII, TRI);
+      // After fusion: the reload it rewrites only takes its LD A,(HL+) form
+      // once these two have run.
+      Changed |= reloadDirectlyIntoPair(MBB, TII, TRI);
     }
     Changed |= directIncDec(MBB, TII, TRI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);

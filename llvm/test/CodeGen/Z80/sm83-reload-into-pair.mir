@@ -1,0 +1,79 @@
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# SM83 reloads a 16-bit frame slot through HL, which doubles as the address
+# register. When the value was wanted in another pair, the copy out of HL
+# follows and the halves can be loaded where they belong instead.
+
+--- |
+  define void @into_pair() { ret void }
+  define void @hl_still_live() { ret void }
+  define void @runs_off_the_block() { ret void }
+...
+---
+name:            into_pair
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $sp
+    LDHL_SP_e 8, implicit-def $hl, implicit-def $flags, implicit $sp
+    LD_A_HLind implicit-def $a, implicit $hl
+    INC_HL implicit-def $hl, implicit $hl
+    LD_H_HLind implicit-def $h, implicit $hl
+    LD_L_A implicit-def $l, implicit killed $a
+    LD_C_L implicit-def $c, implicit $l
+    LD_B_H implicit-def $b, implicit $h
+    RET implicit killed $bc
+
+# CHECK-LABEL: name: into_pair
+# CHECK:      LD_A_HLI
+# CHECK-NEXT: LD_B_HLind
+# CHECK-NEXT: LD_C_A
+# CHECK-NEXT: RET
+
+...
+---
+name:            hl_still_live
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $sp
+    LDHL_SP_e 8, implicit-def $hl, implicit-def $flags, implicit $sp
+    LD_A_HLind implicit-def $a, implicit $hl
+    INC_HL implicit-def $hl, implicit $hl
+    LD_H_HLind implicit-def $h, implicit $hl
+    LD_L_A implicit-def $l, implicit killed $a
+    LD_C_L implicit-def $c, implicit $l
+    LD_B_H implicit-def $b, implicit $h
+    PUSH_HL implicit $hl, implicit-def $sp, implicit $sp
+    RET implicit killed $bc
+
+# The rewrite stops writing HL, so a reader of it downstream rules the fold
+# out and the reload has to keep going through the pair.
+
+# CHECK-LABEL: name: hl_still_live
+# CHECK:      LD_L_A
+# CHECK-NEXT: LD_C_L
+# CHECK-NEXT: LD_B_H
+# CHECK-NEXT: PUSH_HL
+
+...
+---
+name:            runs_off_the_block
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $hl
+    LD_A_HLI implicit-def $a, implicit-def $hl, implicit $hl
+    LD_H_HLind implicit-def $h, implicit $hl
+
+  bb.1:
+    liveins: $a, $h
+    RET implicit $a
+
+# The match walks forward five instructions, which the block need not have.
+#
+# CHECK-LABEL: name: runs_off_the_block
+# CHECK:      LD_A_HLI
+# CHECK-NEXT: LD_H_HLind
+
+...
