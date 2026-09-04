@@ -291,8 +291,9 @@ bool Z80InstructionSelector::selectMul8(MachineInstr &MI) {
 
 // Select G_UDIV/G_UREM i8: inline 8-bit restoring division via pseudo.
 // Input: A = dividend, E = divisor. Output: A = quotient (UDIV8) or remainder
-// (UMOD8). Under -Oz, emits a runtime call instead to save code size (~15B
-// inline → ~10B call).
+// (UMOD8). The call is shorter than the inline loop but costs the time of
+// getting there, so only minsize takes it. SM83 calls either way: the
+// instructions the loop is missing there make it lose on both counts.
 bool Z80InstructionSelector::selectUDivMod8(MachineInstr &MI, bool IsDiv) {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
@@ -307,8 +308,9 @@ bool Z80InstructionSelector::selectUDivMod8(MachineInstr &MI, bool IsDiv) {
 
   const DebugLoc &DL = MI.getDebugLoc();
 
-  if (MF.getFunction().hasOptSize()) {
-    // -Os/-Oz: call dedicated 8-bit runtime function.
+  if (MF.getSubtarget<Z80Subtarget>().hasSM83() ||
+      MF.getFunction().hasMinSize()) {
+    // Call the dedicated 8-bit runtime function instead.
     // Convention: A = dividend, E = divisor, return A = result.
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
         !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
