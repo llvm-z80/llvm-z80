@@ -757,6 +757,22 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
+  case Z80::SPILL_IMM16: {
+    // SPILL_IMM16 val, offset -> LD (IX+d),lo ; LD (IX+d+1),hi
+    // Large offsets are handled in eliminateFrameIndex.
+    int64_t Val = MI.getOperand(0).getImm();
+    int64_t Offset = MI.getOperand(1).getImm();
+
+    assert(Offset >= -128 && Offset + 1 <= 127 &&
+           "Large offset should have been expanded in eliminateFrameIndex");
+    BuildMI(MBB, MI, DL, get(Z80::LD_IXd_n)).addImm(Offset).addImm(Val & 0xFF);
+    BuildMI(MBB, MI, DL, get(Z80::LD_IXd_n))
+        .addImm(Offset + 1)
+        .addImm((Val >> 8) & 0xFF);
+    MI.eraseFromParent();
+    return true;
+  }
+
   case Z80::SPILL_GR8: {
     // SPILL_GR8 src, offset -> LD (IX+d),r
     // Large offsets are handled in eliminateFrameIndex.

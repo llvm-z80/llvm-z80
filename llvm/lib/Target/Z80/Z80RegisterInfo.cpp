@@ -1199,6 +1199,27 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       return false;
     }
 
+    if (Opc == Z80::SPILL_IMM16) {
+      int64_t Val = MI->getOperand(0).getImm();
+      bool PreserveFlags = isFlagsLiveAfter(MI, this);
+      bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, std::next(MI), this);
+      int SPDelta = 0;
+
+      if (NeedSaveHL) {
+        emitHLSavePush(MBB, MI, DL, TII);
+        SPDelta += 2;
+      }
+      emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+      BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
+      BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
+      BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n))
+          .addImm((Val >> 8) & 0xFF);
+      if (NeedSaveHL)
+        BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
+      MI->eraseFromParent();
+      return false;
+    }
+
     if (Opc == Z80::SPILL_GR8) {
       Register SrcReg = MI->getOperand(0).getReg();
       expandSpillGR8SPRelative(MBB, MI, DL, TII, SrcReg, Offset, this);
@@ -1284,7 +1305,8 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
   // For 16-bit SPILL/RELOAD, both Offset and Offset+1 must fit.
   bool Is16BitFI = (Opc == Z80::SPILL_GR16 || Opc == Z80::RELOAD_GR16 ||
                     Opc == Z80::SPILL_ANY16 || Opc == Z80::RELOAD_ANY16 ||
-                    Opc == Z80::ADD_HL_FI || Opc == Z80::SUB_HL_FI);
+                    Opc == Z80::SPILL_IMM16 || Opc == Z80::ADD_HL_FI ||
+                    Opc == Z80::SUB_HL_FI);
   int64_t MaxOffset = Is16BitFI ? Offset + 1 : Offset;
 
   if (Offset >= -128 && MaxOffset <= 127) {
@@ -1340,6 +1362,31 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
     BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
+    if (NeedSaveTemp)
+      BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
+    if (NeedSaveHL)
+      BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
+    MI->eraseFromParent();
+    return false;
+  }
+
+  if (Opc == Z80::SPILL_IMM16) {
+    int64_t Val = MI->getOperand(0).getImm();
+    auto NextIt = std::next(MI);
+    Register TempReg =
+        !isRegLiveAt(Z80::BC, MBB, NextIt, this) ? Z80::BC : Z80::DE;
+    bool PreserveFlags = isFlagsLiveAfter(MI, this);
+    bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, this);
+    bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
+
+    if (NeedSaveHL)
+      emitHLSavePush(MBB, MI, DL, TII);
+    if (NeedSaveTemp)
+      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+    emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
+    BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
+    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
+    BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm((Val >> 8) & 0xFF);
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
     if (NeedSaveHL)

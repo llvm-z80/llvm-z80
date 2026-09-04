@@ -1970,6 +1970,29 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           return true;
         }
         if (SrcTy.getSizeInBits() <= 16) {
+          // As above for 8 bits: a constant goes straight to memory rather
+          // than through a register pair, which also keeps the pair free.
+          // A second use of the constant pays for the pair on Z80, which is
+          // a byte saved for a few cycles spent and so the size levels'
+          // trade. SM83 pays for its own address setup on every frame
+          // access and gets nothing back from the pair.
+          const MachineFunction &StoreMF = *MBB.getParent();
+          bool KeepSharedPair =
+              !StoreMF.getSubtarget<Z80Subtarget>().hasSM83() &&
+              StoreMF.getFunction().hasOptSize();
+          MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
+          if (SrcDef && SrcDef->getOpcode() == TargetOpcode::G_CONSTANT &&
+              (!KeepSharedPair || MRI.hasOneNonDBGUse(SrcReg))) {
+            int64_t Val =
+                SrcDef->getOperand(1).getCImm()->getSExtValue() & 0xFFFF;
+            BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_IMM16))
+                .addImm(Val)
+                .addFrameIndex(FI)
+                .addImm(ExtraOffset)
+                .cloneMemRefs(MI);
+            MI.eraseFromParent();
+            return true;
+          }
           if (!RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
             return false;
           BuildMI(MBB, MI, DL, TII.get(Z80::SPILL_GR16))

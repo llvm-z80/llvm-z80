@@ -637,6 +637,13 @@ def SPILL_IMM8 : Z80Pseudo<(outs), (ins i8imm:$val, i32imm:$fi, i32imm:$offset)>
   let mayStore = true;
   let mayLoad = false;
 }
+// 16-bit constant store to a frame slot. Storing the two halves as
+// immediates keeps the value out of a register pair entirely, which both
+// shortens the store and leaves the pair free for allocation.
+def SPILL_IMM16 : Z80Pseudo<(outs), (ins i16imm:$val, i32imm:$fi, i32imm:$offset)> {
+  let mayStore = true;
+  let mayLoad = false;
+}
 def RELOAD_GR8 : Z80Pseudo<(outs GR8:$dst), (ins i32imm:$fi, i32imm:$offset)> {
   let mayLoad = true;
   let mayStore = false;
