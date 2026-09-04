@@ -243,7 +243,7 @@ def XOR_L : Inst8<"xor l", 0xAD> { let Uses = [A, L]; let Defs = [A, FLAGS]; }
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def XOR_HLind : Inst8<"xor (hl)", 0xAE> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def XOR_A : Inst8<"xor a", 0xAF> { let Uses = [A]; let Defs = [A, FLAGS]; }
+def XOR_A : Inst8<"xor a", 0xAF> { let Defs = [A, FLAGS]; }
 def XOR_n : Inst16<"xor", 0xEE, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
 
 // OR r - Logical OR with A
