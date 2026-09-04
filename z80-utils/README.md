@@ -170,6 +170,31 @@ cargo run bench                           # Z80, O1
 cargo run bench -target sm83 -opt Os      # SM83, Os
 ```
 
+#### stdcbench — Clang vs SDCC on an Outside Benchmark
+
+Builds [stdcbench](https://github.com/llvm-z80/stdcbench)'s c90base module with
+both toolchains and compares code size and emulated cycles. Not part of the
+default run.
+
+```bash
+git submodule update --init vendor/stdcbench
+
+cargo run stdcbench                        # Z80, Os, one iteration
+cargo run stdcbench -target sm83 -opt O2
+cargo run stdcbench -iterations 4
+```
+
+Only c90base is built: it calls nothing from the C library, while c90lib needs
+malloc, qsort and the string functions this freestanding target does not have.
+`test-runner/stdcbench/portme.{c,h}` supplies the target hooks, so the mirror
+stays byte-for-byte upstream.
+
+What is reported is cycles, not a stdcbench score. stdcbench scores work done
+per unit of wall-clock time and the emulator gives the guest no clock to read,
+so the harness pins the iteration count and measures the run exactly instead.
+The benchmark's own result checks still run, and the `Checks` column reports
+them; that column failing means the compiled code computed a wrong answer.
+
 ### Test File Format
 
 #### C tests (`test-runner/testcases/clang/`, `test-runner/testcases/sdcc/`)

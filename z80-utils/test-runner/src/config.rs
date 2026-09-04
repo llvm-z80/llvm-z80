@@ -227,6 +227,16 @@ impl Paths {
         self.torture_dir().join("shim").join(target.triple()).join("shim.asm")
     }
 
+    /// The stdcbench submodule checkout.
+    pub fn stdcbench_src_dir(&self) -> PathBuf {
+        self.project_dir.join("../vendor/stdcbench")
+    }
+
+    /// portme.c / portme.h, which the harness owns rather than the mirror.
+    pub fn stdcbench_harness_dir(&self) -> PathBuf {
+        self.project_dir.join("stdcbench")
+    }
+
     /// Staging directory for assembled crt0.o + builtin .o files.
     pub fn elf_runtime_stage(&self, target: Target) -> PathBuf {
         let t = target.triple();

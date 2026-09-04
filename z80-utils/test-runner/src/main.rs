@@ -8,6 +8,7 @@ mod llc;
 mod run_all;
 mod runtime;
 mod sdcc;
+mod stdcbench;
 mod suite;
 mod torture;
 mod torture_data;
@@ -41,6 +42,7 @@ fn main() -> ExitCode {
         "clang" => cmd_clang(&args[1..]),
         "custom" => cmd_custom(&args[1..]),
         "sdcc" => cmd_sdcc(&args[1..]),
+        "stdcbench" => cmd_stdcbench(&args[1..]),
         "torture" => cmd_torture(&args[1..]),
         "llc" => cmd_llc(&args[1..]),
         "utils" => cmd_utils(&args[1..]),
@@ -74,6 +76,7 @@ Commands:
   clang      Run Clang C test suite
   custom     Compile-check arbitrary .c or .ll files
   sdcc       Run SDCC compatibility test suite
+  stdcbench  Run stdcbench c90base, Clang vs SDCC (not part of the default run)
   torture    Run the GCC C torture suite (not part of the default run)
   llc        Run LLC (LLVM IR) test suite
   utils      Run elf2rel/rel2elf roundtrip and crosslink tests
@@ -487,6 +490,51 @@ fn cmd_bench(args: &[String]) -> ExitCode {
     let config = bench::BenchConfig { target, opt, pattern };
     bench::run(&paths, &config);
     ExitCode::SUCCESS
+}
+
+fn cmd_stdcbench(args: &[String]) -> ExitCode {
+    let mut target = Target::Z80;
+    let mut opt = config::OptLevel::Os;
+    let mut iterations = 1u32;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-target" => target = parse_target(args, &mut i),
+            "-opt" => {
+                i += 1;
+                if i < args.len() {
+                    match config::OptLevel::parse(&args[i]) {
+                        Some(o) => opt = o,
+                        None => {
+                            eprintln!("invalid opt level: {}", args[i]);
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                }
+            }
+            "-iterations" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<u32>().ok()) {
+                    Some(n) if n > 0 => iterations = n,
+                    _ => {
+                        eprintln!("-iterations expects a positive number");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let paths = Paths::resolve();
+    let config = stdcbench::StdcbenchConfig { target, opt, iterations };
+    if stdcbench::run(&paths, &config) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 fn cmd_torture(args: &[String]) -> ExitCode {

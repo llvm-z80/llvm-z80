@@ -424,7 +424,7 @@ fn measure_ihx(
 }
 
 /// Extract total loaded section sizes from an ELF using llvm-size.
-fn elf_text_size(llvm_size: &Path, elf: &Path) -> Option<u32> {
+pub(crate) fn elf_text_size(llvm_size: &Path, elf: &Path) -> Option<u32> {
     let output = Command::new(llvm_size)
         .arg(elf)
         .output()
@@ -442,7 +442,7 @@ fn elf_text_size(llvm_size: &Path, elf: &Path) -> Option<u32> {
     Some(text + data)
 }
 
-fn ihx_code_size(ihx: &Path) -> u32 {
+pub(crate) fn ihx_code_size(ihx: &Path) -> u32 {
     let content = std::fs::read_to_string(ihx).unwrap_or_default();
     let mut total = 0u32;
     for line in content.lines() {
@@ -553,13 +553,13 @@ fn print_table(results: &[BenchResult], _config: &BenchConfig) {
     println!("Speed wins:      Clang={clang_speed_wins}  SDCC={sdcc_speed_wins}  Tie={speed_tie}");
 }
 
-enum Winner {
+pub(crate) enum Winner {
     A,
     B,
     Tie,
 }
 
-fn winner<T: PartialOrd>(a: T, b: T) -> Winner {
+pub(crate) fn winner<T: PartialOrd>(a: T, b: T) -> Winner {
     if a < b { Winner::A }
     else if a > b { Winner::B }
     else { Winner::Tie }
