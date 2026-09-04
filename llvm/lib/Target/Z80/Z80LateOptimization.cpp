@@ -398,6 +398,29 @@ static bool isRegDeadAfter(MachineBasicBlock::iterator After,
   return true;
 }
 
+// A reload from a frame slot whose destination is overwritten before it is
+// read costs three bytes and buys nothing: a pair reloaded because one of
+// its bytes is needed leaves the other one dead once the halves become
+// separate instructions.
+static bool eraseDeadFrameReloads(MachineBasicBlock &MBB,
+                                  const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+  for (auto MII = MBB.begin(); MII != MBB.end();) {
+    Register Dst = getLoadIXdDstReg(MII->getOpcode());
+    if (!Dst.isValid() || !isPlainSlotAccess(*MII) ||
+        !isRegDeadAfter(std::next(MII), MBB, TRI, Dst)) {
+      ++MII;
+      continue;
+    }
+    LLVM_DEBUG(dbgs() << "  Removing dead frame reload: " << *MII);
+    MII = MBB.erase(MII);
+    Changed = true;
+  }
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
 // Get the destination register of a LD r,A instruction, or Register().
 static Register getLDrADstReg(unsigned Opc) {
   switch (Opc) {
@@ -871,6 +894,10 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
 
   for (MachineBasicBlock &MBB : MF) {
+    // Run first: every later peephole reasons about what a register holds,
+    // and a load that never gets read only muddies that.
+    Changed |= eraseDeadFrameReloads(MBB, TRI);
+
     // --- Peephole: POP rr; PUSH rr → (remove both) ---
     // When a register pair is popped and immediately pushed back, the stack
     // state is unchanged (SP net effect = 0, same value on stack). If the
