@@ -1,0 +1,83 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# The IX-indexed store of an immediate is one byte longer than the store of
+# A, so putting the value in A once pays for itself from the second store of
+# a zero on, or the third of anything else. The store itself takes the same
+# time either way, which makes the load pure added time, so this is a trade
+# only the level that spends speed on size takes.
+
+--- |
+  define void @two_zeros() minsize { ret void }
+  define void @one_of_each() minsize { ret void }
+  define void @optsize_only() optsize { ret void }
+  define void @tuned_for_speed() { ret void }
+...
+---
+name:            two_zeros
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $ix
+    LD_IXd_n -2, 0
+    LD_IXd_n -3, 0
+    LD_IXd_n -4, 7
+    RET
+
+# CHECK-LABEL: name: two_zeros
+# CHECK:      XOR_A
+# CHECK-NEXT: LD_IXd_A -2
+# CHECK-NEXT: LD_IXd_A -3
+# CHECK-NEXT: LD_IXd_n -4, 7
+
+...
+---
+name:            one_of_each
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $ix
+    LD_IXd_n -2, 7
+    LD_IXd_n -3, 9
+    RET
+
+# Nothing repeats, so there is nothing to amortize the load against.
+
+# CHECK-LABEL: name: one_of_each
+# CHECK:      LD_IXd_n -2, 7
+# CHECK-NEXT: LD_IXd_n -3, 9
+
+...
+---
+name:            optsize_only
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $ix
+    LD_IXd_n -2, 0
+    LD_IXd_n -3, 0
+    LD_IXd_n -4, 0
+    RET
+
+# Saving a byte for a few cycles is not the trade optsize takes.
+#
+# CHECK-LABEL: name: optsize_only
+# CHECK-NOT:  XOR_A
+# CHECK:      LD_IXd_n -2, 0
+
+...
+---
+name:            tuned_for_speed
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $ix
+    LD_IXd_n -2, 0
+    LD_IXd_n -3, 0
+    LD_IXd_n -4, 0
+    RET
+
+# CHECK-LABEL: name: tuned_for_speed
+# CHECK-NOT:  XOR_A
+# CHECK:      LD_IXd_n -2, 0
+
+...

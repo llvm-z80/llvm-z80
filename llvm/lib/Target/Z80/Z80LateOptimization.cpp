@@ -1192,6 +1192,84 @@ static bool materializeConstantStores(MachineBasicBlock &MBB,
   return Changed;
 }
 
+// The IX-indexed store of an immediate is four bytes, one more than the
+// store of A. Investing in A once, where nothing else needs it, pays for
+// itself from the third store of a value on, or the second when the value
+// is zero and XOR A can produce it.
+static bool materializeIXConstantStores(MachineBasicBlock &MBB,
+                                        const TargetInstrInfo *TII,
+                                        const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+
+  auto WindowEnd = MBB.begin();
+  while (WindowEnd != MBB.end()) {
+    auto Touches = [&](MachineBasicBlock::iterator It) {
+      return It->isCall() || It->isInlineAsm() ||
+             It->readsRegister(Z80::A, TRI) || It->modifiesRegister(Z80::A, TRI);
+    };
+    auto WindowBegin = WindowEnd;
+    while (WindowBegin != MBB.end() && Touches(WindowBegin))
+      ++WindowBegin;
+    WindowEnd = WindowBegin;
+    SmallVector<MachineBasicBlock::iterator, 8> Stores;
+    while (WindowEnd != MBB.end() && !Touches(WindowEnd)) {
+      if (WindowEnd->getOpcode() == Z80::LD_IXd_n)
+        Stores.push_back(WindowEnd);
+      ++WindowEnd;
+    }
+    if (Stores.empty())
+      continue;
+
+    // A may be carrying a value straight through the window to a reader
+    // beyond it, which the constant would destroy.
+    if (!isRegDeadAfter(WindowEnd, MBB, TRI, Z80::A))
+      continue;
+
+    // Only the most repeated value: a second constant's LD A,n would land
+    // between the first group's converted stores and corrupt what A holds.
+    DenseMap<int64_t, unsigned> Counts;
+    for (auto It : Stores)
+      ++Counts[It->getOperand(1).getImm() & 0xFF];
+    int64_t Value = 0;
+    unsigned Saving = 0;
+    for (auto &C : Counts)
+      if (C.second > Saving) {
+        Value = C.first;
+        Saving = C.second;
+      }
+
+    auto FirstIt = *llvm::find_if(Stores, [&](auto It) {
+      return (It->getOperand(1).getImm() & 0xFF) == Value;
+    });
+    bool FlagsDead = isRegDeadAfter(FirstIt, MBB, TRI, Z80::FLAGS);
+    unsigned Cost = (Value == 0 && FlagsDead) ? 1 : 2;
+    if (Saving <= Cost)
+      continue;
+
+    const DebugLoc &DL = FirstIt->getDebugLoc();
+    if (Value == 0 && FlagsDead)
+      Z80::markUndefUse(BuildMI(MBB, FirstIt, DL, TII->get(Z80::XOR_A)),
+                        Z80::A);
+    else
+      BuildMI(MBB, FirstIt, DL, TII->get(Z80::LD_A_n)).addImm(Value);
+
+    for (auto It : Stores) {
+      if ((It->getOperand(1).getImm() & 0xFF) != Value)
+        continue;
+      BuildMI(MBB, It, It->getDebugLoc(), TII->get(Z80::LD_IXd_A))
+          .addImm(It->getOperand(0).getImm());
+      MBB.erase(It);
+    }
+    Changed = true;
+    LLVM_DEBUG(dbgs() << "  A invest (IX): constant " << Value << " saves "
+                      << (Saving - Cost) << "B\n");
+  }
+
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
 static bool reuseLDHLAddress(MachineBasicBlock &MBB,
                              const TargetInstrInfo *TII,
                              const TargetRegisterInfo *TRI) {
@@ -2573,6 +2651,11 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       // once these two have run.
       Changed |= reloadDirectlyIntoPair(MBB, TII, TRI);
     }
+    // The store itself costs the same either way, so the LD A,n that pays
+    // for the shorter stores is pure added time: a size-for-speed trade,
+    // which is the level that takes those.
+    if (!STI.hasSM83() && MF.getFunction().hasMinSize())
+      Changed |= materializeIXConstantStores(MBB, TII, TRI);
     Changed |= directIncDec(MBB, TII, TRI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
   }
