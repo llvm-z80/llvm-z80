@@ -19,6 +19,7 @@
 
 // LD r,r' - Load register to register
 // Opcode: 0b01dddsss where ddd=dest, sss=src
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def LD_B_B : Inst8<"ld b,b", 0x40> { let Uses = [B]; let Defs = [B]; }
 def LD_B_C : Inst8<"ld b,c", 0x41> { let Uses = [C]; let Defs = [B]; }
 def LD_B_D : Inst8<"ld b,d", 0x42> { let Uses = [D]; let Defs = [B]; }
@@ -83,6 +84,7 @@ def LD_E_n : LDrn<REG_E> { let Defs = [E]; }
 def LD_H_n : LDrn<REG_H> { let Defs = [H]; }
 def LD_L_n : LDrn<REG_L> { let Defs = [L]; }
 def LD_A_n : Inst16<"ld a,", 0x3E, Imm8Mode> { let Defs = [A]; }
+}
 
 // LD r,(HL) - Load from memory at HL
 let mayLoad = true, mayStore = false, hasSideEffects = false in {
@@ -127,9 +129,11 @@ def LD_DEind_A : Inst8<"ld (de),a", 0x12> { let Uses = [DE, A]; }
 //===----------------------------------------------------------------------===//
 
 // LD dd,nn - Load 16-bit immediate (defines the target register)
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def LD_BC_nn : LDrrnn<REGPAIR_BC> { let Defs = [BC]; }
 def LD_DE_nn : LDrrnn<REGPAIR_DE> { let Defs = [DE]; }
 def LD_HL_nn : LDrrnn<REGPAIR_HL> { let Defs = [HL]; }
+}
 def LD_SP_nn : LDrrnn<REGPAIR_SP> { let Defs = [SP]; }
 
 // LD SP,HL
@@ -158,14 +162,17 @@ def POP_AF : POPrr<REGPAIR_AF> { let Defs = [A, FLAGS]; }
 //===----------------------------------------------------------------------===//
 
 // ADD A,r - Add to A
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADD_A_B : Inst8<"add a,b", 0x80> { let Uses = [A, B]; let Defs = [A, FLAGS]; }
 def ADD_A_C : Inst8<"add a,c", 0x81> { let Uses = [A, C]; let Defs = [A, FLAGS]; }
 def ADD_A_D : Inst8<"add a,d", 0x82> { let Uses = [A, D]; let Defs = [A, FLAGS]; }
 def ADD_A_E : Inst8<"add a,e", 0x83> { let Uses = [A, E]; let Defs = [A, FLAGS]; }
 def ADD_A_H : Inst8<"add a,h", 0x84> { let Uses = [A, H]; let Defs = [A, FLAGS]; }
 def ADD_A_L : Inst8<"add a,l", 0x85> { let Uses = [A, L]; let Defs = [A, FLAGS]; }
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def ADD_A_HLind : Inst8<"add a,(hl)", 0x86> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADD_A_A : Inst8<"add a,a", 0x87> { let Uses = [A]; let Defs = [A, FLAGS]; }
 def ADD_A_n : Inst16<"add a,", 0xC6, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
 
@@ -176,8 +183,10 @@ def ADC_A_D : Inst8<"adc a,d", 0x8A> { let Uses = [A, D, FLAGS]; let Defs = [A, 
 def ADC_A_E : Inst8<"adc a,e", 0x8B> { let Uses = [A, E, FLAGS]; let Defs = [A, FLAGS]; }
 def ADC_A_H : Inst8<"adc a,h", 0x8C> { let Uses = [A, H, FLAGS]; let Defs = [A, FLAGS]; }
 def ADC_A_L : Inst8<"adc a,l", 0x8D> { let Uses = [A, L, FLAGS]; let Defs = [A, FLAGS]; }
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def ADC_A_HLind : Inst8<"adc a,(hl)", 0x8E> { let Uses = [A, HL, FLAGS]; let Defs = [A, FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADC_A_A : Inst8<"adc a,a", 0x8F> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
 def ADC_A_n : Inst16<"adc a,", 0xCE, Imm8Mode> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
 
@@ -188,8 +197,10 @@ def SUB_D : Inst8<"sub d", 0x92> { let Uses = [A, D]; let Defs = [A, FLAGS]; }
 def SUB_E : Inst8<"sub e", 0x93> { let Uses = [A, E]; let Defs = [A, FLAGS]; }
 def SUB_H : Inst8<"sub h", 0x94> { let Uses = [A, H]; let Defs = [A, FLAGS]; }
 def SUB_L : Inst8<"sub l", 0x95> { let Uses = [A, L]; let Defs = [A, FLAGS]; }
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def SUB_HLind : Inst8<"sub (hl)", 0x96> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def SUB_A : Inst8<"sub a", 0x97> { let Uses = [A]; let Defs = [A, FLAGS]; }
 def SUB_n : Inst16<"sub", 0xD6, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
 
@@ -200,8 +211,10 @@ def SBC_A_D : Inst8<"sbc a,d", 0x9A> { let Uses = [A, D, FLAGS]; let Defs = [A, 
 def SBC_A_E : Inst8<"sbc a,e", 0x9B> { let Uses = [A, E, FLAGS]; let Defs = [A, FLAGS]; }
 def SBC_A_H : Inst8<"sbc a,h", 0x9C> { let Uses = [A, H, FLAGS]; let Defs = [A, FLAGS]; }
 def SBC_A_L : Inst8<"sbc a,l", 0x9D> { let Uses = [A, L, FLAGS]; let Defs = [A, FLAGS]; }
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def SBC_A_HLind : Inst8<"sbc a,(hl)", 0x9E> { let Uses = [A, HL, FLAGS]; let Defs = [A, FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def SBC_A_A : Inst8<"sbc a,a", 0x9F> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
 def SBC_A_n : Inst16<"sbc a,", 0xDE, Imm8Mode> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
 
@@ -212,8 +225,10 @@ def AND_D : Inst8<"and d", 0xA2> { let Uses = [A, D]; let Defs = [A, FLAGS]; }
 def AND_E : Inst8<"and e", 0xA3> { let Uses = [A, E]; let Defs = [A, FLAGS]; }
 def AND_H : Inst8<"and h", 0xA4> { let Uses = [A, H]; let Defs = [A, FLAGS]; }
 def AND_L : Inst8<"and l", 0xA5> { let Uses = [A, L]; let Defs = [A, FLAGS]; }
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def AND_HLind : Inst8<"and (hl)", 0xA6> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def AND_A : Inst8<"and a", 0xA7> { let Uses = [A]; let Defs = [A, FLAGS]; }
 def AND_n : Inst16<"and", 0xE6, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
 
@@ -224,8 +239,10 @@ def XOR_D : Inst8<"xor d", 0xAA> { let Uses = [A, D]; let Defs = [A, FLAGS]; }
 def XOR_E : Inst8<"xor e", 0xAB> { let Uses = [A, E]; let Defs = [A, FLAGS]; }
 def XOR_H : Inst8<"xor h", 0xAC> { let Uses = [A, H]; let Defs = [A, FLAGS]; }
 def XOR_L : Inst8<"xor l", 0xAD> { let Uses = [A, L]; let Defs = [A, FLAGS]; }
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def XOR_HLind : Inst8<"xor (hl)", 0xAE> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def XOR_A : Inst8<"xor a", 0xAF> { let Uses = [A]; let Defs = [A, FLAGS]; }
 def XOR_n : Inst16<"xor", 0xEE, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
 
@@ -236,8 +253,10 @@ def OR_D : Inst8<"or d", 0xB2> { let Uses = [A, D]; let Defs = [A, FLAGS]; }
 def OR_E : Inst8<"or e", 0xB3> { let Uses = [A, E]; let Defs = [A, FLAGS]; }
 def OR_H : Inst8<"or h", 0xB4> { let Uses = [A, H]; let Defs = [A, FLAGS]; }
 def OR_L : Inst8<"or l", 0xB5> { let Uses = [A, L]; let Defs = [A, FLAGS]; }
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def OR_HLind : Inst8<"or (hl)", 0xB6> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def OR_A : Inst8<"or a", 0xB7> { let Uses = [A]; let Defs = [A, FLAGS]; }
 def OR_n : Inst16<"or", 0xF6, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
 
@@ -248,8 +267,10 @@ def CP_D : Inst8<"cp d", 0xBA> { let Uses = [A, D]; let Defs = [FLAGS]; }
 def CP_E : Inst8<"cp e", 0xBB> { let Uses = [A, E]; let Defs = [FLAGS]; }
 def CP_H : Inst8<"cp h", 0xBC> { let Uses = [A, H]; let Defs = [FLAGS]; }
 def CP_L : Inst8<"cp l", 0xBD> { let Uses = [A, L]; let Defs = [FLAGS]; }
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def CP_HLind : Inst8<"cp (hl)", 0xBE> { let Uses = [A, HL]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def CP_A : Inst8<"cp a", 0xBF> { let Uses = [A]; let Defs = [FLAGS]; }
 def CP_n : Inst16<"cp", 0xFE, Imm8Mode> { let Uses = [A]; let Defs = [FLAGS]; }
 
@@ -260,8 +281,10 @@ def INC_D : INCr<REG_D> { let Uses = [D]; let Defs = [D, FLAGS]; }
 def INC_E : INCr<REG_E> { let Uses = [E]; let Defs = [E, FLAGS]; }
 def INC_H : INCr<REG_H> { let Uses = [H]; let Defs = [H, FLAGS]; }
 def INC_L : INCr<REG_L> { let Uses = [L]; let Defs = [L, FLAGS]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def INC_HLind : Inst8<"inc (hl)", 0x34> { let Uses = [HL]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def INC_A : Inst8<"inc a", 0x3C> { let Uses = [A]; let Defs = [A, FLAGS]; }
 
 def DEC_B : DECr<REG_B> { let Uses = [B]; let Defs = [B, FLAGS]; }
@@ -270,8 +293,10 @@ def DEC_D : DECr<REG_D> { let Uses = [D]; let Defs = [D, FLAGS]; }
 def DEC_E : DECr<REG_E> { let Uses = [E]; let Defs = [E, FLAGS]; }
 def DEC_H : DECr<REG_H> { let Uses = [H]; let Defs = [H, FLAGS]; }
 def DEC_L : DECr<REG_L> { let Uses = [L]; let Defs = [L, FLAGS]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def DEC_HLind : Inst8<"dec (hl)", 0x35> { let Uses = [HL]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def DEC_A : Inst8<"dec a", 0x3D> { let Uses = [A]; let Defs = [A, FLAGS]; }
 
 //===----------------------------------------------------------------------===//
@@ -283,6 +308,7 @@ def CPL : Inst8<"cpl", 0x2F> { let Uses = [A]; let Defs = [A, FLAGS]; }
 def CCF : Inst8<"ccf", 0x3F> { let Uses = [FLAGS]; let Defs = [FLAGS]; }
 def SCF : Inst8<"scf", 0x37> { let Defs = [FLAGS]; }
 def NOP : Inst8<"nop", 0x00>;
+}
 def HALT : Inst8<"halt", 0x76>;
 def DI : Inst8<"di", 0xF3>;
 def EI : Inst8<"ei", 0xFB>;
@@ -298,13 +324,17 @@ def ADD_HL_HL : ADDHLrr<REGPAIR_HL> { let Uses = [HL]; let Defs = [HL, FLAGS]; }
 def ADD_HL_SP : ADDHLrr<REGPAIR_SP> { let Uses = [HL, SP]; let Defs = [HL, FLAGS]; }
 
 // INC/DEC ss
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def INC_BC : INCrr<REGPAIR_BC> { let Uses = [BC]; let Defs = [BC]; }
 def INC_DE : INCrr<REGPAIR_DE> { let Uses = [DE]; let Defs = [DE]; }
+}
 def INC_HL : INCrr<REGPAIR_HL> { let Uses = [HL]; let Defs = [HL]; }
 def INC_SP : INCrr<REGPAIR_SP> { let Uses = [SP]; let Defs = [SP]; }
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def DEC_BC : DECrr<REGPAIR_BC> { let Uses = [BC]; let Defs = [BC]; }
 def DEC_DE : DECrr<REGPAIR_DE> { let Uses = [DE]; let Defs = [DE]; }
+}
 def DEC_HL : DECrr<REGPAIR_HL> { let Uses = [HL]; let Defs = [HL]; }
 def DEC_SP : DECrr<REGPAIR_SP> { let Uses = [SP]; let Defs = [SP]; }
 
@@ -314,6 +344,7 @@ def DEC_SP : DECrr<REGPAIR_SP> { let Uses = [SP]; let Defs = [SP]; }
 
 // Accumulator rotates — read and modify A
 // RLCA/RRCA: don't read carry. RLA/RRA: read carry (rotate through carry).
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def RLCA : Inst8<"rlca", 0x07> { let Uses = [A]; let Defs = [A, FLAGS]; }
 def RRCA : Inst8<"rrca", 0x0F> { let Uses = [A]; let Defs = [A, FLAGS]; }
 def RLA  : Inst8<"rla",  0x17> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
@@ -327,8 +358,10 @@ def RLC_D : CBRotate<0b000, REG_D, "rlc"> { let Defs = [D, FLAGS]; let Uses = [D
 def RLC_E : CBRotate<0b000, REG_E, "rlc"> { let Defs = [E, FLAGS]; let Uses = [E]; }
 def RLC_H : CBRotate<0b000, REG_H, "rlc"> { let Defs = [H, FLAGS]; let Uses = [H]; }
 def RLC_L : CBRotate<0b000, REG_L, "rlc"> { let Defs = [L, FLAGS]; let Uses = [L]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def RLC_HLind : InstCB<"rlc (hl)", 0x06> { let Uses = [HL]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def RLC_A : CBRotate<0b000, REG_A, "rlc"> { let Defs = [A, FLAGS]; let Uses = [A]; }
 
 // RRC r (don't read carry)
@@ -338,8 +371,10 @@ def RRC_D : CBRotate<0b001, REG_D, "rrc"> { let Defs = [D, FLAGS]; let Uses = [D
 def RRC_E : CBRotate<0b001, REG_E, "rrc"> { let Defs = [E, FLAGS]; let Uses = [E]; }
 def RRC_H : CBRotate<0b001, REG_H, "rrc"> { let Defs = [H, FLAGS]; let Uses = [H]; }
 def RRC_L : CBRotate<0b001, REG_L, "rrc"> { let Defs = [L, FLAGS]; let Uses = [L]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def RRC_HLind : InstCB<"rrc (hl)", 0x0E> { let Uses = [HL]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def RRC_A : CBRotate<0b001, REG_A, "rrc"> { let Defs = [A, FLAGS]; let Uses = [A]; }
 
 // RL r (reads carry, rotate through carry)
@@ -349,8 +384,10 @@ def RL_D : CBRotate<0b010, REG_D, "rl"> { let Defs = [D, FLAGS]; let Uses = [D, 
 def RL_E : CBRotate<0b010, REG_E, "rl"> { let Defs = [E, FLAGS]; let Uses = [E, FLAGS]; }
 def RL_H : CBRotate<0b010, REG_H, "rl"> { let Defs = [H, FLAGS]; let Uses = [H, FLAGS]; }
 def RL_L : CBRotate<0b010, REG_L, "rl"> { let Defs = [L, FLAGS]; let Uses = [L, FLAGS]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def RL_HLind : InstCB<"rl (hl)", 0x16> { let Uses = [HL, FLAGS]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def RL_A : CBRotate<0b010, REG_A, "rl"> { let Defs = [A, FLAGS]; let Uses = [A, FLAGS]; }
 
 // RR r (reads carry, rotate through carry)
@@ -360,8 +397,10 @@ def RR_D : CBRotate<0b011, REG_D, "rr"> { let Defs = [D, FLAGS]; let Uses = [D, 
 def RR_E : CBRotate<0b011, REG_E, "rr"> { let Defs = [E, FLAGS]; let Uses = [E, FLAGS]; }
 def RR_H : CBRotate<0b011, REG_H, "rr"> { let Defs = [H, FLAGS]; let Uses = [H, FLAGS]; }
 def RR_L : CBRotate<0b011, REG_L, "rr"> { let Defs = [L, FLAGS]; let Uses = [L, FLAGS]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def RR_HLind : InstCB<"rr (hl)", 0x1E> { let Uses = [HL, FLAGS]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def RR_A : CBRotate<0b011, REG_A, "rr"> { let Defs = [A, FLAGS]; let Uses = [A, FLAGS]; }
 
 // SLA r (don't read carry)
@@ -371,8 +410,10 @@ def SLA_D : CBRotate<0b100, REG_D, "sla"> { let Defs = [D, FLAGS]; let Uses = [D
 def SLA_E : CBRotate<0b100, REG_E, "sla"> { let Defs = [E, FLAGS]; let Uses = [E]; }
 def SLA_H : CBRotate<0b100, REG_H, "sla"> { let Defs = [H, FLAGS]; let Uses = [H]; }
 def SLA_L : CBRotate<0b100, REG_L, "sla"> { let Defs = [L, FLAGS]; let Uses = [L]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def SLA_HLind : InstCB<"sla (hl)", 0x26> { let Uses = [HL]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def SLA_A : CBRotate<0b100, REG_A, "sla"> { let Defs = [A, FLAGS]; let Uses = [A]; }
 
 // SRA r (don't read carry)
@@ -382,8 +423,10 @@ def SRA_D : CBRotate<0b101, REG_D, "sra"> { let Defs = [D, FLAGS]; let Uses = [D
 def SRA_E : CBRotate<0b101, REG_E, "sra"> { let Defs = [E, FLAGS]; let Uses = [E]; }
 def SRA_H : CBRotate<0b101, REG_H, "sra"> { let Defs = [H, FLAGS]; let Uses = [H]; }
 def SRA_L : CBRotate<0b101, REG_L, "sra"> { let Defs = [L, FLAGS]; let Uses = [L]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def SRA_HLind : InstCB<"sra (hl)", 0x2E> { let Uses = [HL]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def SRA_A : CBRotate<0b101, REG_A, "sra"> { let Defs = [A, FLAGS]; let Uses = [A]; }
 
 // SRL r (don't read carry)
@@ -393,8 +436,10 @@ def SRL_D : CBRotate<0b111, REG_D, "srl"> { let Defs = [D, FLAGS]; let Uses = [D
 def SRL_E : CBRotate<0b111, REG_E, "srl"> { let Defs = [E, FLAGS]; let Uses = [E]; }
 def SRL_H : CBRotate<0b111, REG_H, "srl"> { let Defs = [H, FLAGS]; let Uses = [H]; }
 def SRL_L : CBRotate<0b111, REG_L, "srl"> { let Defs = [L, FLAGS]; let Uses = [L]; }
+}
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def SRL_HLind : InstCB<"srl (hl)", 0x3E> { let Uses = [HL]; let Defs = [FLAGS]; }
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def SRL_A : CBRotate<0b111, REG_A, "srl"> { let Defs = [A, FLAGS]; let Uses = [A]; }
 
 //===----------------------------------------------------------------------===//
@@ -407,60 +452,76 @@ def BIT_0_B : BITbr<0, REG_B>;  def BIT_0_C : BITbr<0, REG_C>;
 def BIT_0_D : BITbr<0, REG_D>;  def BIT_0_E : BITbr<0, REG_E>;
 def BIT_0_H : BITbr<0, REG_H>;  def BIT_0_L : BITbr<0, REG_L>;
 def BIT_0_A : BITbr<0, REG_A>;
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def BIT_0_HLind : InstCB<"bit 0,(hl)", 0x46>;
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def BIT_1_B : BITbr<1, REG_B>;  def BIT_1_C : BITbr<1, REG_C>;
 def BIT_1_D : BITbr<1, REG_D>;  def BIT_1_E : BITbr<1, REG_E>;
 def BIT_1_H : BITbr<1, REG_H>;  def BIT_1_L : BITbr<1, REG_L>;
 def BIT_1_A : BITbr<1, REG_A>;
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def BIT_1_HLind : InstCB<"bit 1,(hl)", 0x4E>;
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def BIT_2_B : BITbr<2, REG_B>;  def BIT_2_C : BITbr<2, REG_C>;
 def BIT_2_D : BITbr<2, REG_D>;  def BIT_2_E : BITbr<2, REG_E>;
 def BIT_2_H : BITbr<2, REG_H>;  def BIT_2_L : BITbr<2, REG_L>;
 def BIT_2_A : BITbr<2, REG_A>;
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def BIT_2_HLind : InstCB<"bit 2,(hl)", 0x56>;
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def BIT_3_B : BITbr<3, REG_B>;  def BIT_3_C : BITbr<3, REG_C>;
 def BIT_3_D : BITbr<3, REG_D>;  def BIT_3_E : BITbr<3, REG_E>;
 def BIT_3_H : BITbr<3, REG_H>;  def BIT_3_L : BITbr<3, REG_L>;
 def BIT_3_A : BITbr<3, REG_A>;
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def BIT_3_HLind : InstCB<"bit 3,(hl)", 0x5E>;
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def BIT_4_B : BITbr<4, REG_B>;  def BIT_4_C : BITbr<4, REG_C>;
 def BIT_4_D : BITbr<4, REG_D>;  def BIT_4_E : BITbr<4, REG_E>;
 def BIT_4_H : BITbr<4, REG_H>;  def BIT_4_L : BITbr<4, REG_L>;
 def BIT_4_A : BITbr<4, REG_A>;
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def BIT_4_HLind : InstCB<"bit 4,(hl)", 0x66>;
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def BIT_5_B : BITbr<5, REG_B>;  def BIT_5_C : BITbr<5, REG_C>;
 def BIT_5_D : BITbr<5, REG_D>;  def BIT_5_E : BITbr<5, REG_E>;
 def BIT_5_H : BITbr<5, REG_H>;  def BIT_5_L : BITbr<5, REG_L>;
 def BIT_5_A : BITbr<5, REG_A>;
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def BIT_5_HLind : InstCB<"bit 5,(hl)", 0x6E>;
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def BIT_6_B : BITbr<6, REG_B>;  def BIT_6_C : BITbr<6, REG_C>;
 def BIT_6_D : BITbr<6, REG_D>;  def BIT_6_E : BITbr<6, REG_E>;
 def BIT_6_H : BITbr<6, REG_H>;  def BIT_6_L : BITbr<6, REG_L>;
 def BIT_6_A : BITbr<6, REG_A>;
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def BIT_6_HLind : InstCB<"bit 6,(hl)", 0x76>;
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def BIT_7_B : BITbr<7, REG_B>;  def BIT_7_C : BITbr<7, REG_C>;
 def BIT_7_D : BITbr<7, REG_D>;  def BIT_7_E : BITbr<7, REG_E>;
 def BIT_7_H : BITbr<7, REG_H>;  def BIT_7_L : BITbr<7, REG_L>;
 def BIT_7_A : BITbr<7, REG_A>;
+}
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def BIT_7_HLind : InstCB<"bit 7,(hl)", 0x7E>;
 } // Defs = [FLAGS]
 
 // RES b,r - Reset bit
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def RES_0_B : RESbr<0, REG_B>;  def RES_0_C : RESbr<0, REG_C>;
 def RES_0_D : RESbr<0, REG_D>;  def RES_0_E : RESbr<0, REG_E>;
 def RES_0_H : RESbr<0, REG_H>;  def RES_0_L : RESbr<0, REG_L>;
@@ -500,6 +561,7 @@ def RES_7_B : RESbr<7, REG_B>;  def RES_7_C : RESbr<7, REG_C>;
 def RES_7_D : RESbr<7, REG_D>;  def RES_7_E : RESbr<7, REG_E>;
 def RES_7_H : RESbr<7, REG_H>;  def RES_7_L : RESbr<7, REG_L>;
 def RES_7_A : RESbr<7, REG_A>;
+}
 
 // RES b,(HL) - Reset bit in memory
 let mayLoad = true, mayStore = true, hasSideEffects = false in {
@@ -514,6 +576,7 @@ def RES_7_HLind : InstCB<"res 7,(hl)", 0xBE> { let Uses = [HL]; }
 }
 
 // SET b,r - Set bit
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def SET_0_B : SETbr<0, REG_B>;  def SET_0_C : SETbr<0, REG_C>;
 def SET_0_D : SETbr<0, REG_D>;  def SET_0_E : SETbr<0, REG_E>;
 def SET_0_H : SETbr<0, REG_H>;  def SET_0_L : SETbr<0, REG_L>;
@@ -553,6 +616,7 @@ def SET_7_B : SETbr<7, REG_B>;  def SET_7_C : SETbr<7, REG_C>;
 def SET_7_D : SETbr<7, REG_D>;  def SET_7_E : SETbr<7, REG_E>;
 def SET_7_H : SETbr<7, REG_H>;  def SET_7_L : SETbr<7, REG_L>;
 def SET_7_A : SETbr<7, REG_A>;
+}
 
 // SET b,(HL) - Set bit in memory
 let mayLoad = true, mayStore = true, hasSideEffects = false in {

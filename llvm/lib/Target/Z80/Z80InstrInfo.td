@@ -113,7 +113,9 @@ def CPDR : InstED8<"cpdr", 0xB9> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F
 //  General-Purpose Arithmetic and CPU Control (Z80-only)
 //===----------------------------------------------------------------------===//
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def NEG : InstED8<"neg", 0x44> { let Uses = [A]; let Defs = [A, FLAGS]; }
+}
 
 // IM instructions
 def IM_0 : InstED8<"im 0", 0x46>;
@@ -248,8 +250,10 @@ def OTDR : InstED8<"otdr", 0xBB> { let Defs = [FLAGS]; }
 let Predicates = [HasZ80] in {
 
 // LD IX,nn / LD IY,nn
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def LD_IX_nn : InstDD24<"ld ix,", 0x21, Imm16ModeAt2> { let Defs = [IX]; }
 def LD_IY_nn : InstFD24<"ld iy,", 0x21, Imm16ModeAt2> { let Defs = [IY]; }
+}
 
 // PUSH IX / PUSH IY
 def PUSH_IX : InstDD8<"push ix", 0xE5> { let Uses = [IX]; }
@@ -274,6 +278,7 @@ def LD_SP_IX : InstDD8<"ld sp,ix", 0xF9> { let Uses = [IX]; let Defs = [SP]; }
 def LD_SP_IY : InstFD8<"ld sp,iy", 0xF9> { let Uses = [IY]; let Defs = [SP]; }
 
 // INC IX / INC IY / DEC IX / DEC IY
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def INC_IX : InstDD8<"inc ix", 0x23> { let Uses = [IX]; let Defs = [IX]; }
 def INC_IY : InstFD8<"inc iy", 0x23> { let Uses = [IY]; let Defs = [IY]; }
 def DEC_IX : InstDD8<"dec ix", 0x2B> { let Uses = [IX]; let Defs = [IX]; }
@@ -283,11 +288,14 @@ def DEC_IY : InstFD8<"dec iy", 0x2B> { let Uses = [IY]; let Defs = [IY]; }
 def ADD_IX_BC : InstDD8<"add ix,bc", 0x09> { let Uses = [IX, BC]; let Defs = [IX, FLAGS]; }
 def ADD_IX_DE : InstDD8<"add ix,de", 0x19> { let Uses = [IX, DE]; let Defs = [IX, FLAGS]; }
 def ADD_IX_IX : InstDD8<"add ix,ix", 0x29> { let Uses = [IX];     let Defs = [IX, FLAGS]; }
+}
 def ADD_IX_SP : InstDD8<"add ix,sp", 0x39> { let Uses = [IX, SP]; let Defs = [IX, FLAGS]; }
 
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADD_IY_BC : InstFD8<"add iy,bc", 0x09> { let Uses = [IY, BC]; let Defs = [IY, FLAGS]; }
 def ADD_IY_DE : InstFD8<"add iy,de", 0x19> { let Uses = [IY, DE]; let Defs = [IY, FLAGS]; }
 def ADD_IY_IY : InstFD8<"add iy,iy", 0x29> { let Uses = [IY];     let Defs = [IY, FLAGS]; }
+}
 def ADD_IY_SP : InstFD8<"add iy,sp", 0x39> { let Uses = [IY, SP]; let Defs = [IY, FLAGS]; }
 
 // EX (SP),IX / EX (SP),IY

@@ -174,7 +174,7 @@ class Z80Inst<string asmstr> : Instruction {
   let OutOperandList = (outs);
   let AsmString = asmstr;
 
-  // Conservative defaults for MC layer
+  // Assume the worst of anything that does not say otherwise.
   let mayLoad = true;
   let mayStore = true;
   let hasSideEffects = true;
@@ -578,19 +578,23 @@ def CC_M  : Z80CondCode<0b111, "m">;
 //===----------------------------------------------------------------------===//
 
 // Z80 8-bit register encoding: B=0, C=1, D=2, E=3, H=4, L=5, (HL)=6, A=7
-class RegEnc8<bits<3> val, string name> {
+class RegEnc8<bits<3> val, string name, Register reg> {
   bits<3> enc = val;
   string Name = name;
+  // The register the encoding names, for classes that describe what they
+  // read and write. The memory encoding names the register holding the
+  // address instead.
+  Register Reg = reg;
 }
 
-def REG_B   : RegEnc8<0b000, "b">;
-def REG_C   : RegEnc8<0b001, "c">;
-def REG_D   : RegEnc8<0b010, "d">;
-def REG_E   : RegEnc8<0b011, "e">;
-def REG_H   : RegEnc8<0b100, "h">;
-def REG_L   : RegEnc8<0b101, "l">;
-def REG_HL_IND : RegEnc8<0b110, "(hl)">;
-def REG_A   : RegEnc8<0b111, "a">;
+def REG_B   : RegEnc8<0b000, "b", B>;
+def REG_C   : RegEnc8<0b001, "c", C>;
+def REG_D   : RegEnc8<0b010, "d", D>;
+def REG_E   : RegEnc8<0b011, "e", E>;
+def REG_H   : RegEnc8<0b100, "h", H>;
+def REG_L   : RegEnc8<0b101, "l", L>;
+def REG_HL_IND : RegEnc8<0b110, "(hl)", HL>;
+def REG_A   : RegEnc8<0b111, "a", A>;
 
 // Z80 16-bit register pair encoding: BC=0, DE=1, HL=2, SP=3 (or AF for PUSH/POP)
 class RegPairEnc<bits<2> val, string name> {
@@ -707,17 +711,26 @@ class CBRotate<bits<3> op, RegEnc8 r, string opname>
 /// BIT b,r - Test bit b of register r
 /// Opcode: CB 0b01bbbrrr where bbb is bit number, rrr is register
 class BITbr<bits<3> b, RegEnc8 r>
-    : InstCB<"bit " # b # "," # r.Name, !or(0x40, !shl(b, 3), r.enc)>;
+    : InstCB<"bit " # b # "," # r.Name, !or(0x40, !shl(b, 3), r.enc)> {
+  let Uses = [r.Reg];
+  let Defs = [FLAGS];
+}
 
 /// RES b,r - Reset bit b of register r
 /// Opcode: CB 0b10bbbrrr where bbb is bit number, rrr is register
 class RESbr<bits<3> b, RegEnc8 r>
-    : InstCB<"res " # b # "," # r.Name, !or(0x80, !shl(b, 3), r.enc)>;
+    : InstCB<"res " # b # "," # r.Name, !or(0x80, !shl(b, 3), r.enc)> {
+  let Uses = [r.Reg];
+  let Defs = [r.Reg];
+}
 
 /// SET b,r - Set bit b of register r
 /// Opcode: CB 0b11bbbrrr where bbb is bit number, rrr is register
 class SETbr<bits<3> b, RegEnc8 r>
-    : InstCB<"set " # b # "," # r.Name, !or(0xC0, !shl(b, 3), r.enc)>;
+    : InstCB<"set " # b # "," # r.Name, !or(0xC0, !shl(b, 3), r.enc)> {
+  let Uses = [r.Reg];
+  let Defs = [r.Reg];
+}
 
 //===----------------------------------------------------------------------===//
 //  Operand type for labels
