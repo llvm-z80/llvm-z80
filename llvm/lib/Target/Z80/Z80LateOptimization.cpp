@@ -1040,6 +1040,74 @@ static bool elidePopPushAcrossStretch(MachineBasicBlock &MBB,
   return Changed;
 }
 
+// The mirror of the pass above: PUSH rr ... POP rr saves a pair across a
+// stretch that never writes it, so the pair is doing nothing. What keeps the
+// pass above from taking it is SP: everything the stretch reached through
+// the stack was addressed with those two bytes already counted in. LDHL SP,e
+// carries its own displacement, so taking two off each one puts the stretch
+// back where it was.
+//
+// A displacement of less than two would have been addressing the saved value
+// itself, which is not something the frame layout produces, and is refused
+// rather than reasoned about.
+static bool elidePushPopAcrossStretch(MachineBasicBlock &MBB,
+                                      const TargetInstrInfo *TII,
+                                      const TargetRegisterInfo *TRI) {
+  static const struct {
+    unsigned PushOpc;
+    unsigned PopOpc;
+    MCPhysReg Reg;
+  } Pairs[] = {
+      {Z80::PUSH_BC, Z80::POP_BC, Z80::BC},
+      {Z80::PUSH_DE, Z80::POP_DE, Z80::DE},
+      {Z80::PUSH_HL, Z80::POP_HL, Z80::HL},
+  };
+  bool Changed = false;
+  for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
+    auto Next = std::next(MII);
+    for (const auto &P : Pairs) {
+      if (MII->getOpcode() != P.PushOpc)
+        continue;
+      SmallVector<MachineInstr *, 8> Rebase;
+      unsigned Budget = 16;
+      for (auto J = Next; J != MIE && Budget--; ++J) {
+        // LDHL SP,e writes HL, so it is only rebasable when HL is not the
+        // pair being saved: for that one, the pop is what puts it back.
+        if (J->getOpcode() == Z80::LDHL_SP_e && P.Reg != Z80::HL) {
+          if (SignExtend64<8>(J->getOperand(0).getImm()) < 2)
+            break;
+          Rebase.push_back(&*J);
+          continue;
+        }
+        if (J->getOpcode() == P.PopOpc) {
+          for (MachineInstr *MI : Rebase) {
+            int64_t Disp = SignExtend64<8>(MI->getOperand(0).getImm()) - 2;
+            MI->getOperand(0).setImm(Disp & 0xFF);
+          }
+          LLVM_DEBUG(dbgs() << "  Push/pop elision across stretch: " << *MII);
+          MBB.erase(J);
+          Next = MBB.erase(MII);
+          Changed = true;
+          break;
+        }
+        // The saved value only has to survive: a stretch that reads the pair
+        // reads what it already holds. Push and pop model their SP movement
+        // through getSPAdjust rather than operands, so ask both ways.
+        if (J->isCall() || J->isBranch() || J->isTerminator() ||
+            J->isInlineAsm() || J->modifiesRegister(P.Reg, TRI) ||
+            TII->getSPAdjust(*J) != 0 || J->readsRegister(Z80::SP, TRI) ||
+            J->modifiesRegister(Z80::SP, TRI))
+          break;
+      }
+      break;
+    }
+    MII = Next;
+  }
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
 // --- SM83: route (HL) accesses through A for the post-increment form ---
 //
 //   LD A,(HL); INC HL  -> LD A,(HL+)              (2B/4M -> 1B/2M)
@@ -2658,6 +2726,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       Changed |= materializeIXConstantStores(MBB, TII, TRI);
     Changed |= directIncDec(MBB, TII, TRI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
+    Changed |= elidePushPopAcrossStretch(MBB, TII, TRI);
   }
 
   return Changed;
