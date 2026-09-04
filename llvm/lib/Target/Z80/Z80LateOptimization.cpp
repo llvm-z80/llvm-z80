@@ -449,6 +449,39 @@ static Register getZeroNeutralAluSrcReg(unsigned Opc) {
   }
 }
 
+// Get the register an OR r / XOR r / ADD A,r reads besides A, or Register().
+// All three copy that register into A when A holds zero.
+static Register getAccumulatorNeutralAluSrcReg(unsigned Opc) {
+  switch (Opc) {
+  case Z80::OR_B:
+  case Z80::XOR_B:
+  case Z80::ADD_A_B:
+    return Z80::B;
+  case Z80::OR_C:
+  case Z80::XOR_C:
+  case Z80::ADD_A_C:
+    return Z80::C;
+  case Z80::OR_D:
+  case Z80::XOR_D:
+  case Z80::ADD_A_D:
+    return Z80::D;
+  case Z80::OR_E:
+  case Z80::XOR_E:
+  case Z80::ADD_A_E:
+    return Z80::E;
+  case Z80::OR_H:
+  case Z80::XOR_H:
+  case Z80::ADD_A_H:
+    return Z80::H;
+  case Z80::OR_L:
+  case Z80::XOR_L:
+  case Z80::ADD_A_L:
+    return Z80::L;
+  default:
+    return Register();
+  }
+}
+
 // OR or XOR against a register holding zero leaves A exactly as it was, so
 // all such an instruction really does is set flags. Where those are dead
 // too it does nothing at all. These come from wide values whose upper half
@@ -457,6 +490,7 @@ static Register getZeroNeutralAluSrcReg(unsigned Opc) {
 // Dropping the instruction usually leaves the constant that fed it dead as
 // well, which the sweep below then takes.
 static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
+                                  const TargetInstrInfo *TII,
                                   const TargetRegisterInfo *TRI) {
   static const MCPhysReg Regs8[] = {Z80::A, Z80::B, Z80::C, Z80::D,
                                     Z80::E, Z80::H, Z80::L};
@@ -475,6 +509,21 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
       continue;
     }
 
+    // The mirror case: a zero accumulator makes OR, XOR and ADD A a plain
+    // move. Written as one, the copy in and the copy back out cancel, and
+    // the peepholes below take both.
+    if (Register Src = getAccumulatorNeutralAluSrcReg(MI.getOpcode());
+        Src.isValid() && Zero.count(Z80::A) &&
+        isRegDeadAfter(std::next(MII), MBB, TRI, Z80::FLAGS)) {
+      LLVM_DEBUG(dbgs() << "  Zero accumulator, is a move: " << MI);
+      BuildMI(MBB, MII, MI.getDebugLoc(),
+              TII->get(getLD8Opcode(Z80::A, Src)));
+      MII = MBB.erase(MII);
+      Zero.erase(Z80::A);
+      Changed = true;
+      continue;
+    }
+
     if (MI.isCall() || MI.isInlineAsm()) {
       Zero.clear();
     } else {
@@ -485,6 +534,11 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
               Zero.erase(R);
 
       unsigned Opc = MI.getOpcode();
+      if (Opc == Z80::XOR_A)
+        Zero.insert(Z80::A);
+      for (MCPhysReg R : Regs8)
+        if (R != Z80::A && getLD8Opcode(Z80::A, R) == Opc && Zero.count(R))
+          Zero.insert(Z80::A);
       bool Wide = Opc == Z80::LD_BC_nn || Opc == Z80::LD_DE_nn ||
                   Opc == Z80::LD_HL_nn;
       if ((getLDrnDstReg(Opc).isValid() || Wide) &&
@@ -551,6 +605,44 @@ static unsigned getLoadHLindOpcode(Register R) {
   }
 }
 
+// For an 8-bit ALU instruction that reads a register, give back that
+// register and the IX-indexed form of the same operation.
+static Register getAluRegSrc(unsigned Opc, unsigned &IXdOpc) {
+  static const struct {
+    unsigned Regs[6]; // B, C, D, E, H, L
+    unsigned IXd;
+  } Ops[] = {
+      {{Z80::ADD_A_B, Z80::ADD_A_C, Z80::ADD_A_D, Z80::ADD_A_E, Z80::ADD_A_H,
+        Z80::ADD_A_L},
+       Z80::ADD_A_IXd},
+      {{Z80::ADC_A_B, Z80::ADC_A_C, Z80::ADC_A_D, Z80::ADC_A_E, Z80::ADC_A_H,
+        Z80::ADC_A_L},
+       Z80::ADC_A_IXd},
+      {{Z80::SUB_B, Z80::SUB_C, Z80::SUB_D, Z80::SUB_E, Z80::SUB_H, Z80::SUB_L},
+       Z80::SUB_IXd},
+      {{Z80::SBC_A_B, Z80::SBC_A_C, Z80::SBC_A_D, Z80::SBC_A_E, Z80::SBC_A_H,
+        Z80::SBC_A_L},
+       Z80::SBC_A_IXd},
+      {{Z80::AND_B, Z80::AND_C, Z80::AND_D, Z80::AND_E, Z80::AND_H, Z80::AND_L},
+       Z80::AND_IXd},
+      {{Z80::XOR_B, Z80::XOR_C, Z80::XOR_D, Z80::XOR_E, Z80::XOR_H, Z80::XOR_L},
+       Z80::XOR_IXd},
+      {{Z80::OR_B, Z80::OR_C, Z80::OR_D, Z80::OR_E, Z80::OR_H, Z80::OR_L},
+       Z80::OR_IXd},
+      {{Z80::CP_B, Z80::CP_C, Z80::CP_D, Z80::CP_E, Z80::CP_H, Z80::CP_L},
+       Z80::CP_IXd},
+  };
+  static const MCPhysReg Regs[] = {Z80::B, Z80::C, Z80::D,
+                                   Z80::E, Z80::H, Z80::L};
+  for (const auto &Op : Ops)
+    for (unsigned I = 0; I != 6; ++I)
+      if (Op.Regs[I] == Opc) {
+        IXdOpc = Op.IXd;
+        return Regs[I];
+      }
+  return Register();
+}
+
 // Ways a register ends up carrying a value between memory and somewhere it
 // did not need to stop:
 //
@@ -577,24 +669,67 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
     Register Loaded = FromSlot ? getLoadIXdDstReg(MII->getOpcode())
                                : getLoadHLindDstReg(MII->getOpcode());
     if (Loaded.isValid()) {
+      int64_t Slot = FromSlot ? MII->getOperand(0).getImm() : 0;
+      // The consumer to fold into. It need not come next, as long as
+      // nothing in between disturbs the register or what the load reads.
+      auto Use = MBB.end();
       Register Copied;
-      for (MCPhysReg R : {Z80::A, Z80::B, Z80::C, Z80::D, Z80::E, Z80::H,
-                          Z80::L})
-        if (getLD8Opcode(R, Loaded) == Next->getOpcode())
-          Copied = R;
+      unsigned IXdOpc = 0;
+      unsigned Budget = 32;
+      for (auto Scan = Next; Scan != MBB.end() && Budget; ++Scan, --Budget) {
+        if (FromSlot && getAluRegSrc(Scan->getOpcode(), IXdOpc) == Loaded) {
+          Use = Scan;
+          break;
+        }
+        for (MCPhysReg R : {Z80::A, Z80::B, Z80::C, Z80::D, Z80::E, Z80::H,
+                            Z80::L})
+          if (getLD8Opcode(R, Loaded) == Scan->getOpcode())
+            Copied = R;
+        if (Copied.isValid()) {
+          Use = Scan;
+          break;
+        }
+        if (Scan->isCall() || Scan->isInlineAsm() ||
+            Scan->readsRegister(Loaded, TRI) ||
+            Scan->modifiesRegister(Loaded, TRI))
+          break;
+        // The read moves to where the use is, so nothing may write what it
+        // reads on the way. Another frame slot is provably a different
+        // byte; anything else could be a pointer into this one.
+        if (Scan->mayStore()) {
+          bool OtherSlot = FromSlot &&
+                           (getStoreIXdSrcReg(Scan->getOpcode()).isValid() ||
+                            Scan->getOpcode() == Z80::LD_IXd_n) &&
+                           Scan->getOperand(0).getImm() != Slot;
+          if (!OtherSlot)
+            break;
+        }
+        // The load is the same load only while the register it addresses
+        // through still holds the address.
+        if (Scan->modifiesRegister(FromSlot ? Z80::IX : Z80::HL, TRI))
+          break;
+      }
+
       // A load through HL cannot be redirected into H or L: that is the
       // address register, and anything reading it afterwards would see the
       // loaded byte instead.
       bool ClobbersAddr = !FromSlot && (Copied == Z80::H || Copied == Z80::L);
-      if (Copied.isValid() && Copied != Loaded && !ClobbersAddr &&
-          isRegDeadAfter(std::next(Next), MBB, TRI, Loaded.asMCReg())) {
-        unsigned Opc = FromSlot ? getLoadIXdOpcode(Copied)
-                                : getLoadHLindOpcode(Copied);
-        auto MIB = BuildMI(MBB, MII, DL, TII->get(Opc));
-        if (FromSlot)
-          MIB.addImm(MII->getOperand(0).getImm());
-        MIB.cloneMemRefs(*MII);
-        MII = MBB.erase(MII);
+      if (Use != MBB.end() && Copied != Loaded && !ClobbersAddr &&
+          isRegDeadAfter(std::next(Use), MBB, TRI, Loaded.asMCReg())) {
+        const DebugLoc &UseDL = Use->getDebugLoc();
+        if (Copied.isValid()) {
+          unsigned Opc = FromSlot ? getLoadIXdOpcode(Copied)
+                                  : getLoadHLindOpcode(Copied);
+          auto MIB = BuildMI(MBB, Use, UseDL, TII->get(Opc));
+          if (FromSlot)
+            MIB.addImm(Slot);
+          MIB.cloneMemRefs(*MII);
+        } else {
+          BuildMI(MBB, Use, UseDL, TII->get(IXdOpc))
+              .addImm(Slot)
+              .cloneMemRefs(*MII);
+        }
+        MBB.erase(Use);
         MII = MBB.erase(MII);
         Changed = true;
         continue;
@@ -634,6 +769,16 @@ static bool eraseDeadFrameReloads(MachineBasicBlock &MBB,
     bool IsSlotLoad = Dst.isValid();
     if (!Dst.isValid())
       Dst = getLDrnDstReg(MII->getOpcode());
+    if (!Dst.isValid())
+      for (MCPhysReg D : {Z80::A, Z80::B, Z80::C, Z80::D, Z80::E, Z80::H,
+                          Z80::L}) {
+        for (MCPhysReg S : {Z80::A, Z80::B, Z80::C, Z80::D, Z80::E, Z80::H,
+                            Z80::L})
+          if (getLD8Opcode(D, S) == MII->getOpcode())
+            Dst = D;
+        if (Dst.isValid())
+          break;
+      }
     if (!Dst.isValid())
       switch (MII->getOpcode()) {
       case Z80::LD_BC_nn:
@@ -863,7 +1008,7 @@ static bool elidePopPushAcrossStretch(MachineBasicBlock &MBB,
     for (const auto &P : Pairs) {
       if (MII->getOpcode() != P.PopOpc)
         continue;
-      unsigned Budget = 16;
+      unsigned Budget = 32;
       for (auto J = Next; J != MIE && Budget--; ++J) {
         if (J->getOpcode() == P.PushOpc) {
           // The pop also refills the register itself; anything reading it
@@ -1207,7 +1352,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     // Dropping a no-op is what leaves the constant behind it dead, so this
     // comes before the sweep.
-    Changed |= elideZeroOperandLogic(MBB, TRI);
+    Changed |= elideZeroOperandLogic(MBB, TII, TRI);
     // Before the rest: they all reason about what a register holds, and a
     // definition nobody reads only muddies that.
     Changed |= eraseDeadFrameReloads(MBB, TRI);
