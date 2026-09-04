@@ -23,7 +23,10 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineOutliner.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -2050,4 +2053,163 @@ Z80InstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
       {Z80::MO_ADDR16_LO, "z80-addr16-lo"},
       {Z80::MO_ADDR16_HI, "z80-addr16-hi"}};
   return Flags;
+}
+
+//===----------------------------------------------------------------------===//
+// Machine outliner
+//===----------------------------------------------------------------------===//
+//
+// Outlining swaps a run of instructions for a three-byte CALL and pays for
+// one RET, so it is worth it for a run of four bytes or more that repeats.
+// A Z80 CALL leaves two bytes of return address on the stack, which is why
+// nothing that reads or writes SP may be outlined: inside the outlined body
+// the stack has moved. Everything reached through IX is untouched by that,
+// and the frame pointer is what most of this code addresses locals with.
+
+bool Z80InstrInfo::shouldOutlineFromFunctionByDefault(
+    MachineFunction &MF) const {
+  // A call in place of the code it replaces is smaller and slower, so this
+  // belongs to the level that spends speed on size.
+  return MF.getFunction().hasMinSize();
+}
+
+bool Z80InstrInfo::isFunctionSafeToOutlineFrom(
+    MachineFunction &MF, bool OutlineFromLinkOnceODRs) const {
+  const Function &F = MF.getFunction();
+
+  if (!OutlineFromLinkOnceODRs && F.hasLinkOnceODRLinkage())
+    return false;
+
+  // An interrupt handler is measured by the latency it adds to whatever it
+  // interrupted, and it runs on whatever stack that code left behind.
+  // Neither wants a call frame it did not ask for.
+  if (F.hasFnAttribute("interrupt"))
+    return false;
+
+  return true;
+}
+
+std::optional<std::unique_ptr<outliner::OutlinedFunction>>
+Z80InstrInfo::getOutliningCandidateInfo(
+    const MachineModuleInfo &MMI,
+    std::vector<outliner::Candidate> &RepeatedSequenceLocs,
+    unsigned MinRepeats) const {
+  if (RepeatedSequenceLocs.size() < MinRepeats)
+    return std::nullopt;
+
+  unsigned SequenceSize = 0;
+  int SPDepth = 0;
+  for (const MachineInstr &MI : RepeatedSequenceLocs[0]) {
+    SequenceSize += getInstSizeInBytes(MI);
+
+    // The body has to reach two bytes further down for its locals, which
+    // the displacement may not have room for.
+    if (MI.getOpcode() == Z80::LDHL_SP_e &&
+        !isInt<8>(SignExtend64<8>(MI.getOperand(0).getImm()) + 2))
+      return std::nullopt;
+
+    // The run may move SP as long as it puts it back: the RET at the end
+    // reads the return address from where the CALL left it. It may never
+    // rise above that either, or a POP would take the return address for
+    // whatever it was after.
+    SPDepth += getSPAdjust(MI);
+    if (SPDepth < 0)
+      return std::nullopt;
+  }
+  if (SPDepth != 0)
+    return std::nullopt;
+
+  // CALL nn is three bytes at each site; the outlined body ends in one RET.
+  for (outliner::Candidate &C : RepeatedSequenceLocs)
+    C.setCallInfo(/*CID=*/0, /*CO=*/3);
+
+  return std::make_unique<outliner::OutlinedFunction>(
+      RepeatedSequenceLocs, SequenceSize, /*FrameOverhead=*/1,
+      /*FrameConstructionID=*/0);
+}
+
+outliner::InstrType
+Z80InstrInfo::getOutliningTypeImpl(const MachineModuleInfo &MMI,
+                                   MachineBasicBlock::iterator &MIT,
+                                   unsigned Flags) const {
+  MachineInstr &MI = *MIT;
+  const TargetRegisterInfo *TRI =
+      MI.getMF()->getSubtarget().getRegisterInfo();
+
+  // Control flow has to stay where it is: a branch inside the outlined body
+  // would leave it, and a call or return there would fight over the return
+  // address the CALL just pushed.
+  if (MI.isCall() || MI.isReturn() || MI.isTerminator() || MI.isPosition())
+    return outliner::InstrType::Illegal;
+
+  // hasUnmodeledSideEffects() is not usable as the filter here: most of the
+  // instruction descriptions do not carry a pattern, so TableGen assumes the
+  // worst for them and the answer is yes for nearly everything. Name what is
+  // actually unsafe instead. Extraction keeps the order and the count of
+  // everything it moves, so ordinary memory traffic, volatile included, is
+  // fine; what is not is the machine state that is about where the code is
+  // executing rather than what it computes.
+  switch (MI.getOpcode()) {
+  case Z80::HALT:
+  case Z80::DI:
+  case Z80::EI:
+  case Z80::IM_0:
+  case Z80::IM_1:
+  case Z80::IM_2:
+  case Z80::IN_A_n:
+  case Z80::OUT_n_A:
+  case Z80::LD_A_I:
+  case Z80::LD_A_R:
+  case Z80::LD_I_A:
+  case Z80::LD_R_A:
+    return outliner::InstrType::Illegal;
+  default:
+    break;
+  }
+
+  // Anything that depends on where the stack pointer is would see it two
+  // bytes lower inside the outlined body. PUSH and POP do not name SP among
+  // their operands, so they are only visible through the adjustment hook.
+  //
+  // LDHL SP,e is the exception, and the one that matters: SM83 reaches every
+  // local through it, and it carries its own displacement, so the body can
+  // simply ask for two more. Nothing else moves SP inside the body, so the
+  // shift is the same at every point in it.
+  //
+  // PUSH and POP are the other exception. They do not name SP among their
+  // operands, only moving it through the adjustment hook, and a run that
+  // puts SP back where it found it leaves the return address exactly where
+  // the RET expects it. Whether a particular run balances is checked once
+  // the run is known.
+  if (MI.getOpcode() != Z80::LDHL_SP_e && getSPAdjust(MI) == 0 &&
+      (MI.readsRegister(Z80::SP, TRI) || MI.modifiesRegister(Z80::SP, TRI)))
+    return outliner::InstrType::Illegal;
+
+  for (const MachineOperand &MO : MI.operands())
+    if (MO.isMBB() || MO.isJTI() || MO.isBlockAddress() || MO.isCPI())
+      return outliner::InstrType::Illegal;
+
+  return outliner::InstrType::Legal;
+}
+
+void Z80InstrInfo::buildOutlinedFrame(
+    MachineBasicBlock &MBB, MachineFunction &MF,
+    const outliner::OutlinedFunction &OF) const {
+  // The CALL left two bytes of return address behind, so every SP-relative
+  // address in the body is that much further down.
+  for (MachineInstr &MI : MBB)
+    if (MI.getOpcode() == Z80::LDHL_SP_e) {
+      int64_t Disp = SignExtend64<8>(MI.getOperand(0).getImm()) + 2;
+      MI.getOperand(0).setImm(Disp & 0xFF);
+    }
+
+  MBB.insert(MBB.end(), BuildMI(MF, DebugLoc(), get(Z80::RET)));
+}
+
+MachineBasicBlock::iterator Z80InstrInfo::insertOutlinedCall(
+    Module &M, MachineBasicBlock &MBB, MachineBasicBlock::iterator &It,
+    MachineFunction &MF, outliner::Candidate &C) const {
+  It = MBB.insert(It, BuildMI(MF, DebugLoc(), get(Z80::CALL_nn))
+                          .addGlobalAddress(M.getNamedValue(MF.getName())));
+  return It;
 }

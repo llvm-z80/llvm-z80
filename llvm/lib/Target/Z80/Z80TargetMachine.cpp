@@ -109,6 +109,12 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
   setGlobalISel(true);
   // Prevents fallback to SelectionDAG by allowing direct aborts.
   setGlobalISelAbort(GlobalISelAbortMode::Enable);
+
+  // Code size is the scarce resource here, and a repeated run of
+  // instructions is worth a call. The target hook decides which functions
+  // take the trade; -enable-machine-outliner still overrides both.
+  this->Options.EnableMachineOutliner = true;
+  this->Options.SupportsDefaultOutlining = true;
 }
 
 const Z80Subtarget *
