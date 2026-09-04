@@ -507,6 +507,121 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
   return Changed;
 }
 
+// Get the LD r,(IX+d) opcode for a register, or 0.
+static unsigned getLoadIXdOpcode(Register R) {
+  switch (R.id()) {
+  case Z80::A:
+    return Z80::LD_A_IXd;
+  case Z80::B:
+    return Z80::LD_B_IXd;
+  case Z80::C:
+    return Z80::LD_C_IXd;
+  case Z80::D:
+    return Z80::LD_D_IXd;
+  case Z80::E:
+    return Z80::LD_E_IXd;
+  case Z80::H:
+    return Z80::LD_H_IXd;
+  case Z80::L:
+    return Z80::LD_L_IXd;
+  default:
+    return 0;
+  }
+}
+
+// Get the LD r,(HL) opcode for a register, or 0.
+static unsigned getLoadHLindOpcode(Register R) {
+  switch (R.id()) {
+  case Z80::A:
+    return Z80::LD_A_HLind;
+  case Z80::B:
+    return Z80::LD_B_HLind;
+  case Z80::C:
+    return Z80::LD_C_HLind;
+  case Z80::D:
+    return Z80::LD_D_HLind;
+  case Z80::E:
+    return Z80::LD_E_HLind;
+  case Z80::H:
+    return Z80::LD_H_HLind;
+  case Z80::L:
+    return Z80::LD_L_HLind;
+  default:
+    return 0;
+  }
+}
+
+// Ways a register ends up carrying a value between memory and somewhere it
+// did not need to stop:
+//
+//   ld c,(ix+d) ; ld a,c       ->  ld a,(ix+d)
+//   ld c,(hl)   ; ld a,c       ->  ld a,(hl)
+//   ld c,#n     ; ld (ix+d),c  ->  ld (ix+d),#n
+//
+// Each costs a byte and occupies a register the allocator had no reason to
+// spend. The register has to be dead afterwards, since it stops being
+// written.
+static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
+                                    const TargetInstrInfo *TII,
+                                    const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+  for (auto MII = MBB.begin(); MII != MBB.end();) {
+    auto Next = std::next(MII);
+    if (Next == MBB.end()) {
+      ++MII;
+      continue;
+    }
+    const DebugLoc &DL = MII->getDebugLoc();
+
+    bool FromSlot = getLoadIXdDstReg(MII->getOpcode()).isValid();
+    Register Loaded = FromSlot ? getLoadIXdDstReg(MII->getOpcode())
+                               : getLoadHLindDstReg(MII->getOpcode());
+    if (Loaded.isValid()) {
+      Register Copied;
+      for (MCPhysReg R : {Z80::A, Z80::B, Z80::C, Z80::D, Z80::E, Z80::H,
+                          Z80::L})
+        if (getLD8Opcode(R, Loaded) == Next->getOpcode())
+          Copied = R;
+      // A load through HL cannot be redirected into H or L: that is the
+      // address register, and anything reading it afterwards would see the
+      // loaded byte instead.
+      bool ClobbersAddr = !FromSlot && (Copied == Z80::H || Copied == Z80::L);
+      if (Copied.isValid() && Copied != Loaded && !ClobbersAddr &&
+          isRegDeadAfter(std::next(Next), MBB, TRI, Loaded.asMCReg())) {
+        unsigned Opc = FromSlot ? getLoadIXdOpcode(Copied)
+                                : getLoadHLindOpcode(Copied);
+        auto MIB = BuildMI(MBB, MII, DL, TII->get(Opc));
+        if (FromSlot)
+          MIB.addImm(MII->getOperand(0).getImm());
+        MIB.cloneMemRefs(*MII);
+        MII = MBB.erase(MII);
+        MII = MBB.erase(MII);
+        Changed = true;
+        continue;
+      }
+    }
+
+    if (Register Held = getLDrnDstReg(MII->getOpcode());
+        Held.isValid() && getStoreIXdSrcReg(Next->getOpcode()) == Held &&
+        MII->getOperand(0).isImm() &&
+        isRegDeadAfter(std::next(Next), MBB, TRI, Held.asMCReg())) {
+      BuildMI(MBB, MII, DL, TII->get(Z80::LD_IXd_n))
+          .addImm(Next->getOperand(0).getImm())
+          .addImm(MII->getOperand(0).getImm() & 0xFF)
+          .cloneMemRefs(*Next);
+      MII = MBB.erase(MII);
+      MII = MBB.erase(MII);
+      Changed = true;
+      continue;
+    }
+
+    ++MII;
+  }
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
 // A reload from a frame slot, or a constant loaded into a register, whose
 // destination is overwritten before it is read buys nothing: a pair reloaded
 // because one of its bytes is needed leaves the other one dead, and so does
@@ -1096,6 +1211,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
     // Before the rest: they all reason about what a register holds, and a
     // definition nobody reads only muddies that.
     Changed |= eraseDeadFrameReloads(MBB, TRI);
+    Changed |= foldCopyIntoFrameAccess(MBB, TII, TRI);
 
     // --- Peephole: POP rr; PUSH rr → (remove both) ---
     // When a register pair is popped and immediately pushed back, the stack
