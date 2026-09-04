@@ -357,6 +357,14 @@ static bool isRegDeadAfter(MachineBasicBlock::iterator After,
       if (MO.readsReg())
         HasUse = true;
       if (MO.isDef()) {
+        // An implicit def the instruction does not declare cannot be
+        // trusted to be where the write happens: lowering a pair copy into
+        // two byte moves leaves both sub-register defs on the second one,
+        // which is not what writes the first byte. Calls and inline asm are
+        // the exception, since their clobbers are attached by the caller.
+        if (MO.isImplicit() && !I->isCall() && !I->isInlineAsm() &&
+            !llvm::is_contained(I->getDesc().implicit_defs(), MO.getReg()))
+          continue;
         MCPhysReg DefReg = MO.getReg();
         // Direct or super-register def covers the entire register.
         if (DefReg == Reg || TRI->isSuperRegister(Reg, DefReg))
