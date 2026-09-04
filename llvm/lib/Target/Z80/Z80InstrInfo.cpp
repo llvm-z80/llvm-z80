@@ -828,7 +828,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
         bool NeedSaveHL =
             LiveRegs.contains(Z80::H) || LiveRegs.contains(Z80::L);
         if (NeedSaveHL)
-          BuildMI(MBB, MI, DL, get(Z80::PUSH_HL));
+          Z80::emitHLSavePush(MBB, MI, DL, *this);
         BuildMI(MBB, MI, DL, get(Z80::PUSH_IY));
         BuildMI(MBB, MI, DL, get(Z80::POP_HL));
         BuildMI(MBB, MI, DL, get(Z80::LD_IXd_L)).addImm(Offset);
@@ -883,7 +883,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
         bool NeedSaveHL =
             LiveRegs.contains(Z80::H) || LiveRegs.contains(Z80::L);
         if (NeedSaveHL)
-          BuildMI(MBB, MI, DL, get(Z80::PUSH_HL));
+          Z80::emitHLSavePush(MBB, MI, DL, *this);
         BuildMI(MBB, MI, DL, get(Z80::LD_L_IXd)).addImm(Offset);
         BuildMI(MBB, MI, DL, get(Z80::LD_H_IXd)).addImm(Offset + 1);
         BuildMI(MBB, MI, DL, get(Z80::PUSH_HL));

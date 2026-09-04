@@ -203,11 +203,7 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
       } else {
         // Large frame: PUSH HL; LD HL,-(size-2); ADD HL,SP; LD SP,HL;
         // restore HL from IX-based save location.
-        MachineInstrBuilder PushHL = BuildMI(MBB, MBBI, DL, TII.get(Z80::PUSH_HL));
-        // The save only matters when HL carries an incoming argument.
-        if (!MBB.isLiveIn(Z80::HL) && !MBB.isLiveIn(Z80::L) &&
-            !MBB.isLiveIn(Z80::H))
-          Z80::markUndefUse(PushHL, Z80::HL);
+        Z80::emitHLSavePush(MBB, MBBI, DL, TII);
         BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_HL_nn))
             .addImm(-(int64_t)(StackSize - 2) & 0xFFFF);
         BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_HL_SP));

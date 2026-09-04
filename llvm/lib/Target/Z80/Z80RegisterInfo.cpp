@@ -770,7 +770,7 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
     bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
 
     if (NeedSaveHL) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+      emitHLSavePush(MBB, MI, DL, TII);
       SPDelta += 2;
     }
     if (NeedSaveTemp) {
@@ -842,7 +842,7 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
     bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
 
     if (NeedSaveHL) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+      emitHLSavePush(MBB, MI, DL, TII);
       SPDelta += 2;
     }
 
@@ -881,7 +881,7 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
     bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
 
     if (NeedSaveHL) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+      emitHLSavePush(MBB, MI, DL, TII);
       SPDelta += 2;
     }
     if (NeedSaveTemp) {
@@ -943,7 +943,7 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
     bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
 
     if (NeedSaveHL) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+      emitHLSavePush(MBB, MI, DL, TII);
       SPDelta += 2;
     }
 
@@ -1094,7 +1094,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       } else {
         bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, std::next(MI), this);
         if (NeedSaveHL) {
-          BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+          emitHLSavePush(MBB, MI, DL, TII);
           SPDelta += 2;
         }
         emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
@@ -1155,7 +1155,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, std::next(MI), this);
 
       if (NeedSaveHL)
-        BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+        emitHLSavePush(MBB, MI, DL, TII);
       emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, Z80::DE, PreserveFlags);
       BuildMI(MBB, MI, DL, TII.get(Z80::EX_DE_HL));
       if (NeedSaveHL)
@@ -1165,7 +1165,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, std::next(MI), this);
 
       if (NeedSaveHL)
-        BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+        emitHLSavePush(MBB, MI, DL, TII);
       emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, Z80::BC, PreserveFlags);
       BuildMI(MBB, MI, DL, TII.get(Z80::LD_B_H));
       BuildMI(MBB, MI, DL, TII.get(Z80::LD_C_L));
@@ -1188,7 +1188,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       int SPDelta = 0;
 
       if (NeedSaveHL) {
-        BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+        emitHLSavePush(MBB, MI, DL, TII);
         SPDelta += 2;
       }
       emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
@@ -1251,7 +1251,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
 
       if (NeedSaveTemp)
         BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
-      BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+      emitHLSavePush(MBB, MI, DL, TII);
 
       int SPAdj = 2 + (NeedSaveTemp ? 2 : 0);
       expandReloadGR16SPRelative(MBB, MI, DL, TII, TempReg, Offset + SPAdj,
@@ -1415,7 +1415,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
 
     // Save HL (the value to add/sub to).
-    BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
+    emitHLSavePush(MBB, MI, DL, TII);
 
     // Compute address: HL = IX + Offset (clobbers HL)
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
