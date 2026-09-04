@@ -25,4 +25,4 @@ def z80_cross_size_copy : GICombineRule<
 def Z80PostLegalizerCombiner : GICombiner<
   "Z80PostLegalizerCombinerImpl",
   [copy_prop, cast_of_cast_combines, identity_combines, merge_combines,
-   commute_constant_to_rhs, z80_cross_size_copy]>;
+   commute_constant_to_rhs, redundant_and, z80_cross_size_copy]>;

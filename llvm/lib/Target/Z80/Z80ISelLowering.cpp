@@ -15,6 +15,7 @@
 
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/GlobalISel/GISelValueTracking.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -25,6 +26,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/KnownBits.h"
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80.h"
@@ -98,6 +100,23 @@ unsigned Z80TargetLowering::getNumRegistersForCallingConv(LLVMContext &Context,
   return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
 }
 
+// A wide comparison becomes one of these target opcodes, which produce the
+// same zero-or-one boolean G_ICMP does. Nothing else can know that about a
+// target opcode, so without this the mask the widening of the condition
+// leaves behind never looks redundant.
+void Z80TargetLowering::computeKnownBitsForTargetInstr(
+    GISelValueTracking &Analysis, Register R, KnownBits &Known,
+    const APInt &DemandedElts, const MachineRegisterInfo &MRI,
+    unsigned Depth) const {
+  switch (MRI.getVRegDef(R)->getOpcode()) {
+  case Z80::G_Z80_ICMP32:
+  case Z80::G_Z80_ICMP64:
+    Known.Zero.setBitsFrom(1);
+    return;
+  default:
+    return;
+  }
+}
 
 
 TargetLowering::ConstraintType
