@@ -22,6 +22,7 @@
 #include "Z80Subtarget.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -398,21 +399,146 @@ static bool isRegDeadAfter(MachineBasicBlock::iterator After,
   return true;
 }
 
-// A reload from a frame slot whose destination is overwritten before it is
-// read costs three bytes and buys nothing: a pair reloaded because one of
-// its bytes is needed leaves the other one dead once the halves become
-// separate instructions.
+// Get the register an LD r,#imm writes, or Register().
+static Register getLDrnDstReg(unsigned Opc) {
+  switch (Opc) {
+  case Z80::LD_A_n:
+    return Z80::A;
+  case Z80::LD_B_n:
+    return Z80::B;
+  case Z80::LD_C_n:
+    return Z80::C;
+  case Z80::LD_D_n:
+    return Z80::D;
+  case Z80::LD_E_n:
+    return Z80::E;
+  case Z80::LD_H_n:
+    return Z80::H;
+  case Z80::LD_L_n:
+    return Z80::L;
+  default:
+    return Register();
+  }
+}
+
+// Get the register an OR r / XOR r reads besides A, or Register(). Both
+// leave A untouched when that register holds zero. A itself is excluded:
+// OR A and XOR A mean something else.
+static Register getZeroNeutralAluSrcReg(unsigned Opc) {
+  switch (Opc) {
+  case Z80::OR_B:
+  case Z80::XOR_B:
+    return Z80::B;
+  case Z80::OR_C:
+  case Z80::XOR_C:
+    return Z80::C;
+  case Z80::OR_D:
+  case Z80::XOR_D:
+    return Z80::D;
+  case Z80::OR_E:
+  case Z80::XOR_E:
+    return Z80::E;
+  case Z80::OR_H:
+  case Z80::XOR_H:
+    return Z80::H;
+  case Z80::OR_L:
+  case Z80::XOR_L:
+    return Z80::L;
+  default:
+    return Register();
+  }
+}
+
+// OR or XOR against a register holding zero leaves A exactly as it was, so
+// all such an instruction really does is set flags. Where those are dead
+// too it does nothing at all. These come from wide values whose upper half
+// is a known zero: the byte-wise expansion has no way to see it.
+//
+// Dropping the instruction usually leaves the constant that fed it dead as
+// well, which the sweep below then takes.
+static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
+                                  const TargetRegisterInfo *TRI) {
+  static const MCPhysReg Regs8[] = {Z80::A, Z80::B, Z80::C, Z80::D,
+                                    Z80::E, Z80::H, Z80::L};
+  bool Changed = false;
+  SmallSet<MCPhysReg, 8> Zero;
+
+  for (auto MII = MBB.begin(); MII != MBB.end();) {
+    MachineInstr &MI = *MII;
+
+    if (Register Src = getZeroNeutralAluSrcReg(MI.getOpcode());
+        Src.isValid() && Zero.count(Src.asMCReg()) &&
+        isRegDeadAfter(std::next(MII), MBB, TRI, Z80::FLAGS)) {
+      LLVM_DEBUG(dbgs() << "  Zero operand, no effect: " << MI);
+      MII = MBB.erase(MII);
+      Changed = true;
+      continue;
+    }
+
+    if (MI.isCall() || MI.isInlineAsm()) {
+      Zero.clear();
+    } else {
+      for (const MachineOperand &MO : MI.operands())
+        if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
+          for (MCPhysReg R : Regs8)
+            if (TRI->regsOverlap(MO.getReg(), R))
+              Zero.erase(R);
+
+      unsigned Opc = MI.getOpcode();
+      bool Wide = Opc == Z80::LD_BC_nn || Opc == Z80::LD_DE_nn ||
+                  Opc == Z80::LD_HL_nn;
+      if ((getLDrnDstReg(Opc).isValid() || Wide) &&
+          MI.getOperand(0).isImm() && MI.getOperand(0).getImm() == 0) {
+        if (Wide) {
+          Register Pair = Opc == Z80::LD_BC_nn   ? Z80::BC
+                          : Opc == Z80::LD_DE_nn ? Z80::DE
+                                                 : Z80::HL;
+          for (MCSubRegIterator SR(Pair, TRI); SR.isValid(); ++SR)
+            Zero.insert(*SR);
+        } else {
+          Zero.insert(getLDrnDstReg(Opc).asMCReg());
+        }
+      }
+    }
+    ++MII;
+  }
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+// A reload from a frame slot, or a constant loaded into a register, whose
+// destination is overwritten before it is read buys nothing: a pair reloaded
+// because one of its bytes is needed leaves the other one dead, and so does
+// a constant whose only reader has just been dropped.
 static bool eraseDeadFrameReloads(MachineBasicBlock &MBB,
                                   const TargetRegisterInfo *TRI) {
   bool Changed = false;
   for (auto MII = MBB.begin(); MII != MBB.end();) {
     Register Dst = getLoadIXdDstReg(MII->getOpcode());
-    if (!Dst.isValid() || !isPlainSlotAccess(*MII) ||
+    bool IsSlotLoad = Dst.isValid();
+    if (!Dst.isValid())
+      Dst = getLDrnDstReg(MII->getOpcode());
+    if (!Dst.isValid())
+      switch (MII->getOpcode()) {
+      case Z80::LD_BC_nn:
+        Dst = Z80::BC;
+        break;
+      case Z80::LD_DE_nn:
+        Dst = Z80::DE;
+        break;
+      case Z80::LD_HL_nn:
+        Dst = Z80::HL;
+        break;
+      default:
+        break;
+      }
+    if (!Dst.isValid() || (IsSlotLoad && !isPlainSlotAccess(*MII)) ||
         !isRegDeadAfter(std::next(MII), MBB, TRI, Dst)) {
       ++MII;
       continue;
     }
-    LLVM_DEBUG(dbgs() << "  Removing dead frame reload: " << *MII);
+    LLVM_DEBUG(dbgs() << "  Removing dead def: " << *MII);
     MII = MBB.erase(MII);
     Changed = true;
   }
@@ -964,8 +1090,11 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
 
   for (MachineBasicBlock &MBB : MF) {
-    // Run first: every later peephole reasons about what a register holds,
-    // and a load that never gets read only muddies that.
+    // Dropping a no-op is what leaves the constant behind it dead, so this
+    // comes before the sweep.
+    Changed |= elideZeroOperandLogic(MBB, TRI);
+    // Before the rest: they all reason about what a register holds, and a
+    // definition nobody reads only muddies that.
     Changed |= eraseDeadFrameReloads(MBB, TRI);
 
     // --- Peephole: POP rr; PUSH rr → (remove both) ---
