@@ -1414,13 +1414,14 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     // Callee-cleanup return: pop return address, skip N bytes of stack args,
     // then return via indirect jump.
     unsigned Amount = MI.getOperand(0).getImm();
+    MachineInstrBuilder Term;
     if (Amount == 0) {
-      BuildMI(MBB, MI, DL, get(Z80::RET));
+      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
     } else if (STI->hasSM83()) {
       // SM83: POP HL; ADD SP,e; JP (HL)
       BuildMI(MBB, MI, DL, get(Z80::POP_HL));
       BuildMI(MBB, MI, DL, get(Z80::ADD_SP_e)).addImm(Amount & 0xFF);
-      BuildMI(MBB, MI, DL, get(Z80::JP_HLind));
+      Term = BuildMI(MBB, MI, DL, get(Z80::JP_HLind));
     } else if (Amount <= 8) {
       // Z80 small: POP BC; INC SP × N; PUSH BC; RET
       // Use BC (not HL) because HL may hold i32/float return high word.
@@ -1429,7 +1430,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       for (unsigned i = 0; i < Amount; ++i)
         BuildMI(MBB, MI, DL, get(Z80::INC_SP));
       BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
-      BuildMI(MBB, MI, DL, get(Z80::RET));
+      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
     } else if (MI.readsRegister(Z80::HL, TRI)) {
       // Z80 large with an i32/float return: the value travels in HLDE (the
       // SDCC float exception makes such functions callee-cleanup), so the
@@ -1440,7 +1441,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       BuildMI(MBB, MI, DL, get(Z80::ADD_IY_SP));
       BuildMI(MBB, MI, DL, get(Z80::LD_SP_IY));
       BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
-      BuildMI(MBB, MI, DL, get(Z80::RET));
+      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
     } else {
       // Z80 large: POP BC; LD HL,N; ADD HL,SP; LD SP,HL; PUSH BC; RET
       BuildMI(MBB, MI, DL, get(Z80::POP_BC));
@@ -1448,8 +1449,12 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       BuildMI(MBB, MI, DL, get(Z80::ADD_HL_SP));
       BuildMI(MBB, MI, DL, get(Z80::LD_SP_HL));
       BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
-      BuildMI(MBB, MI, DL, get(Z80::RET));
+      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
     }
+    // Uses only; the instructions built above declare their own defs.
+    for (const MachineOperand &MO : MI.implicit_operands())
+      if (MO.isReg() && MO.isUse())
+        Term.addReg(MO.getReg(), RegState::Implicit);
     MI.eraseFromParent();
     return true;
   }
