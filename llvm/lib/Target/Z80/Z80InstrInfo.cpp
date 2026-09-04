@@ -1675,6 +1675,48 @@ unsigned Z80InstrInfo::removeBranch(MachineBasicBlock &MBB,
   return Count;
 }
 
+// An 8-bit ALU operation can read its register operand out of a frame slot
+// instead, so a value spilled only to be read there does not need reloading.
+MachineInstr *Z80InstrInfo::foldMemoryOperandImpl(
+    MachineFunction &MF, MachineInstr &MI, ArrayRef<unsigned> Ops,
+    int FrameIndex, MachineInstr *&CopyMI, LiveIntervals *LIS,
+    VirtRegMap *VRM) const {
+  // The slot is read, so only the one register operand may be folded.
+  if (Ops.size() != 1 || Ops[0] != 0 || MI.getOperand(0).isDef())
+    return nullptr;
+
+  // IX+d is the form this folds into, so it takes a frame pointer to reach.
+  if (!MF.getSubtarget().getFrameLowering()->hasFP(MF))
+    return nullptr;
+
+  unsigned AluOp;
+  switch (MI.getOpcode()) {
+  case Z80::ADD_A_r:
+    AluOp = Z80::ALU_ADD;
+    break;
+  case Z80::SUB_r:
+    AluOp = Z80::ALU_SUB;
+    break;
+  case Z80::AND_r:
+    AluOp = Z80::ALU_AND;
+    break;
+  case Z80::OR_r:
+    AluOp = Z80::ALU_OR;
+    break;
+  case Z80::XOR_r:
+    AluOp = Z80::ALU_XOR;
+    break;
+  default:
+    return nullptr;
+  }
+
+  return BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), get(Z80::ALU_A_FI))
+      .addImm(AluOp)
+      .addFrameIndex(FrameIndex)
+      .addImm(0)
+      .getInstr();
+}
+
 unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
 

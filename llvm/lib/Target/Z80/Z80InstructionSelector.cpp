@@ -1548,6 +1548,40 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     return true;
   };
 
+  // Helper: fold a single-use frame slot load into an 8-bit ALU operation.
+  // ASrcReg is the operand that goes to A; FoldReg is the one whose load
+  // becomes the memory operand. Only where the function keeps a frame
+  // pointer, since IX+d is the form this is worth doing for; without one
+  // the expansion has to unfold it again and nothing is gained.
+  auto tryAluFIFold = [&](Register ASrcReg, Register FoldReg, Register DstReg,
+                          unsigned AluOp) -> bool {
+    const MachineFunction &FoldMF = *MBB.getParent();
+    if (!FoldMF.getSubtarget().getFrameLowering()->hasFP(FoldMF))
+      return false;
+    FILoadInfo FIInfo = getFILoad(FoldReg);
+    if (FIInfo.FI < 0)
+      return false;
+    if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
+        !RBI.constrainGenericRegister(ASrcReg, Z80::GR8RegClass, MRI))
+      return false;
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
+        .addReg(ASrcReg);
+    auto MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::ALU_A_FI))
+                   .addImm(AluOp)
+                   .addFrameIndex(FIInfo.FI)
+                   .addImm(FIInfo.Offset);
+    // The pseudo performs the load the fold is about to erase.
+    MIB.cloneMemRefs(*FIInfo.LoadMI);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
+        .addReg(Z80::A);
+    moveLifetimeEnd(FIInfo.LoadMI, MI,
+                    std::next(MachineBasicBlock::iterator(*MIB.getInstr())),
+                    FIInfo.FI);
+    FIInfo.LoadMI->eraseFromParent();
+    MI.eraseFromParent();
+    return true;
+  };
+
   // Handle generic opcodes
   switch (Opcode) {
   default:
@@ -2153,6 +2187,10 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         return true;
       }
 
+      if (tryAluFIFold(Src1Reg, Src2Reg, DstReg, Z80::ALU_ADD) ||
+          tryAluFIFold(Src2Reg, Src1Reg, DstReg, Z80::ALU_ADD))
+        return true;
+
       // Constrain registers
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
@@ -2302,6 +2340,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         return true;
       }
 
+      if (tryAluFIFold(Src1Reg, Src2Reg, DstReg, Z80::ALU_SUB))
+        return true;
+
       // Constrain registers
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
@@ -2430,6 +2471,10 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           std::swap(Src1Reg, Src2Reg);
         auto ImmVal = getConst8(Src2Reg);
 
+        if (!ImmVal && (tryAluFIFold(Src1Reg, Src2Reg, DstReg, Z80::ALU_AND) ||
+                        tryAluFIFold(Src2Reg, Src1Reg, DstReg, Z80::ALU_AND)))
+          return true;
+
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(Src1Reg);
         if (ImmVal)
@@ -2455,6 +2500,12 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
 
     if (DstTy.getSizeInBits() <= 8) {
+      unsigned AluOp =
+          Opcode == TargetOpcode::G_OR ? Z80::ALU_OR : Z80::ALU_XOR;
+      if (tryAluFIFold(Src1Reg, Src2Reg, DstReg, AluOp) ||
+          tryAluFIFold(Src2Reg, Src1Reg, DstReg, AluOp))
+        return true;
+
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(Src2Reg, Z80::GR8RegClass, MRI))

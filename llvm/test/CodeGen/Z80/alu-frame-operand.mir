@@ -1,0 +1,42 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=prolog-epilog %s -o - | FileCheck %s
+#
+# Whether an 8-bit ALU operation can reach its frame slot is settled once the
+# frame is laid out, so the expansion picks the addressing mode: IX+d where
+# the displacement fits, an address in a pair where it does not, and a reload
+# and register operation where there is no frame pointer at all.
+
+--- |
+  define void @large_offset() "frame-pointer"="all" { ret void }
+  define void @no_frame_pointer() { ret void }
+...
+---
+name:            large_offset
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 200, alignment: 1 }
+  - { id: 1, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $ix
+    ALU_A_FI 0, %stack.1, 0, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $a
+...
+---
+# CHECK-LABEL: name: large_offset
+# CHECK:      ADD_HL_BC
+# CHECK-NEXT: ADD_A_HLind
+---
+name:            no_frame_pointer
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $sp
+    ALU_A_FI 2, %stack.0, 0, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $a
+...
+---
+# CHECK-LABEL: name: no_frame_pointer
+# CHECK:      LD_B_HLind
+# CHECK-NEXT: AND_r $b

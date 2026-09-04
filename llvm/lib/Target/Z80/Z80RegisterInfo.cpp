@@ -1263,6 +1263,33 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     //
     // The PUSH/POP of HL shifts SP, so Offset is adjusted by SPAdj to
     // compensate for the extra stack entries between SP and the target slot.
+    // Without a frame pointer there is no IX+d to fold into, so unfold back
+    // to the reload and the register form the selection replaced.
+    if (Opc == Z80::ALU_A_FI) {
+      unsigned Op = MI->getOperand(0).getImm();
+      auto NextIt = std::next(MI);
+      Register TempReg = Z80::B;
+      for (MCPhysReg R : {Z80::B, Z80::C, Z80::D, Z80::E})
+        if (!isRegLiveAt(R, MBB, NextIt, this)) {
+          TempReg = R;
+          break;
+        }
+      bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
+      Register TempPair = (TempReg == Z80::B || TempReg == Z80::C) ? Z80::BC
+                                                                   : Z80::DE;
+
+      if (NeedSaveTemp)
+        BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempPair)));
+      expandReloadGR8SPRelative(MBB, MI, DL, TII, TempReg,
+                                Offset + (NeedSaveTemp ? 2 : 0), this);
+      BuildMI(MBB, MI, DL, TII.get(Z80::getAluRegOpcode(Op))).addReg(TempReg);
+      if (NeedSaveTemp)
+        BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempPair)));
+
+      MI->eraseFromParent();
+      return false;
+    }
+
     if (Opc == Z80::ADD_HL_FI || Opc == Z80::SUB_HL_FI) {
       auto NextIt = std::next(MI);
       Register TempReg = !isRegLiveAt(Z80::BC, MBB, NextIt, this)   ? Z80::BC
@@ -1310,6 +1337,15 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
   int64_t MaxOffset = Is16BitFI ? Offset + 1 : Offset;
 
   if (Offset >= -128 && MaxOffset <= 127) {
+    if (Opc == Z80::ALU_A_FI) {
+      unsigned Op = MI->getOperand(0).getImm();
+      BuildMI(MBB, MI, DL, TII.get(Z80::getAluIXdOpcode(Op)))
+          .addImm(Offset)
+          .cloneMemRefs(*MI);
+      MI->eraseFromParent();
+      return false;
+    }
+
     // Expand ADD_HL_FI/SUB_HL_FI to 8-bit IX-indexed ALU sequence (10 bytes).
     // This is the fast path — the offset fits in IX+d, so we can directly
     // use ADD A,(IX+d) / ADC A,(IX+d+1) to perform 16-bit addition byte
@@ -1419,6 +1455,30 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
   if (Opc == Z80::RELOAD_GR16 || Opc == Z80::RELOAD_ANY16) {
     Register DstReg = MI->getOperand(0).getReg();
     expandReloadGR16LargeOffset(MBB, MI, DL, TII, DstReg, Offset, this);
+    MI->eraseFromParent();
+    return false;
+  }
+
+  if (Opc == Z80::ALU_A_FI) {
+    unsigned Op = MI->getOperand(0).getImm();
+    auto NextIt = std::next(MI);
+    Register TempReg =
+        !isRegLiveAt(Z80::BC, MBB, NextIt, this) ? Z80::BC : Z80::DE;
+    bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, this);
+    bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
+
+    if (NeedSaveHL)
+      emitHLSavePush(MBB, MI, DL, TII);
+    if (NeedSaveTemp)
+      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+    emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg,
+                        /*PreserveFlags=*/false);
+    BuildMI(MBB, MI, DL, TII.get(Z80::getAluHLindOpcode(Op)))
+        .cloneMemRefs(*MI);
+    if (NeedSaveTemp)
+      BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
+    if (NeedSaveHL)
+      BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
     MI->eraseFromParent();
     return false;
   }

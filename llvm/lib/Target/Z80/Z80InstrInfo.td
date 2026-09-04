@@ -629,6 +629,18 @@ def SUB_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi)> {
   let mayStore = false;
   let Predicates = [HasZ80];
 }
+// 8-bit ALU against a frame slot. $op says which operation, so one pseudo
+// covers them all. Selection cannot name the addressing mode yet: whether
+// the frame pointer exists and whether the displacement fits are settled in
+// eliminateFrameIndex, which picks IX+d, an address in a pair, or unfolds
+// back to a reload and a register ALU.
+def ALU_A_FI : Z80Pseudo<(outs), (ins i32imm:$op, i32imm:$fi, i32imm:$offset)> {
+  let Uses = [A];
+  let Defs = [A, FLAGS];
+  let mayLoad = true;
+  let mayStore = false;
+  let Predicates = [HasZ80];
+}
 def SPILL_GR8 : Z80Pseudo<(outs), (ins GR8:$src, i32imm:$fi, i32imm:$offset)> {
   let mayStore = true;
   let mayLoad = false;

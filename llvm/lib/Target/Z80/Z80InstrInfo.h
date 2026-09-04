@@ -25,6 +25,60 @@ namespace llvm {
 class Z80Subtarget;
 
 namespace Z80 {
+/// Which operation an ALU_A_FI performs. Stored as its first operand.
+enum AluOp { ALU_ADD, ALU_SUB, ALU_AND, ALU_OR, ALU_XOR };
+
+/// The IX-indexed form of an ALU operation.
+inline unsigned getAluIXdOpcode(unsigned Op) {
+  switch (Op) {
+  case ALU_ADD:
+    return Z80::ADD_A_IXd;
+  case ALU_SUB:
+    return Z80::SUB_IXd;
+  case ALU_AND:
+    return Z80::AND_IXd;
+  case ALU_OR:
+    return Z80::OR_IXd;
+  case ALU_XOR:
+    return Z80::XOR_IXd;
+  }
+  llvm_unreachable("unknown ALU operation");
+}
+
+/// The (HL) form of an ALU operation.
+inline unsigned getAluHLindOpcode(unsigned Op) {
+  switch (Op) {
+  case ALU_ADD:
+    return Z80::ADD_A_HLind;
+  case ALU_SUB:
+    return Z80::SUB_HLind;
+  case ALU_AND:
+    return Z80::AND_HLind;
+  case ALU_OR:
+    return Z80::OR_HLind;
+  case ALU_XOR:
+    return Z80::XOR_HLind;
+  }
+  llvm_unreachable("unknown ALU operation");
+}
+
+/// The register-operand pseudo form of an ALU operation.
+inline unsigned getAluRegOpcode(unsigned Op) {
+  switch (Op) {
+  case ALU_ADD:
+    return Z80::ADD_A_r;
+  case ALU_SUB:
+    return Z80::SUB_r;
+  case ALU_AND:
+    return Z80::AND_r;
+  case ALU_OR:
+    return Z80::OR_r;
+  case ALU_XOR:
+    return Z80::XOR_r;
+  }
+  llvm_unreachable("unknown ALU operation");
+}
+
 /// Mark a register the instruction reads only incidentally as undef: the
 /// result does not depend on the value (SBC A,A spreads carry whatever A
 /// holds, AND A only clears carry, a flag-save PUSH AF only carries F), so
@@ -114,6 +168,12 @@ public:
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
   int getSPAdjust(const MachineInstr &MI) const override;
+
+  MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
+                                      ArrayRef<unsigned> Ops, int FrameIndex,
+                                      MachineInstr *&CopyMI,
+                                      LiveIntervals *LIS = nullptr,
+                                      VirtRegMap *VRM = nullptr) const override;
 
   unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
 
