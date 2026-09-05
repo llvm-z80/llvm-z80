@@ -39,40 +39,6 @@ namespace {
 #include "Z80GenPostLegalizeGICombiner.inc"
 #undef GET_GICOMBINER_TYPES
 
-// Match cross-size COPYs between virtual registers of different sizes.
-// The legalizer's narrowScalar can produce COPYs like s16→s8 which should
-// be G_TRUNC, or s8→s16 which should be G_ANYEXT. ISel constrains both
-// sides of a COPY to the same register class, causing conflicts.
-bool matchCrossSizeCopy(MachineInstr &MI, MachineRegisterInfo &MRI,
-                        unsigned &NewOpc) {
-  if (MI.getOpcode() != TargetOpcode::COPY)
-    return false;
-
-  Register DstReg = MI.getOperand(0).getReg();
-  Register SrcReg = MI.getOperand(1).getReg();
-
-  if (!DstReg.isVirtual() || !SrcReg.isVirtual())
-    return false;
-
-  LLT DstTy = MRI.getType(DstReg);
-  LLT SrcTy = MRI.getType(SrcReg);
-  if (!DstTy.isValid() || !SrcTy.isValid())
-    return false;
-
-  unsigned DstSize = DstTy.getSizeInBits();
-  unsigned SrcSize = SrcTy.getSizeInBits();
-  if (DstSize == SrcSize)
-    return false;
-
-  NewOpc = (DstSize < SrcSize) ? TargetOpcode::G_TRUNC : TargetOpcode::G_ANYEXT;
-  return true;
-}
-
-void applyCrossSizeCopy(MachineInstr &MI, unsigned &NewOpc) {
-  const TargetInstrInfo &TII = *MI.getMF()->getSubtarget().getInstrInfo();
-  MI.setDesc(TII.get(NewOpc));
-}
-
 class Z80PostLegalizerCombinerImpl : public Combiner {
 protected:
   const CombinerHelper Helper;
