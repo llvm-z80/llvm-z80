@@ -18,8 +18,8 @@ body:             |
     liveins: $d, $hl, $sp
     ASHR16_VAR implicit-def $hl, implicit-def dead $b, implicit-def $flags, implicit $hl, implicit undef $b
     SPILL_GR16 killed renamable $hl, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
-    LD_A_D implicit-def $a, implicit killed $d
-    LD_C_n 3, implicit-def $c
+    $a = LD_r_r killed $d
+    $c = LD_r_n 3
     SPILL_ANY16 renamable $bc, %stack.1, 0 :: (store (s16) into %stack.1, align 1)
     RET implicit $a
 ...

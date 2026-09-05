@@ -36,18 +36,6 @@
 using namespace llvm;
 
 // Convenience aliases for shared opcode utilities.
-static unsigned getStoreHLindOpcode(Register R) {
-  return Z80::getStoreHLindOpcode(R);
-}
-static unsigned getLoadHLindOpcode(Register R) {
-  return Z80::getLoadHLindOpcode(R);
-}
-static unsigned getCopyToAOpcode(Register R) {
-  return Z80::getLD8RegOpcode(Z80::A, R);
-}
-static unsigned getCopyFromAOpcode(Register R) {
-  return Z80::getLD8RegOpcode(R, Z80::A);
-}
 
 // Check if an 8-bit register is a sub-register of a 16-bit pair.
 static bool isSubRegOf(Register Reg8, Register Reg16) {
@@ -83,7 +71,6 @@ static Register chooseTempReg(Register Avoid8, MachineBasicBlock &MBB,
   return Z80::BC;
 }
 
-static unsigned getPushOpcode(Register R) { return Z80::getPushOpcode(R); }
 static unsigned getPopOpcode(Register R) { return Z80::getPopOpcode(R); }
 
 //===----------------------------------------------------------------------===//
@@ -277,13 +264,10 @@ static void emitLargeOffsetAddr(MachineBasicBlock &MBB,
   BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_IX));
   BuildMI(MBB, InsertBefore, DL, TII.get(Z80::POP_HL));
 
-  unsigned LdOpc = (TempReg == Z80::BC) ? Z80::LD_BC_nn : Z80::LD_DE_nn;
-  unsigned AddOpc = (TempReg == Z80::BC) ? Z80::ADD_HL_BC : Z80::ADD_HL_DE;
-
-  BuildMI(MBB, InsertBefore, DL, TII.get(LdOpc)).addImm(Offset & 0xFFFF);
+  Z80::buildLD16n(MBB, InsertBefore, DL, TII, TempReg).addImm(Offset & 0xFFFF);
   if (PreserveFlags)
     emitFlagSavePush(MBB, InsertBefore, DL, TII);
-  BuildMI(MBB, InsertBefore, DL, TII.get(AddOpc));
+  Z80::buildAddHL(MBB, InsertBefore, DL, TII, TempReg);
   if (PreserveFlags)
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::POP_AF));
 }
@@ -342,7 +326,7 @@ static void expandSpillGR8LargeOffset(MachineBasicBlock &MBB,
   if (NeedSaveAF)
     BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_AF));
   if (SrcIsHL)
-    BuildMI(MBB, MI, DL, TII.get(getCopyToAOpcode(SrcReg)));
+    Z80::buildLD8(MBB, MI, DL, TII, Z80::A, SrcReg);
 
   if (NeedSaveHL)
     emitHLSavePush(MBB, MI, DL, TII);
@@ -352,9 +336,9 @@ static void expandSpillGR8LargeOffset(MachineBasicBlock &MBB,
   emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
 
   if (SrcIsHL)
-    BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_A));
+    Z80::buildStoreHL(MBB, MI, DL, TII, Z80::A);
   else
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(SrcReg)));
+    Z80::buildStoreHL(MBB, MI, DL, TII, SrcReg);
 
   if (NeedSaveTemp)
     BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
@@ -396,16 +380,16 @@ static void expandReloadGR8LargeOffset(MachineBasicBlock &MBB,
   if (DstIsHL) {
     // Can't load directly into H/L (HL holds the address).
     // Load into A, restore scratch, then copy A → DstReg.
-    BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_HLind));
+    Z80::buildLoadHL(MBB, MI, DL, TII, Z80::A);
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
-    BuildMI(MBB, MI, DL, TII.get(getCopyFromAOpcode(DstReg)));
+    Z80::buildLD8(MBB, MI, DL, TII, DstReg, Z80::A);
     if (NeedSaveAF)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_AF));
   } else {
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(DstReg)));
+    Z80::buildLoadHL(MBB, MI, DL, TII, DstReg);
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
     if (NeedSaveHL)
@@ -446,16 +430,14 @@ static void expandSpillGR16LargeOffset(MachineBasicBlock &MBB,
 
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(TempLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(TempHi)));
+    Z80::buildStoreHL(MBB, MI, DL, TII, TempLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildStoreHL(MBB, MI, DL, TII, TempHi);
 
     // Restore HL from TempReg if the spill didn't kill HL.
     if (!MI->getOperand(0).isKill()) {
-      unsigned CopyH = (TempReg == Z80::BC) ? Z80::LD_H_B : Z80::LD_H_D;
-      unsigned CopyL = (TempReg == Z80::BC) ? Z80::LD_L_C : Z80::LD_L_E;
-      BuildMI(MBB, MI, DL, TII.get(CopyL));
-      BuildMI(MBB, MI, DL, TII.get(CopyH));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::L, TempLo);
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::H, TempHi);
     }
 
     if (NeedSaveTemp)
@@ -476,9 +458,9 @@ static void expandSpillGR16LargeOffset(MachineBasicBlock &MBB,
 
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
 
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(SrcLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(SrcHi)));
+    Z80::buildStoreHL(MBB, MI, DL, TII, SrcLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildStoreHL(MBB, MI, DL, TII, SrcHi);
 
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
@@ -518,15 +500,13 @@ static void expandReloadGR16LargeOffset(MachineBasicBlock &MBB,
 
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempHi)));
+    Z80::buildLoadHL(MBB, MI, DL, TII, TempLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildLoadHL(MBB, MI, DL, TII, TempHi);
 
     // Copy temp to HL.
-    unsigned CopyL = (TempReg == Z80::BC) ? Z80::LD_L_C : Z80::LD_L_E;
-    unsigned CopyH = (TempReg == Z80::BC) ? Z80::LD_H_B : Z80::LD_H_D;
-    BuildMI(MBB, MI, DL, TII.get(CopyL));
-    BuildMI(MBB, MI, DL, TII.get(CopyH));
+    Z80::buildLD8(MBB, MI, DL, TII, Z80::L, TempLo);
+    Z80::buildLD8(MBB, MI, DL, TII, Z80::H, TempHi);
 
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
@@ -541,9 +521,9 @@ static void expandReloadGR16LargeOffset(MachineBasicBlock &MBB,
 
     Register DstLo = (DstReg == Z80::BC) ? Z80::C : Z80::E;
     Register DstHi = (DstReg == Z80::BC) ? Z80::B : Z80::D;
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(DstLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(DstHi)));
+    Z80::buildLoadHL(MBB, MI, DL, TII, DstLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildLoadHL(MBB, MI, DL, TII, DstHi);
 
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
@@ -588,7 +568,7 @@ static void emitSPRelativeAddr(MachineBasicBlock &MBB,
 
   // Z80 (and SM83 fallback for large offsets):
   // LD HL,nn; [PUSH AF;] ADD HL,SP; [POP AF;]
-  BuildMI(MBB, InsertBefore, DL, TII.get(Z80::LD_HL_nn))
+  Z80::buildLD16n(MBB, InsertBefore, DL, TII, Z80::HL)
       .addImm(AdjOffset & 0xFFFF);
   if (PreserveFlags)
     emitFlagSavePush(MBB, InsertBefore, DL, TII);
@@ -616,7 +596,7 @@ static void expandSpillGR8SPRelative(MachineBasicBlock &MBB,
     SPDelta += 2;
   }
   if (SrcIsHL)
-    BuildMI(MBB, MI, DL, TII.get(getCopyToAOpcode(SrcReg)));
+    Z80::buildLD8(MBB, MI, DL, TII, Z80::A, SrcReg);
 
   bool NeedSaveHL = SrcIsHL || isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
   if (NeedSaveHL) {
@@ -627,9 +607,9 @@ static void expandSpillGR8SPRelative(MachineBasicBlock &MBB,
   emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
 
   if (SrcIsHL)
-    BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_A));
+    Z80::buildStoreHL(MBB, MI, DL, TII, Z80::A);
   else
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(SrcReg)));
+    Z80::buildStoreHL(MBB, MI, DL, TII, SrcReg);
 
   if (NeedSaveHL)
     BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
@@ -664,14 +644,14 @@ static void expandReloadGR8SPRelative(MachineBasicBlock &MBB,
   emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
 
   if (DstIsHL) {
-    BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_HLind));
+    Z80::buildLoadHL(MBB, MI, DL, TII, Z80::A);
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
-    BuildMI(MBB, MI, DL, TII.get(getCopyFromAOpcode(DstReg)));
+    Z80::buildLD8(MBB, MI, DL, TII, DstReg, Z80::A);
     if (NeedSaveAF)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_AF));
   } else {
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(DstReg)));
+    Z80::buildLoadHL(MBB, MI, DL, TII, DstReg);
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
   }
@@ -721,9 +701,9 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
 
     emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
 
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(TempLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(TempHi)));
+    Z80::buildStoreHL(MBB, MI, DL, TII, TempLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildStoreHL(MBB, MI, DL, TII, TempHi);
 
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
@@ -745,23 +725,19 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
     // Copy HL data to TempReg via LD r,r'
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
-    unsigned CopyLo = (TempReg == Z80::BC) ? Z80::LD_C_L : Z80::LD_E_L;
-    unsigned CopyHi = (TempReg == Z80::BC) ? Z80::LD_B_H : Z80::LD_D_H;
-    BuildMI(MBB, MI, DL, TII.get(CopyLo));
-    BuildMI(MBB, MI, DL, TII.get(CopyHi));
+    Z80::buildLD8(MBB, MI, DL, TII, TempLo, Z80::L);
+    Z80::buildLD8(MBB, MI, DL, TII, TempHi, Z80::H);
 
     emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
 
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(TempLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(TempHi)));
+    Z80::buildStoreHL(MBB, MI, DL, TII, TempLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildStoreHL(MBB, MI, DL, TII, TempHi);
 
     if (!MI->getOperand(0).isKill()) {
       // Restore HL from TempReg
-      unsigned RestL = (TempReg == Z80::BC) ? Z80::LD_L_C : Z80::LD_L_E;
-      unsigned RestH = (TempReg == Z80::BC) ? Z80::LD_H_B : Z80::LD_H_D;
-      BuildMI(MBB, MI, DL, TII.get(RestL));
-      BuildMI(MBB, MI, DL, TII.get(RestH));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::L, TempLo);
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::H, TempHi);
     }
 
     if (NeedSaveTemp)
@@ -779,9 +755,9 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
 
     emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
 
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(SrcLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getStoreHLindOpcode(SrcHi)));
+    Z80::buildStoreHL(MBB, MI, DL, TII, SrcLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildStoreHL(MBB, MI, DL, TII, SrcHi);
 
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
@@ -824,9 +800,9 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
 
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempHi)));
+    Z80::buildLoadHL(MBB, MI, DL, TII, TempLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildLoadHL(MBB, MI, DL, TII, TempHi);
 
     // Transfer TempReg to IX/IY via PUSH/POP
     Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
@@ -857,15 +833,13 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
 
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempHi)));
+    Z80::buildLoadHL(MBB, MI, DL, TII, TempLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildLoadHL(MBB, MI, DL, TII, TempHi);
 
     // Copy temp to HL
-    unsigned CopyL = (TempReg == Z80::BC) ? Z80::LD_L_C : Z80::LD_L_E;
-    unsigned CopyH = (TempReg == Z80::BC) ? Z80::LD_H_B : Z80::LD_H_D;
-    BuildMI(MBB, MI, DL, TII.get(CopyL));
-    BuildMI(MBB, MI, DL, TII.get(CopyH));
+    Z80::buildLD8(MBB, MI, DL, TII, Z80::L, TempLo);
+    Z80::buildLD8(MBB, MI, DL, TII, Z80::H, TempHi);
 
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
@@ -882,9 +856,9 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
 
     Register DstLo = TRI->getSubReg(DstReg, Z80::sub_lo);
     Register DstHi = TRI->getSubReg(DstReg, Z80::sub_hi);
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(DstLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(DstHi)));
+    Z80::buildLoadHL(MBB, MI, DL, TII, DstLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildLoadHL(MBB, MI, DL, TII, DstHi);
 
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
@@ -1041,14 +1015,14 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
         if (DstReg == Z80::DE) {
           const auto &STI = MF.getSubtarget<Z80Subtarget>();
           if (STI.hasSM83()) {
-            BuildMI(MBB, MI, DL, TII.get(Z80::LD_D_H));
-            BuildMI(MBB, MI, DL, TII.get(Z80::LD_E_L));
+            Z80::buildLD8(MBB, MI, DL, TII, Z80::D, Z80::H);
+            Z80::buildLD8(MBB, MI, DL, TII, Z80::E, Z80::L);
           } else {
             BuildMI(MBB, MI, DL, TII.get(Z80::EX_DE_HL));
           }
         } else if (DstReg == Z80::BC) {
-          BuildMI(MBB, MI, DL, TII.get(Z80::LD_B_H));
-          BuildMI(MBB, MI, DL, TII.get(Z80::LD_C_L));
+          Z80::buildLD8(MBB, MI, DL, TII, Z80::B, Z80::H);
+          Z80::buildLD8(MBB, MI, DL, TII, Z80::C, Z80::L);
         } else if (DstReg == Z80::IX) {
           BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
           BuildMI(MBB, MI, DL, TII.get(Z80::POP_IX));
@@ -1107,8 +1081,8 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       if (NeedSaveHL)
         emitHLSavePush(MBB, MI, DL, TII);
       emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, Z80::BC, PreserveFlags);
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_B_H));
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_C_L));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::B, Z80::H);
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::C, Z80::L);
       if (NeedSaveHL)
         BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
     } else {
@@ -1151,7 +1125,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       }
       emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
       BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
-      BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
+      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
       BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n))
           .addImm((Val >> 8) & 0xFF);
       if (NeedSaveHL)
@@ -1248,12 +1222,11 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
 
       if (Opc == Z80::ADD_HL_FI) {
-        BuildMI(MBB, MI, DL,
-                TII.get(TempReg == Z80::BC ? Z80::ADD_HL_BC : Z80::ADD_HL_DE));
+        Z80::buildAddHL(MBB, MI, DL, TII, TempReg);
       } else {
-        Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::AND_A)), Z80::A);
-        BuildMI(MBB, MI, DL,
-                TII.get(TempReg == Z80::BC ? Z80::SBC_HL_BC : Z80::SBC_HL_DE));
+        Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, TII, Z80::AND_r, Z80::A),
+                          Z80::A);
+        Z80::buildAdcSbcHL(MBB, MI, DL, TII, Z80::SBC_HL_rr, TempReg);
       }
 
       if (NeedSaveTemp)
@@ -1298,22 +1271,22 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     //   ADC A, (IX+d+1)      ; 3B  add high byte with carry
     //   LD H, A              ; 1B  store back → HL = sum + variable
     if (Opc == Z80::ADD_HL_FI) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_L));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Z80::L);
       BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_IXd)).addImm(Offset);
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_L_A));
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_H));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::L, Z80::A);
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Z80::H);
       BuildMI(MBB, MI, DL, TII.get(Z80::ADC_A_IXd)).addImm(Offset + 1);
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_A));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::H, Z80::A);
       MI->eraseFromParent();
       return false;
     }
     if (Opc == Z80::SUB_HL_FI) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_L));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Z80::L);
       BuildMI(MBB, MI, DL, TII.get(Z80::SUB_IXd)).addImm(Offset);
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_L_A));
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_H));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::L, Z80::A);
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Z80::H);
       BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_IXd)).addImm(Offset + 1);
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_A));
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::H, Z80::A);
       MI->eraseFromParent();
       return false;
     }
@@ -1361,7 +1334,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
     BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
     BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm((Val >> 8) & 0xFF);
     if (NeedSaveTemp)
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
@@ -1470,21 +1443,20 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     // Load from (HL) into TempReg
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempLo)));
-    BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
-    BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempHi)));
+    Z80::buildLoadHL(MBB, MI, DL, TII, TempLo);
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildLoadHL(MBB, MI, DL, TII, TempHi);
 
     // Restore HL.
     BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
 
     // Perform the 16-bit operation.
     if (Opc == Z80::ADD_HL_FI) {
-      BuildMI(MBB, MI, DL,
-              TII.get(TempReg == Z80::BC ? Z80::ADD_HL_BC : Z80::ADD_HL_DE));
+      Z80::buildAddHL(MBB, MI, DL, TII, TempReg);
     } else {
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::AND_A)), Z80::A);
-      BuildMI(MBB, MI, DL,
-              TII.get(TempReg == Z80::BC ? Z80::SBC_HL_BC : Z80::SBC_HL_DE));
+      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, TII, Z80::AND_r, Z80::A),
+                        Z80::A);
+      Z80::buildAdcSbcHL(MBB, MI, DL, TII, Z80::SBC_HL_rr, TempReg);
     }
 
     if (NeedSaveTemp)

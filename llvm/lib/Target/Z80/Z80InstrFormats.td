@@ -410,6 +410,46 @@ class InstDD16<string asmstr, bits<8> opcode, AddressingMode mode = IndexedIXMod
   let AsmString = asmstr # " " # mode.OperandsStr;
 }
 
+/// LD r,(IX+d) / LD (IX+d),r and the IY forms
+/// Opcode: <prefix> 0b01rrr110 d / <prefix> 0b01110rrr d — the LD r,r' layout
+/// under a DD or FD prefix, with the displacement byte after it. The register
+/// field can never name the memory slot, so these stay distinct.
+class LDrIdxd<string mnemonic, bits<8> prefix, string idx>
+    : Z80Inst<mnemonic # " $dst, ( " # idx # " + $imm )"> {
+  bits<3> dst;
+  bits<8> imm;
+  bits<24> Inst;
+  let Inst{7-0} = prefix;
+  let Inst{15-14} = 0b01;
+  let Inst{13-11} = dst;
+  let Inst{10-8} = 0b110;
+  let Inst{23-16} = imm;
+  let Size = 3;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins disp8:$imm);
+  let mayLoad = 1;
+  let mayStore = 0;
+  let hasSideEffects = 0;
+}
+
+class LDIdxdr<string mnemonic, bits<8> prefix, string idx>
+    : Z80Inst<mnemonic # " ( " # idx # " + $imm ), $src"> {
+  bits<3> src;
+  bits<8> imm;
+  bits<24> Inst;
+  let Inst{7-0} = prefix;
+  let Inst{15-14} = 0b01;
+  let Inst{13-11} = 0b110;
+  let Inst{10-8} = src;
+  let Inst{23-16} = imm;
+  let Size = 3;
+  let OutOperandList = (outs);
+  let InOperandList = (ins disp8:$imm, GR8:$src);
+  let mayLoad = 0;
+  let mayStore = 1;
+  let hasSideEffects = 0;
+}
+
 /// 4-byte DD-prefixed instruction with displacement + 8-bit immediate
 /// Encoding: DD opcode disp imm (e.g., LD (IX+d),n = DD 36 d n)
 class InstDD16Imm<string asmstr, bits<8> opcode> : Z80Inst<asmstr> {
@@ -506,6 +546,22 @@ class InstED8<string asmstr, bits<8> opcode> : Z80Inst<asmstr> {
   let InOperandList = (ins);
 }
 
+/// SBC HL,rr / ADC HL,rr - 16-bit subtract or add through the carry
+/// Opcode: ED 0b01rr0010 / ED 0b01rr1010. HL is the only destination the
+/// hardware allows, so it stays implicit; SP keeps its own definitions.
+class ADCSBCHLrr<string mnemonic, bits<4> lo>
+    : Z80Inst<mnemonic # " hl, $src"> {
+  bits<2> src;
+  bits<16> Inst;
+  let Inst{7-0} = 0xED;
+  let Inst{15-14} = 0b01;
+  let Inst{13-12} = src;
+  let Inst{11-8} = lo;
+  let Size = 2;
+  let OutOperandList = (outs);
+  let InOperandList = (ins GR16:$src);
+}
+
 /// 4-byte ED-prefixed instruction with 16-bit operand.
 /// The immediate sits after two opcode bytes, so the addressing mode must
 /// place a symbol operand's fixup at offset 2 (the At2 variants).
@@ -577,25 +633,6 @@ def CC_M  : Z80CondCode<0b111, "m">;
 //  Register encoding
 //===----------------------------------------------------------------------===//
 
-// Z80 8-bit register encoding: B=0, C=1, D=2, E=3, H=4, L=5, (HL)=6, A=7
-class RegEnc8<bits<3> val, string name, Register reg> {
-  bits<3> enc = val;
-  string Name = name;
-  // The register the encoding names, for classes that describe what they
-  // read and write. The memory encoding names the register holding the
-  // address instead.
-  Register Reg = reg;
-}
-
-def REG_B   : RegEnc8<0b000, "b", B>;
-def REG_C   : RegEnc8<0b001, "c", C>;
-def REG_D   : RegEnc8<0b010, "d", D>;
-def REG_E   : RegEnc8<0b011, "e", E>;
-def REG_H   : RegEnc8<0b100, "h", H>;
-def REG_L   : RegEnc8<0b101, "l", L>;
-def REG_HL_IND : RegEnc8<0b110, "(hl)", HL>;
-def REG_A   : RegEnc8<0b111, "a", A>;
-
 // Z80 16-bit register pair encoding: BC=0, DE=1, HL=2, SP=3 (or AF for PUSH/POP)
 class RegPairEnc<bits<2> val, string name> {
   bits<2> enc = val;
@@ -612,15 +649,95 @@ def REGPAIR_AF : RegPairEnc<0b11, "af">;
 //  Instruction pattern helpers
 //===----------------------------------------------------------------------===//
 
-/// LD r,n - Load 8-bit immediate into register
-/// Opcode: 0b00rrr110 where rrr is register encoding
-class LDrn<RegEnc8 r> : Inst16<"ld " # r.Name # ",",
-                               !or(0x06, !shl(r.enc, 3)), Imm8Mode>;
+/// LD r,r' - Load one 8-bit register from another
+/// Opcode: 0b01dddsss, so the two register fields carry the whole instruction
+/// apart from the leading 01. Naming them as operands rather than baking a
+/// definition per pair means a later pass can rewrite either one.
+class LDrr<string mnemonic> : Z80Inst<mnemonic # " $dst, $src"> {
+  bits<3> dst;
+  bits<3> src;
+  bits<8> Inst;
+  let Inst{7-6} = 0b01;
+  let Inst{5-3} = dst;
+  let Inst{2-0} = src;
+  let Size = 1;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins GR8:$src);
+}
 
-/// LD rr,nn - Load 16-bit immediate into register pair
-/// Opcode: 0b00rr0001 where rr is register pair encoding
-class LDrrnn<RegPairEnc rr> : Inst24<"ld " # rr.Name # ",",
-                                     !or(0x01, !shl(rr.enc, 4)), Imm16Mode>;
+/// LD r,(HL) / LD (HL),r - Move a byte between a register and where HL points
+/// Opcode: 0b01rrr110 / 0b01110rrr, the LD r,r' layout with one field naming
+/// memory instead of a register. The register field can never name (HL), so
+/// these stay distinct from LD r,r' (and 0x76, both fields memory, is HALT).
+class LDrHLind<string mnemonic> : Z80Inst<mnemonic # " $dst, (hl)"> {
+  bits<3> dst;
+  bits<8> Inst;
+  let Inst{7-6} = 0b01;
+  let Inst{5-3} = dst;
+  let Inst{2-0} = 0b110;
+  let Size = 1;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins);
+  let Uses = [HL];
+}
+
+class LDHLindr<string mnemonic> : Z80Inst<mnemonic # " (hl), $src"> {
+  bits<3> src;
+  bits<8> Inst;
+  let Inst{7-6} = 0b01;
+  let Inst{5-3} = 0b110;
+  let Inst{2-0} = src;
+  let Size = 1;
+  let OutOperandList = (outs);
+  let InOperandList = (ins GR8:$src);
+  let Uses = [HL];
+}
+
+/// ALU A,r - Eight-bit accumulator operation against a register
+/// Opcode: 0b10ooorrr, where ooo selects the operation. The accumulator is
+/// implicit; the other register is an operand rather than part of the opcode.
+class ALUAr<string mnemonic, bits<3> op> : Z80Inst<mnemonic # " $src"> {
+  bits<3> src;
+  bits<8> Inst;
+  let Inst{7-6} = 0b10;
+  let Inst{5-3} = op;
+  let Inst{2-0} = src;
+  let Size = 1;
+  let OutOperandList = (outs);
+  let InOperandList = (ins GR8:$src);
+}
+
+/// LD r,n - Load an 8-bit immediate into a register
+/// Opcode: 0b00rrr110 followed by the immediate byte. As with LD r,r', the
+/// register is an operand rather than part of the opcode.
+class LDrn<string mnemonic> : Z80Inst<mnemonic # " $dst, $imm"> {
+  bits<3> dst;
+  bits<8> imm;
+  bits<16> Inst;
+  let Inst{7-6} = 0b00;
+  let Inst{5-3} = dst;
+  let Inst{2-0} = 0b110;
+  let Inst{15-8} = imm;
+  let Size = 2;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins imm8:$imm);
+}
+
+/// LD rr,nn - Load a 16-bit immediate into a register pair
+/// Opcode: 0b00rr0001 followed by the two immediate bytes, with the pair as
+/// an operand. SP keeps its own definition.
+class LDrrnn<string mnemonic> : Z80Inst<mnemonic # " $dst, $imm"> {
+  bits<2> dst;
+  bits<16> imm;
+  bits<24> Inst;
+  let Inst{7-6} = 0b00;
+  let Inst{5-4} = dst;
+  let Inst{3-0} = 0b0001;
+  let Inst{23-8} = imm;
+  let Size = 3;
+  let OutOperandList = (outs GR16:$dst);
+  let InOperandList = (ins imm16:$imm);
+}
 
 /// JR cc,e - Conditional relative jump
 /// Opcode: 0b001cc000 where cc is condition (only NZ/Z/NC/C for JR)
@@ -672,64 +789,106 @@ class PUSHrr<RegPairEnc rr> : Inst8<"push " # rr.Name,
 class POPrr<RegPairEnc rr> : Inst8<"pop " # rr.Name,
                                    !or(0xC1, !shl(rr.enc, 4))>;
 
-/// INC rr - Increment register pair
-/// Opcode: 0b00rr0011 where rr is register pair
-class INCrr<RegPairEnc rr> : Inst8<"inc " # rr.Name,
-                                   !or(0x03, !shl(rr.enc, 4))>;
+/// INC rr / DEC rr - Increment or decrement a register pair, touching no
+/// flags. Opcode: 0b00rr0011 / 0b00rr1011, with the pair as an operand.
+/// SP has its own definitions: it is not a register operand anywhere in this
+/// backend, since PEI accounts for the stack pointer on its own.
+class INCDECrr<string mnemonic, bits<4> lo> : Z80Inst<mnemonic # " $dst"> {
+  bits<2> dst;
+  bits<8> Inst;
+  let Inst{7-6} = 0b00;
+  let Inst{5-4} = dst;
+  let Inst{3-0} = lo;
+  let Size = 1;
+  let OutOperandList = (outs GR16:$dst);
+  let InOperandList = (ins GR16:$src);
+  let Constraints = "$dst = $src";
+}
 
-/// DEC rr - Decrement register pair
-/// Opcode: 0b00rr1011 where rr is register pair
-class DECrr<RegPairEnc rr> : Inst8<"dec " # rr.Name,
-                                   !or(0x0B, !shl(rr.enc, 4))>;
+/// INC r / DEC r - Increment or decrement an 8-bit register
+/// Opcode: 0b00rrr100 / 0b00rrr101, with the register as an operand. Carry
+/// is the one flag these leave alone. The (HL) forms sit in the same slots
+/// but address memory, so they keep their own definitions.
+class INCDECr<string mnemonic, bits<3> lo> : Z80Inst<mnemonic # " $dst"> {
+  bits<3> dst;
+  bits<8> Inst;
+  let Inst{7-6} = 0b00;
+  let Inst{5-3} = dst;
+  let Inst{2-0} = lo;
+  let Size = 1;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins GR8:$src);
+  let Constraints = "$dst = $src";
+  let Defs = [FLAGS];
+}
 
-/// INC r - Increment 8-bit register
-/// Opcode: 0b00rrr100 where rrr is register encoding
-class INCr<RegEnc8 r> : Inst8<"inc " # r.Name,
-                              !or(0x04, !shl(r.enc, 3))>;
-
-/// DEC r - Decrement 8-bit register
-/// Opcode: 0b00rrr101 where rrr is register encoding
-class DECr<RegEnc8 r> : Inst8<"dec " # r.Name,
-                              !or(0x05, !shl(r.enc, 3))>;
-
-/// ADD HL,rr - Add register pair to HL
-/// Opcode: 0b00rr1001 where rr is register pair
-class ADDHLrr<RegPairEnc rr> : Inst8<"add hl," # rr.Name,
-                                     !or(0x09, !shl(rr.enc, 4))>;
+/// ADD HL,rr - Add a register pair to HL
+/// Opcode: 0b00rr1001. HL is the only destination the hardware allows, so it
+/// stays implicit; the pair added is an operand. HL and SP keep their own
+/// definitions, the first because it is also the destination and the second
+/// because SP is not a register operand in this backend.
+class ADDHLrr<string mnemonic> : Z80Inst<mnemonic # " hl, $src"> {
+  bits<2> src;
+  bits<8> Inst;
+  let Inst{7-6} = 0b00;
+  let Inst{5-4} = src;
+  let Inst{3-0} = 0b1001;
+  let Size = 1;
+  let OutOperandList = (outs);
+  let InOperandList = (ins GR16_BCDE:$src);
+}
 
 //===----------------------------------------------------------------------===//
 //  CB-prefix bit operation helpers
 //===----------------------------------------------------------------------===//
 
-/// CB-prefixed rotation/shift on register
-/// Opcode pattern: CB 0b00ooorrr where ooo is operation, rrr is register
-/// Note: Defs/Uses are added per-instruction in Z80InstrInfo.td since
-/// RegEnc8 doesn't carry a Register reference.
-class CBRotate<bits<3> op, RegEnc8 r, string opname>
-    : InstCB<opname # " " # r.Name, !or(!shl(op, 3), r.enc)>;
-
-/// BIT b,r - Test bit b of register r
-/// Opcode: CB 0b01bbbrrr where bbb is bit number, rrr is register
-class BITbr<bits<3> b, RegEnc8 r>
-    : InstCB<"bit " # b # "," # r.Name, !or(0x40, !shl(b, 3), r.enc)> {
-  let Uses = [r.Reg];
+/// Rotate or shift a register, CB-prefixed
+/// Opcode: CB 0b00ooorrr, with the register as an operand. The (HL) forms
+/// take the slot the register field cannot name, so they stay separate.
+class CBRotate<string mnemonic, bits<3> op> : Z80Inst<mnemonic # " $dst"> {
+  bits<3> dst;
+  bits<16> Inst;
+  let Inst{7-0} = 0xCB;
+  let Inst{15-14} = 0b00;
+  let Inst{13-11} = op;
+  let Inst{10-8} = dst;
+  let Size = 2;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins GR8:$src);
+  let Constraints = "$dst = $src";
   let Defs = [FLAGS];
 }
 
-/// RES b,r - Reset bit b of register r
-/// Opcode: CB 0b10bbbrrr where bbb is bit number, rrr is register
-class RESbr<bits<3> b, RegEnc8 r>
-    : InstCB<"res " # b # "," # r.Name, !or(0x80, !shl(b, 3), r.enc)> {
-  let Uses = [r.Reg];
-  let Defs = [r.Reg];
+/// BIT b,r / RES b,r / SET b,r - test, clear or set one bit of a register
+/// Opcode: CB 0boobbbrrr, where oo is 01, 10 or 11. Both the bit number and
+/// the register are operands. The (HL) forms take the register slot that
+/// names no register, so they stay separate.
+class BITbr<string mnemonic, bits<2> op> : Z80Inst<mnemonic # " $b, $src"> {
+  bits<3> b;
+  bits<3> src;
+  bits<16> Inst;
+  let Inst{7-0} = 0xCB;
+  let Inst{15-14} = op;
+  let Inst{13-11} = b;
+  let Inst{10-8} = src;
+  let Size = 2;
+  let OutOperandList = (outs);
+  let InOperandList = (ins i8imm:$b, GR8:$src);
 }
 
-/// SET b,r - Set bit b of register r
-/// Opcode: CB 0b11bbbrrr where bbb is bit number, rrr is register
-class SETbr<bits<3> b, RegEnc8 r>
-    : InstCB<"set " # b # "," # r.Name, !or(0xC0, !shl(b, 3), r.enc)> {
-  let Uses = [r.Reg];
-  let Defs = [r.Reg];
+class RESSETbr<string mnemonic, bits<2> op>
+    : Z80Inst<mnemonic # " $b, $dst"> {
+  bits<3> b;
+  bits<3> dst;
+  bits<16> Inst;
+  let Inst{7-0} = 0xCB;
+  let Inst{15-14} = op;
+  let Inst{13-11} = b;
+  let Inst{10-8} = dst;
+  let Size = 2;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins i8imm:$b, GR8:$src);
+  let Constraints = "$dst = $src";
 }
 
 //===----------------------------------------------------------------------===//

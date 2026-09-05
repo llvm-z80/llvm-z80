@@ -16,15 +16,15 @@ body:             |
   bb.0:
     liveins: $c, $d, $sp
     LDHL_SP_e 0, implicit-def $hl, implicit-def $flags, implicit $sp
-    LD_HLind_C implicit $hl, implicit killed $c :: (store (s16) into %stack.0, align 1)
-    INC_HL implicit-def $hl, implicit $hl
-    LD_HLind_B implicit $hl, implicit undef $b :: (store (s16) into %stack.0, align 1)
-    INC_HL implicit-def $hl, implicit $hl
-    LD_HLind_D implicit killed $hl, implicit killed $d :: (store (s8) into %stack.0 + 2)
-    LD_E_n 8, implicit-def $e
+    LD_HLind_r killed $c, implicit $hl :: (store (s16) into %stack.0, align 1)
+    $hl = INC_rr $hl
+    LD_HLind_r undef $b, implicit $hl :: (store (s16) into %stack.0, align 1)
+    $hl = INC_rr $hl
+    LD_HLind_r killed $d, implicit killed $hl :: (store (s8) into %stack.0 + 2)
+    $e = LD_r_n 8
     RET implicit $e
 ...
 ---
 # CHECK-LABEL: name: fuse_undef_half
-# CHECK:      LD_A_B implicit-def $a, implicit undef $b
+# CHECK:      $a = LD_r_r undef $b
 # CHECK-NEXT: LD_HLI_A

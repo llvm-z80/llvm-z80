@@ -523,7 +523,7 @@ bool Z80InstructionSelector::selectMulByConst(MachineInstr &MI) {
   if (C == 0) {
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
       return false;
-    BuildMI(MBB, MI, DL, TII.get(Z80::LD_HL_nn)).addImm(0);
+    Z80::buildLD16n(MBB, MI, DL, TII, Z80::HL).addImm(0);
     BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::HL);
     MI.eraseFromParent();
     return true;
@@ -583,7 +583,7 @@ bool Z80InstructionSelector::selectMulByConst(MachineInstr &MI) {
     if (Step == SHIFT) {
       BuildMI(MBB, MI, DL, TII.get(Z80::ADD_HL_HL));
     } else {
-      BuildMI(MBB, MI, DL, TII.get(Z80::ADD_HL_DE));
+      Z80::buildAddHL(MBB, MI, DL, TII, Z80::DE);
     }
   }
 
@@ -620,7 +620,7 @@ void Z80InstructionSelector::emitSigned16BitCompare(MachineBasicBlock &MBB,
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(LhsHi);
   BuildMI(MBB, MI, DL, TII.get(Z80::XOR_r)).addReg(RhsHi);
   BuildMI(MBB, MI, DL, TII.get(Z80::RLCA));
-  Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
+  Z80::buildSbcAA(MBB, MI, DL, TII);
   Register SignDiffMask = MRI.createVirtualRegister(&Z80::GR8RegClass);
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), SignDiffMask)
       .addReg(Z80::A);
@@ -629,7 +629,7 @@ void Z80InstructionSelector::emitSigned16BitCompare(MachineBasicBlock &MBB,
   // high-pressure situations like i64 narrowScalar chains)
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHS);
   BuildMI(MBB, MI, DL, TII.get(Z80::SUB_HL_rr)).addReg(RHS);
-  Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
+  Z80::buildSbcAA(MBB, MI, DL, TII);
   BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
   Register UnsignedLt = MRI.createVirtualRegister(&Z80::GR8RegClass);
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), UnsignedLt).addReg(Z80::A);
@@ -903,7 +903,7 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(HiByte);
         // ADD A,A shifts bit 7 into carry
-        BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_A));
+        Z80::buildAlu8(MBB, MI, DL, TII, Z80::ADD_A_r, Z80::A);
         // SLT: branch on carry; SGE: branch on no carry
         JumpOpc = (Pred == CmpInst::ICMP_SLT) ? Z80::JP_C_nn : Z80::JP_NC_nn;
       } else {
@@ -913,7 +913,7 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
           return false;
         bool Invert = (Pred == CmpInst::ICMP_SGE);
         emitSigned16BitCompare(MBB, MI, LHS, RHS, MRI, Invert);
-        BuildMI(MBB, MI, DL, TII.get(Z80::OR_A));
+        Z80::buildAlu8(MBB, MI, DL, TII, Z80::OR_r, Z80::A);
         JumpOpc = Z80::JP_NZ_nn;
       }
     } else {
@@ -1652,14 +1652,14 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
         return false;
       // 8-bit constant: LD r,n (pseudo, expanded after RA)
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r8_n), DstReg)
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r_n), DstReg)
           .addImm(Val & 0xFF);
     } else if (DstTy.getSizeInBits() <= 16) {
       // Constrain destination to 16-bit register class
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
         return false;
       // 16-bit constant: LD rr,nn (pseudo, expanded after RA)
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r16_nn), DstReg)
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_rr_nn), DstReg)
           .addImm(Val & 0xFFFF);
     } else {
       return false;
@@ -1696,7 +1696,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return false;
 
     // Use LD_r16_nn pseudo with the global's address
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r16_nn), DstReg)
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_rr_nn), DstReg)
         .addGlobalAddress(GV);
     MI.eraseFromParent();
     return true;
@@ -1710,7 +1710,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
       return false;
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r16_nn), DstReg)
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_rr_nn), DstReg)
         .addBlockAddress(BA);
     MI.eraseFromParent();
     return true;
@@ -1724,7 +1724,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
       return false;
 
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r16_nn), DstReg)
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_rr_nn), DstReg)
         .addJumpTableIndex(JTI);
     MI.eraseFromParent();
     return true;
@@ -1782,9 +1782,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           // 8-bit IX-indexed load: LD A,(IX+d)
           if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
             return false;
-          BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_IXd))
-              .addImm(Disp)
-              .addReg(Z80::A, RegState::ImplicitDefine);
+          Z80::buildLoadIdx(MBB, MI, DL, TII, Z80::LD_r_IXd, Z80::A, Disp);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
               .addReg(Z80::A);
           MI.eraseFromParent();
@@ -1799,8 +1797,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             return false;
 
           Register TargetPair = Z80::HL;
-          unsigned LdLoOpc = Z80::LD_L_IXd;
-          unsigned LdHiOpc = Z80::LD_H_IXd;
+          Register LdLoReg = Z80::L;
+          Register LdHiReg = Z80::H;
 
           if (MRI.hasOneNonDBGUse(DstReg)) {
             MachineInstr &Use = *MRI.use_nodbg_begin(DstReg)->getParent();
@@ -1809,21 +1807,19 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
               Register PhysDst = Use.getOperand(0).getReg();
               if (PhysDst == Z80::DE) {
                 TargetPair = Z80::DE;
-                LdLoOpc = Z80::LD_E_IXd;
-                LdHiOpc = Z80::LD_D_IXd;
+                LdLoReg = Z80::E;
+                LdHiReg = Z80::D;
               } else if (PhysDst == Z80::BC) {
                 TargetPair = Z80::BC;
-                LdLoOpc = Z80::LD_C_IXd;
-                LdHiOpc = Z80::LD_B_IXd;
+                LdLoReg = Z80::C;
+                LdHiReg = Z80::B;
               }
             }
           }
 
-          BuildMI(MBB, MI, DL, TII.get(LdLoOpc))
-              .addImm(Disp)
+          Z80::buildLoadIdx(MBB, MI, DL, TII, Z80::LD_r_IXd, LdLoReg, Disp)
               .addReg(TargetPair, RegState::ImplicitDefine);
-          BuildMI(MBB, MI, DL, TII.get(LdHiOpc))
-              .addImm(Disp + 1)
+          Z80::buildLoadIdx(MBB, MI, DL, TII, Z80::LD_r_IXd, LdHiReg, Disp + 1)
               .addReg(TargetPair, RegState::ImplicitDefine);
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
               .addReg(TargetPair);
@@ -1919,11 +1915,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
           .addReg(AddrReg);
       // Load low byte
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_E_HLind));
+      Z80::buildLoadHL(MBB, MI, DL, TII, Z80::E);
       // Increment address
-      BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
+      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
       // Load high byte
-      BuildMI(MBB, MI, DL, TII.get(Z80::LD_D_HLind));
+      Z80::buildLoadHL(MBB, MI, DL, TII, Z80::D);
       // Copy result to destination
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::DE);
       MI.eraseFromParent();
@@ -2078,11 +2074,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
           .addReg(AddrReg);
       // Store low byte directly from E (no A intermediary)
-      auto &StoreLo = *BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_E));
+      auto &StoreLo = *Z80::buildStoreHL(MBB, MI, DL, TII, Z80::E);
       // Increment address
-      BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
+      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
       // Store high byte directly from D
-      auto &StoreHi = *BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_D));
+      auto &StoreHi = *Z80::buildStoreHL(MBB, MI, DL, TII, Z80::D);
       if (IsUndef) {
         StoreLo.findRegisterUseOperand(Z80::E, /*TRI=*/nullptr)->setIsUndef();
         StoreHi.findRegisterUseOperand(Z80::D, /*TRI=*/nullptr)->setIsUndef();
@@ -2100,7 +2096,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     Register BaseReg = MI.getOperand(1).getReg();
     Register OffReg = MI.getOperand(2).getReg();
 
-    // Check for small constant offset: repeated INC16/DEC16 (1 byte each)
+    // Check for small constant offset: repeated INC rr/DEC rr (1 byte each)
     // is smaller than LD rr,nn + ADD HL,rr (4 bytes) for |offset| <= 3.
     MachineInstr *OffDef = MRI.getVRegDef(OffReg);
     if (OffDef && OffDef->getOpcode() == TargetOpcode::G_CONSTANT) {
@@ -2109,14 +2105,14 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
             !RBI.constrainGenericRegister(BaseReg, Z80::GR16RegClass, MRI))
           return false;
-        unsigned PseudoOpc = (OffVal > 0) ? Z80::INC16 : Z80::DEC16;
+        unsigned StepOpc = (OffVal > 0) ? Z80::INC_rr : Z80::DEC_rr;
         int64_t Count = std::abs(OffVal);
         Register PrevReg = BaseReg;
         for (int64_t i = 0; i < Count; i++) {
           Register OutReg = (i == Count - 1)
                                 ? DstReg
                                 : MRI.createVirtualRegister(&Z80::GR16RegClass);
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(PseudoOpc), OutReg)
+          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(StepOpc), OutReg)
               .addReg(PrevReg);
           PrevReg = OutReg;
         }
@@ -2178,9 +2174,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(Src1Reg);
 
         if (Val == 1)
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::INC_A));
+          Z80::buildIncDec8(MBB, MI, MI.getDebugLoc(), TII, Z80::INC_r, Z80::A);
         else if (Val == -1 || (Val & 0xFF) == 0xFF)
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::DEC_A));
+          Z80::buildIncDec8(MBB, MI, MI.getDebugLoc(), TII, Z80::DEC_r, Z80::A);
         else
           BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::ADD_A_n))
               .addImm(Val & 0xFF);
@@ -2219,7 +2215,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         return false;
 
       // 16-bit add
-      // Check for constant +1/-1 to use INC16/DEC16 pseudo
+      // Check for constant +1/-1 to use INC rr/DEC rr
       {
         MachineInstr *Def1 = MRI.getVRegDef(Src1Reg);
         MachineInstr *Def2 = MRI.getVRegDef(Src2Reg);
@@ -2232,8 +2228,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         auto ConstVal1 = getConstVal(Def1);
         auto ConstVal2 = getConstVal(Def2);
         // Prefer the non-constant as the source register
-        // Check for small constants that can use repeated INC16/DEC16.
-        // INC16 is 1 byte each, vs LD rr,nn (3 bytes) + ADD HL,rr (1 byte).
+        // Check for small constants that can use repeated INC rr/DEC rr.
+        // INC rr is 1 byte each, vs LD rr,nn (3 bytes) + ADD HL,rr (1 byte).
         // Worth it for |constant| <= 3.
         Register SrcReg;
         int64_t Imm = 0;
@@ -2251,7 +2247,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           HasConst = true;
         }
         if (HasConst) {
-          unsigned PseudoOpc = (Imm > 0) ? Z80::INC16 : Z80::DEC16;
+          unsigned StepOpc = (Imm > 0) ? Z80::INC_rr : Z80::DEC_rr;
           int64_t Count = std::abs(Imm);
           Register PrevReg = SrcReg;
           for (int64_t i = 0; i < Count; i++) {
@@ -2259,7 +2255,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
                 (i == Count - 1)
                     ? DstReg
                     : MRI.createVirtualRegister(&Z80::GR16RegClass);
-            BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(PseudoOpc), OutReg)
+            BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(StepOpc), OutReg)
                 .addReg(PrevReg);
             PrevReg = OutReg;
           }
@@ -2331,9 +2327,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(Src1Reg);
 
         if (Val == 1)
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::DEC_A));
+          Z80::buildIncDec8(MBB, MI, MI.getDebugLoc(), TII, Z80::DEC_r, Z80::A);
         else if (Val == -1 || (Val & 0xFF) == 0xFF)
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::INC_A));
+          Z80::buildIncDec8(MBB, MI, MI.getDebugLoc(), TII, Z80::INC_r, Z80::A);
         else
           BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SUB_n))
               .addImm(Val & 0xFF);
@@ -2370,14 +2366,14 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           !RBI.constrainGenericRegister(Src2Reg, Z80::GR16RegClass, MRI))
         return false;
 
-      // Check for small constant to use repeated DEC16/INC16 pseudo.
-      // SUB N → DEC16 × N, SUB -N → INC16 × N. Worth it for |N| <= 3.
+      // Check for small constant to use repeated DEC rr/INC rr.
+      // SUB N → DEC rr × N, SUB -N → INC rr × N. Worth it for |N| <= 3.
       {
         MachineInstr *Src2Def = MRI.getVRegDef(Src2Reg);
         if (Src2Def && Src2Def->getOpcode() == TargetOpcode::G_CONSTANT) {
           int64_t Val = Src2Def->getOperand(1).getCImm()->getSExtValue();
           if (Val != 0 && std::abs(Val) <= 3) {
-            unsigned PseudoOpc = (Val > 0) ? Z80::DEC16 : Z80::INC16;
+            unsigned StepOpc = (Val > 0) ? Z80::DEC_rr : Z80::INC_rr;
             int64_t Count = std::abs(Val);
             Register PrevReg = Src1Reg;
             for (int64_t i = 0; i < Count; i++) {
@@ -2385,7 +2381,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
                   (i == Count - 1)
                       ? DstReg
                       : MRI.createVirtualRegister(&Z80::GR16RegClass);
-              BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(PseudoOpc), OutReg)
+              BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(StepOpc), OutReg)
                   .addReg(PrevReg);
               PrevReg = OutReg;
             }
@@ -2466,7 +2462,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(Src2Reg);
       } else if (isZeroConst8(Src1Reg) || isZeroConst8(Src2Reg)) {
         // AND with 0 → load immediate 0
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r8_n), DstReg)
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r_n), DstReg)
             .addImm(0);
       } else {
         // Try immediate fold: AND with constant → AND_n
@@ -2601,7 +2597,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // Shift >= type size: result is 0
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(SrcReg);
-        BuildMI(MBB, MI, DL, TII.get(Z80::XOR_A));
+        Z80::buildZeroA(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
       } else if (ShiftAmt >= 4 && STI.hasSM83()) {
@@ -2619,7 +2615,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           BuildMI(MBB, MI, DL, TII.get(Z80::SWAP_A));
           BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(0xF0);
           for (int64_t i = 4; i < ShiftAmt; i++)
-            BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_A));
+            Z80::buildAlu8(MBB, MI, DL, TII, Z80::ADD_A_r, Z80::A);
         }
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
@@ -2627,7 +2623,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(SrcReg);
         for (int64_t i = 0; i < ShiftAmt; i++)
-          BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_A));
+          Z80::buildAlu8(MBB, MI, DL, TII, Z80::ADD_A_r, Z80::A);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
       } else {
@@ -2654,7 +2650,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(SrcReg);
       } else if (ShiftAmt >= 16) {
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_r16_nn), DstReg).addImm(0);
+        BuildMI(MBB, MI, DL, TII.get(Z80::LD_rr_nn), DstReg).addImm(0);
       } else if (ShiftAmt >= 13) {
         // SHL by 13-15: rotate right + mask is faster than byte-move + shift
         // E.g. SHL 15: RRCA puts bit 0 at bit 7, AND 0x80 keeps it
@@ -2667,8 +2663,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           BuildMI(MBB, MI, DL, TII.get(Z80::RRCA));
         BuildMI(MBB, MI, DL, TII.get(Z80::AND_n))
             .addImm((0xFF << (ShiftAmt - 8)) & 0xFF);
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_A));
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_L_n)).addImm(0);
+        Z80::buildLD8(MBB, MI, DL, TII, Z80::H, Z80::A);
+        Z80::buildLD8n(MBB, MI, DL, TII, Z80::L).addImm(0);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::HL);
       } else if (ShiftAmt >= 8) {
@@ -2682,7 +2678,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             return false;
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
               .addReg(ZextSrc);
-          BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_A));
+          Z80::buildLD8(MBB, MI, DL, TII, Z80::H, Z80::A);
         } else {
           // Extract low byte directly to H, avoiding dead load of high byte
           Register LoByte = MRI.createVirtualRegister(&Z80::GR8RegClass);
@@ -2691,7 +2687,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::H)
               .addReg(LoByte);
         }
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_L_n)).addImm(0);
+        Z80::buildLD8n(MBB, MI, DL, TII, Z80::L).addImm(0);
         for (int64_t i = 8; i < ShiftAmt; i++)
           BuildMI(MBB, MI, DL, TII.get(Z80::ADD_HL_HL));
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
@@ -2745,7 +2741,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       } else if (ShiftAmt >= 8) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(SrcReg);
-        BuildMI(MBB, MI, DL, TII.get(Z80::XOR_A));
+        Z80::buildZeroA(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
       } else if (ShiftAmt == 7) {
@@ -2764,14 +2760,14 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, DL, TII.get(Z80::SWAP_A));
         BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(0x0F);
         for (int64_t i = 4; i < ShiftAmt; i++)
-          BuildMI(MBB, MI, DL, TII.get(Z80::SRL_A));
+          Z80::buildRotate8(MBB, MI, DL, TII, Z80::SRL_r, Z80::A);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
       } else if (ShiftAmt > 0) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(SrcReg);
         for (int64_t i = 0; i < ShiftAmt; i++)
-          BuildMI(MBB, MI, DL, TII.get(Z80::SRL_A));
+          Z80::buildRotate8(MBB, MI, DL, TII, Z80::SRL_r, Z80::A);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
       } else {
@@ -2798,7 +2794,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(SrcReg);
       } else if (ShiftAmt >= 16) {
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_r16_nn), DstReg).addImm(0);
+        BuildMI(MBB, MI, DL, TII.get(Z80::LD_rr_nn), DstReg).addImm(0);
       } else if (ShiftAmt >= 13) {
         // LSHR by 13-15: rotate left + mask is faster than byte-move + shift
         // E.g. LSHR 15: RLCA puts bit 7 at bit 0, AND 0x01 keeps it
@@ -2811,8 +2807,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           BuildMI(MBB, MI, DL, TII.get(Z80::RLCA));
         BuildMI(MBB, MI, DL, TII.get(Z80::AND_n))
             .addImm(0xFF >> (ShiftAmt - 8));
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_L_A));
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_n)).addImm(0);
+        Z80::buildLD8(MBB, MI, DL, TII, Z80::L, Z80::A);
+        Z80::buildLD8n(MBB, MI, DL, TII, Z80::H).addImm(0);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::HL);
       } else if (ShiftAmt >= 8) {
@@ -2823,9 +2819,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(SrcReg, RegState{}, Z80::sub_hi);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::L)
             .addReg(HiByte);
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_n)).addImm(0);
+        Z80::buildLD8n(MBB, MI, DL, TII, Z80::H).addImm(0);
         for (int64_t i = 8; i < ShiftAmt; i++)
-          BuildMI(MBB, MI, DL, TII.get(Z80::SRL_L));
+          Z80::buildRotate8(MBB, MI, DL, TII, Z80::SRL_r, Z80::L);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::HL);
       } else if (ShiftAmt > 0) {
@@ -2881,15 +2877,16 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // Sign extension: result is all sign bits (0x00 or 0xFF)
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(SrcReg);
-        BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_A)); // carry = sign bit
-        Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A); // A = 0xFF or 0x00
+        Z80::buildAlu8(MBB, MI, DL, TII, Z80::ADD_A_r,
+                       Z80::A);            // carry = sign bit
+        Z80::buildSbcAA(MBB, MI, DL, TII); // A = 0xFF or 0x00
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
       } else if (ShiftAmt > 0) {
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(SrcReg);
         for (int64_t i = 0; i < ShiftAmt; i++)
-          BuildMI(MBB, MI, DL, TII.get(Z80::SRA_A));
+          Z80::buildRotate8(MBB, MI, DL, TII, Z80::SRA_r, Z80::A);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::A);
       } else {
@@ -2948,14 +2945,14 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // then sign-extend H: ADD A,A puts sign into carry, SBC A,A → 0/-1
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
             .addReg(SrcReg);
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_L_H));
+        Z80::buildLD8(MBB, MI, DL, TII, Z80::L, Z80::H);
         for (int64_t i = 8; i < ShiftAmt; i++)
-          BuildMI(MBB, MI, DL, TII.get(Z80::SRA_L));
+          Z80::buildRotate8(MBB, MI, DL, TII, Z80::SRA_r, Z80::L);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(Z80::L);
-        BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_A));
-        Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
-        BuildMI(MBB, MI, DL, TII.get(Z80::LD_H_A));
+        Z80::buildAlu8(MBB, MI, DL, TII, Z80::ADD_A_r, Z80::A);
+        Z80::buildSbcAA(MBB, MI, DL, TII);
+        Z80::buildLD8(MBB, MI, DL, TII, Z80::H, Z80::A);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
             .addReg(Z80::HL);
       } else if (ShiftAmt > 0) {
@@ -3105,7 +3102,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(LHS);
         emitSUB(RHS);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SUB_n)).addImm(1);
-        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
+        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3116,7 +3113,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(LHS);
         emitSUB(RHS);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::ADD_A_n)).addImm(0xFF);
-        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
+        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3125,7 +3122,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(LHS);
         emitCP(RHS);
-        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
+        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3135,7 +3132,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(LHS);
         emitCP(RHS);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CCF));
-        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
+        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3144,7 +3141,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
             .addReg(RHS);
         emitCP(LHS);
-        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
+        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3154,7 +3151,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(RHS);
         emitCP(LHS);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CCF));
-        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
+        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
 
@@ -3186,7 +3183,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CP_r)).addReg(ModRHS);
         if (InvertC)
           BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CCF));
-        Z80::markUndefUse(BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_A_A)), Z80::A);
+        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
         break;
       }
@@ -3285,12 +3282,12 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
         switch (Pred) {
         case CmpInst::ICMP_ULT:
-          Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
+          Z80::buildSbcAA(MBB, MI, DL, TII);
           BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
           break;
         case CmpInst::ICMP_UGE:
           BuildMI(MBB, MI, DL, TII.get(Z80::CCF));
-          Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
+          Z80::buildSbcAA(MBB, MI, DL, TII);
           BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
           break;
         default:
@@ -3462,11 +3459,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
     } else if (NormPred == CmpInst::ICMP_ULT) {
       // Carry flag set if LHS < RHS.
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
+      Z80::buildSbcAA(MBB, MI, DL, TII);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
     } else {
       // UGE: carry clear if LHS >= RHS → invert.
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
+      Z80::buildSbcAA(MBB, MI, DL, TII);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
       BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
     }
@@ -3502,11 +3499,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     } else if (NormPred == CmpInst::ICMP_NE) {
       BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
     } else if (NormPred == CmpInst::ICMP_ULT) {
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
+      Z80::buildSbcAA(MBB, MI, DL, TII);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
     } else {
       // UGE
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_A)), Z80::A);
+      Z80::buildSbcAA(MBB, MI, DL, TII);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
       BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
     }
@@ -3653,7 +3650,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
         .addReg(CondReg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::OR_A));
+    Z80::buildAlu8(MBB, MI, MI.getDebugLoc(), TII, Z80::OR_r, Z80::A);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::JP_NZ_nn))
         .addMBB(TargetMBB);
     MI.eraseFromParent();
@@ -3869,7 +3866,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
             return false;
           const MachineOperand &GVOp = GlobalDef->getOperand(1);
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r8_n), DstReg)
+          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_r_n), DstReg)
               .addGlobalAddress(GVOp.getGlobal(), GVOp.getOffset(), Flag);
           MI.eraseFromParent(); // erase G_TRUNC
           // The address chain (G_LSHR, G_PTRTOINT, G_GLOBAL_VALUE, shift

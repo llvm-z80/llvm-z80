@@ -77,6 +77,47 @@ static DecodeStatus decodeSImmOperand(MCInst &Inst, uint64_t Imm,
   return MCDisassembler::Success;
 }
 
+/// The 3-bit register field of an opcode. 6 is the (HL) memory form, which
+/// is a distinct instruction rather than a register operand.
+static const MCPhysReg GR8DecoderTable[] = {
+    Z80::B, Z80::C, Z80::D, Z80::E, Z80::H, Z80::L, Z80::NoRegister, Z80::A};
+
+/// The 2-bit pair field of an opcode. The fourth slot is SP or AF depending
+/// on the instruction; only pairs the register allocator can name decode here.
+static const MCPhysReg GR16DecoderTable[] = {Z80::BC, Z80::DE, Z80::HL,
+                                             Z80::NoRegister};
+
+static DecodeStatus DecodeGR16RegisterClass(MCInst &Inst, uint64_t RegNo,
+                                            uint64_t Address,
+                                            const MCDisassembler *Decoder) {
+  if (RegNo >= std::size(GR16DecoderTable) ||
+      GR16DecoderTable[RegNo] == Z80::NoRegister)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createReg(GR16DecoderTable[RegNo]));
+  return MCDisassembler::Success;
+}
+
+/// ADD HL,rr keeps HL and SP as their own instructions, so only the first two
+/// slots of the pair field decode into this class.
+static DecodeStatus
+DecodeGR16_BCDERegisterClass(MCInst &Inst, uint64_t RegNo, uint64_t Address,
+                             const MCDisassembler *Decoder) {
+  if (RegNo > 1)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createReg(GR16DecoderTable[RegNo]));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeGR8RegisterClass(MCInst &Inst, uint64_t RegNo,
+                                           uint64_t Address,
+                                           const MCDisassembler *Decoder) {
+  if (RegNo >= std::size(GR8DecoderTable) ||
+      GR8DecoderTable[RegNo] == Z80::NoRegister)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createReg(GR8DecoderTable[RegNo]));
+  return MCDisassembler::Success;
+}
+
 #include "Z80GenDisassemblerTables.inc"
 
 DecodeStatus Z80Disassembler::getInstruction(MCInst &Instr, uint64_t &Size,
@@ -119,6 +160,17 @@ DecodeStatus Z80Disassembler::getInstruction(MCInst &Instr, uint64_t &Size,
           Size = InsnSize;
           return Result;
         }
+      }
+    }
+
+    // The indexed stores overlap the indexed loads on one byte, so they
+    // decode from their own table.
+    if (InsnSize == 3) {
+      DecodeStatus Result = decodeInstruction(DecoderTableZ80Idx24, Instr, Insn,
+                                              Address, this, STI);
+      if (Result != MCDisassembler::Fail) {
+        Size = InsnSize;
+        return Result;
       }
     }
 

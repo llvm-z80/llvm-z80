@@ -103,17 +103,21 @@ class Z80RegPair<bits<16> num, string name, Register lo, Register hi>
 }
 
 // Main register pairs (encoding: BC=0, DE=1, HL=2, SP/AF=3)
-def BC : Z80RegPair<30, "bc", C, B>;
-def DE : Z80RegPair<31, "de", E, D>;
-def HL : Z80RegPair<32, "hl", L, H>;
-def AF : Z80RegPair<33, "af", F, A>;
+// The pair field of an opcode names BC=0, DE=1, HL=2 and then either SP or
+// AF depending on the instruction, so HWEncoding carries that rather than the
+// DWARF number the register is defined with.
+def BC : Z80RegPair<30, "bc", C, B> { let HWEncoding = 0; }
+def DE : Z80RegPair<31, "de", E, D> { let HWEncoding = 1; }
+def HL : Z80RegPair<32, "hl", L, H> { let HWEncoding = 2; }
+def AF : Z80RegPair<33, "af", F, A> { let HWEncoding = 3; }
 
 // Index registers
-def IX : Z80RegPair<34, "ix", IXL, IXH>;
-def IY : Z80RegPair<35, "iy", IYL, IYH>;
+// A DD or FD prefix makes the HL encoding mean IX or IY.
+def IX : Z80RegPair<34, "ix", IXL, IXH> { let HWEncoding = 2; }
+def IY : Z80RegPair<35, "iy", IYL, IYH> { let HWEncoding = 2; }
 
 // Stack pointer (no accessible sub-registers)
-def SP : Z80Reg<36, "sp">;
+def SP : Z80Reg<36, "sp"> { let HWEncoding = 3; }
 
 // Program counter (not directly accessible but needed)
 def PC : Z80Reg<37, "pc">;

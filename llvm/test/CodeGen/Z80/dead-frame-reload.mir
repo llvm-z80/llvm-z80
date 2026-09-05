@@ -16,15 +16,15 @@ stack:
 body:             |
   bb.0:
     liveins: $ix, $b
-    LD_E_IXd -2, implicit-def $e :: (load (s8) from %stack.0)
-    LD_D_IXd -1, implicit-def $d :: (load (s8) from %stack.0 + 1)
-    LD_E_B implicit-def $e, implicit $b
+    $e = LD_r_IXd -2 :: (load (s8) from %stack.0)
+    $d = LD_r_IXd -1 :: (load (s8) from %stack.0 + 1)
+    $e = LD_r_r $b
     RET implicit $de
 ...
 ---
 # CHECK-LABEL: name: dead_half
-# CHECK-NOT:  LD_E_IXd
-# CHECK:      LD_D_IXd -1
+# CHECK-NOT:  $e = LD_r_IXd
+# CHECK:      $d = LD_r_IXd -1
 ---
 name:            volatile_kept
 tracksRegLiveness: true
@@ -33,9 +33,9 @@ stack:
 body:             |
   bb.0:
     liveins: $ix, $b
-    LD_E_IXd -2, implicit-def $e :: (volatile load (s8) from %stack.0)
-    LD_D_IXd -1, implicit-def $d :: (volatile load (s8) from %stack.0 + 1)
-    LD_E_B implicit-def $e, implicit $b
+    $e = LD_r_IXd -2 :: (volatile load (s8) from %stack.0)
+    $d = LD_r_IXd -1 :: (volatile load (s8) from %stack.0 + 1)
+    $e = LD_r_r $b
     RET implicit $de
 ...
 ---
@@ -43,8 +43,8 @@ body:             |
 # at what it produced.
 #
 # CHECK-LABEL: name: volatile_kept
-# CHECK:      LD_E_IXd -2
-# CHECK-NEXT: LD_D_IXd -1
+# CHECK:      $e = LD_r_IXd -2
+# CHECK-NEXT: $d = LD_r_IXd -1
 ---
 name:            live_half_kept
 tracksRegLiveness: true
@@ -53,11 +53,11 @@ stack:
 body:             |
   bb.0:
     liveins: $ix
-    LD_E_IXd -2, implicit-def $e :: (load (s8) from %stack.0)
-    LD_D_IXd -1, implicit-def $d :: (load (s8) from %stack.0 + 1)
+    $e = LD_r_IXd -2 :: (load (s8) from %stack.0)
+    $d = LD_r_IXd -1 :: (load (s8) from %stack.0 + 1)
     RET implicit $de
 ...
 ---
 # CHECK-LABEL: name: live_half_kept
-# CHECK:      LD_E_IXd -2
-# CHECK-NEXT: LD_D_IXd -1
+# CHECK:      $e = LD_r_IXd -2
+# CHECK-NEXT: $d = LD_r_IXd -1

@@ -15,13 +15,13 @@ body:             |
   bb.0:
     liveins: $sp
     LDHL_SP_e 0, implicit-def $hl, implicit-def $flags, implicit $sp
-    LD_E_HLind implicit-def $e, implicit killed $hl :: (volatile load (s8) from %stack.0)
-    LD_C_n 5, implicit-def $c
+    $e = LD_r_HLind implicit killed $hl :: (volatile load (s8) from %stack.0)
+    $c = LD_r_n 5
     LDHL_SP_e 1, implicit-def $hl, implicit-def $flags, implicit $sp
-    LD_D_HLind implicit-def $d, implicit killed $hl :: (volatile load (s8) from %stack.0 + 1)
+    $d = LD_r_HLind implicit killed $hl :: (volatile load (s8) from %stack.0 + 1)
     RET implicit $de, implicit $c
 ...
 ---
 # CHECK-LABEL: name: step_past_kill
-# CHECK:      LD_E_HLind implicit-def $e, implicit $hl
-# CHECK:      INC_HL implicit-def $hl, implicit killed $hl
+# CHECK:      $e = LD_r_HLind implicit $hl
+# CHECK:      $hl = INC_rr killed $hl

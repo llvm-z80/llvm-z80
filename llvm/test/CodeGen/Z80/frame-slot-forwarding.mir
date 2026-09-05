@@ -17,13 +17,13 @@ stack:
 body:             |
   bb.0:
     liveins: $c, $ix
-    LD_IXd_C -2, implicit $c :: (store (s8) into %stack.0)
-    LD_L_IXd -2, implicit-def $l :: (load (s8) from %stack.0)
+    LD_IXd_r -2, $c :: (store (s8) into %stack.0)
+    $l = LD_r_IXd -2 :: (load (s8) from %stack.0)
     RET implicit $l
 
 # CHECK-LABEL: name: spill_forwards
-# CHECK:      LD_IXd_C -2
-# CHECK-NEXT: LD_L_C
+# CHECK:      LD_IXd_r -2, $c
+# CHECK-NEXT: $l = LD_r_r killed $c
 # CHECK-NEXT: RET
 
 ...
@@ -35,13 +35,13 @@ stack:
 body:             |
   bb.0:
     liveins: $c, $ix
-    LD_IXd_C -2, implicit $c :: (volatile store (s8) into %stack.0)
-    LD_L_IXd -2, implicit-def $l :: (volatile load (s8) from %stack.0)
+    LD_IXd_r -2, $c :: (volatile store (s8) into %stack.0)
+    $l = LD_r_IXd -2 :: (volatile load (s8) from %stack.0)
     RET implicit $l
 
 # CHECK-LABEL: name: volatile_kept
-# CHECK:      LD_IXd_C -2
-# CHECK-NEXT: LD_L_IXd -2
+# CHECK:      LD_IXd_r -2, $c
+# CHECK-NEXT: $l = LD_r_IXd -2
 # CHECK-NEXT: RET
 
 ...

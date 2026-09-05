@@ -81,6 +81,240 @@ inline unsigned getAluRegOpcode(unsigned Op) {
   llvm_unreachable("unknown ALU operation");
 }
 
+/// The IX-indexed form of an ALU-against-register opcode, or 0 when \p Opc
+/// is not one of them.
+inline unsigned getAluRegIXdOpcode(unsigned Opc) {
+  switch (Opc) {
+  case Z80::ADD_A_r:
+    return Z80::ADD_A_IXd;
+  case Z80::ADC_A_r:
+    return Z80::ADC_A_IXd;
+  case Z80::SUB_r:
+    return Z80::SUB_IXd;
+  case Z80::SBC_A_r:
+    return Z80::SBC_A_IXd;
+  case Z80::AND_r:
+    return Z80::AND_IXd;
+  case Z80::XOR_r:
+    return Z80::XOR_IXd;
+  case Z80::OR_r:
+    return Z80::OR_IXd;
+  case Z80::CP_r:
+    return Z80::CP_IXd;
+  default:
+    return 0;
+  }
+}
+
+// Builders for the instructions whose registers are operands. Each comes in
+// two forms, one inserting before an iterator and one appending to a block,
+// and each puts the operands in the order the instruction declares them —
+// which is not always the order the assembly prints.
+
+/// Emit `LD dst, src`, the 8-bit register copy. The registers are operands, so
+/// they are named here rather than by choosing among as many opcodes as there
+/// are pairs of registers.
+inline MachineInstrBuilder buildLD8(MachineBasicBlock &MBB,
+                                    MachineBasicBlock::iterator I,
+                                    const DebugLoc &DL,
+                                    const TargetInstrInfo &TII, MCRegister Dst,
+                                    MCRegister Src) {
+  return BuildMI(MBB, I, DL, TII.get(Z80::LD_r_r), Dst).addReg(Src);
+}
+
+/// Append `LD dst, src` to the end of \p MBB.
+inline MachineInstrBuilder buildLD8(MachineBasicBlock *MBB, const DebugLoc &DL,
+                                    const TargetInstrInfo &TII, MCRegister Dst,
+                                    MCRegister Src) {
+  return BuildMI(MBB, DL, TII.get(Z80::LD_r_r), Dst).addReg(Src);
+}
+
+/// Begin `LD dst, n`, the 8-bit immediate load. The caller supplies the
+/// immediate, which may be a symbol reference as well as a constant.
+inline MachineInstrBuilder
+buildLD8n(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+          const DebugLoc &DL, const TargetInstrInfo &TII, MCRegister Dst) {
+  return BuildMI(MBB, I, DL, TII.get(Z80::LD_r_n), Dst);
+}
+
+/// Append `LD dst, n` to the end of \p MBB.
+inline MachineInstrBuilder buildLD8n(MachineBasicBlock *MBB, const DebugLoc &DL,
+                                     const TargetInstrInfo &TII,
+                                     MCRegister Dst) {
+  return BuildMI(MBB, DL, TII.get(Z80::LD_r_n), Dst);
+}
+
+/// Emit an accumulator operation against \p Src. \p Opc is one of the ALU r
+/// opcodes; A is implicit.
+inline MachineInstrBuilder buildAlu8(MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator I,
+                                     const DebugLoc &DL,
+                                     const TargetInstrInfo &TII, unsigned Opc,
+                                     MCRegister Src) {
+  return BuildMI(MBB, I, DL, TII.get(Opc)).addReg(Src);
+}
+
+/// Append an accumulator operation against \p Src to the end of \p MBB.
+inline MachineInstrBuilder buildAlu8(MachineBasicBlock *MBB, const DebugLoc &DL,
+                                     const TargetInstrInfo &TII, unsigned Opc,
+                                     MCRegister Src) {
+  return BuildMI(MBB, DL, TII.get(Opc)).addReg(Src);
+}
+
+/// Emit `ADC HL, src` or `SBC HL, src`. \p Opc is Z80::ADC_HL_rr or
+/// Z80::SBC_HL_rr; HL is both an input and the destination.
+inline MachineInstrBuilder buildAdcSbcHL(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         const DebugLoc &DL,
+                                         const TargetInstrInfo &TII,
+                                         unsigned Opc, MCRegister Src) {
+  return BuildMI(MBB, I, DL, TII.get(Opc)).addReg(Src);
+}
+
+/// Append `ADC HL, src` or `SBC HL, src` to the end of \p MBB.
+inline MachineInstrBuilder buildAdcSbcHL(MachineBasicBlock *MBB,
+                                         const DebugLoc &DL,
+                                         const TargetInstrInfo &TII,
+                                         unsigned Opc, MCRegister Src) {
+  return BuildMI(MBB, DL, TII.get(Opc)).addReg(Src);
+}
+
+/// Emit `ADD HL, src`. HL is both an input and the destination, so it does
+/// not appear as an operand.
+inline MachineInstrBuilder
+buildAddHL(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+           const DebugLoc &DL, const TargetInstrInfo &TII, MCRegister Src) {
+  return BuildMI(MBB, I, DL, TII.get(Z80::ADD_HL_rr)).addReg(Src);
+}
+
+/// Append `ADD HL, src` to the end of \p MBB.
+inline MachineInstrBuilder buildAddHL(MachineBasicBlock *MBB,
+                                      const DebugLoc &DL,
+                                      const TargetInstrInfo &TII,
+                                      MCRegister Src) {
+  return BuildMI(MBB, DL, TII.get(Z80::ADD_HL_rr)).addReg(Src);
+}
+
+/// Begin `LD dst, nn`, the 16-bit immediate load. The caller supplies the
+/// immediate, which may be a symbol reference as well as a constant.
+inline MachineInstrBuilder
+buildLD16n(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+           const DebugLoc &DL, const TargetInstrInfo &TII, MCRegister Dst) {
+  return BuildMI(MBB, I, DL, TII.get(Z80::LD_rr_nn), Dst);
+}
+
+/// Emit `LD dst, (IX+d)` or `LD dst, (IY+d)`. \p Opc selects the index
+/// register. The destination is named first, so the displacement is the
+/// instruction's second operand.
+inline MachineInstrBuilder
+buildLoadIdx(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+             const DebugLoc &DL, const TargetInstrInfo &TII, unsigned Opc,
+             MCRegister Dst, int64_t Off) {
+  return BuildMI(MBB, I, DL, TII.get(Opc), Dst).addImm(Off);
+}
+
+/// Emit `LD (IX+d), src` or `LD (IY+d), src`. A store has no result, so the
+/// displacement stays the first operand.
+inline MachineInstrBuilder
+buildStoreIdx(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+              const DebugLoc &DL, const TargetInstrInfo &TII, unsigned Opc,
+              int64_t Off, MCRegister Src) {
+  return BuildMI(MBB, I, DL, TII.get(Opc)).addImm(Off).addReg(Src);
+}
+
+/// The displacement of an IX- or IY-indexed access. A load names its
+/// destination first, so the slot is not always the first operand.
+inline const MachineOperand &idxSlotOperand(const MachineInstr &MI) {
+  bool IsLoad =
+      MI.getOpcode() == Z80::LD_r_IXd || MI.getOpcode() == Z80::LD_r_IYd;
+  return MI.getOperand(IsLoad ? 1 : 0);
+}
+
+/// Emit `BIT b, src`, which sets the zero flag from one bit of a register.
+inline MachineInstrBuilder buildBitTest(MachineBasicBlock &MBB,
+                                        MachineBasicBlock::iterator I,
+                                        const DebugLoc &DL,
+                                        const TargetInstrInfo &TII,
+                                        unsigned Bit, MCRegister Src) {
+  return BuildMI(MBB, I, DL, TII.get(Z80::BIT_b_r)).addImm(Bit).addReg(Src);
+}
+
+/// Append `BIT b, src` to the end of \p MBB.
+inline MachineInstrBuilder buildBitTest(MachineBasicBlock *MBB,
+                                        const DebugLoc &DL,
+                                        const TargetInstrInfo &TII,
+                                        unsigned Bit, MCRegister Src) {
+  return BuildMI(MBB, DL, TII.get(Z80::BIT_b_r)).addImm(Bit).addReg(Src);
+}
+
+/// Emit a CB-prefixed rotate or shift of \p Reg. \p Opc is one of the
+/// `<op> r` opcodes; the register is both read and written.
+inline MachineInstrBuilder buildRotate8(MachineBasicBlock &MBB,
+                                        MachineBasicBlock::iterator I,
+                                        const DebugLoc &DL,
+                                        const TargetInstrInfo &TII,
+                                        unsigned Opc, MCRegister Reg) {
+  return BuildMI(MBB, I, DL, TII.get(Opc), Reg).addReg(Reg);
+}
+
+/// Append a CB-prefixed rotate or shift of \p Reg to the end of \p MBB.
+inline MachineInstrBuilder buildRotate8(MachineBasicBlock *MBB,
+                                        const DebugLoc &DL,
+                                        const TargetInstrInfo &TII,
+                                        unsigned Opc, MCRegister Reg) {
+  return BuildMI(MBB, DL, TII.get(Opc), Reg).addReg(Reg);
+}
+
+/// Emit `LD dst, (HL)`, the byte load through HL.
+inline MachineInstrBuilder
+buildLoadHL(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+            const DebugLoc &DL, const TargetInstrInfo &TII, MCRegister Dst) {
+  return BuildMI(MBB, I, DL, TII.get(Z80::LD_r_HLind), Dst);
+}
+
+/// Emit `LD (HL), src`, the byte store through HL.
+inline MachineInstrBuilder
+buildStoreHL(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+             const DebugLoc &DL, const TargetInstrInfo &TII, MCRegister Src) {
+  return BuildMI(MBB, I, DL, TII.get(Z80::LD_HLind_r)).addReg(Src);
+}
+
+/// Emit `INC r` or `DEC r`. \p Opc is Z80::INC_r or Z80::DEC_r; the register
+/// is both read and written, so it appears twice.
+inline MachineInstrBuilder buildIncDec8(MachineBasicBlock &MBB,
+                                        MachineBasicBlock::iterator I,
+                                        const DebugLoc &DL,
+                                        const TargetInstrInfo &TII,
+                                        unsigned Opc, MCRegister Reg) {
+  return BuildMI(MBB, I, DL, TII.get(Opc), Reg).addReg(Reg);
+}
+
+/// Append `INC r` or `DEC r` to the end of \p MBB.
+inline MachineInstrBuilder buildIncDec8(MachineBasicBlock *MBB,
+                                        const DebugLoc &DL,
+                                        const TargetInstrInfo &TII,
+                                        unsigned Opc, MCRegister Reg) {
+  return BuildMI(MBB, DL, TII.get(Opc), Reg).addReg(Reg);
+}
+
+/// Emit `INC rr` or `DEC rr`. \p Opc is Z80::INC_rr or Z80::DEC_rr; the pair
+/// is both read and written, so it appears twice.
+inline MachineInstrBuilder buildIncDec16(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         const DebugLoc &DL,
+                                         const TargetInstrInfo &TII,
+                                         unsigned Opc, MCRegister Pair) {
+  return BuildMI(MBB, I, DL, TII.get(Opc), Pair).addReg(Pair);
+}
+
+/// Append `INC rr` or `DEC rr` to the end of \p MBB.
+inline MachineInstrBuilder buildIncDec16(MachineBasicBlock *MBB,
+                                         const DebugLoc &DL,
+                                         const TargetInstrInfo &TII,
+                                         unsigned Opc, MCRegister Pair) {
+  return BuildMI(MBB, DL, TII.get(Opc), Pair).addReg(Pair);
+}
+
 /// Mark a register the instruction reads only incidentally as undef: the
 /// result does not depend on the value (SBC A,A spreads carry whatever A
 /// holds, AND A only clears carry, a flag-save PUSH AF only carries F), so
@@ -89,6 +323,46 @@ inline void markUndefUse(const MachineInstrBuilder &MIB, MCRegister Reg) {
   for (MachineOperand &MO : MIB.getInstr()->operands())
     if (MO.isReg() && MO.isUse() && MO.getReg() == Reg)
       MO.setIsUndef();
+}
+
+/// Emit `XOR A`, which sets A to zero whatever it held. The read of A is
+/// incidental, so it is marked undef and does not keep a value alive.
+inline MachineInstrBuilder buildZeroA(MachineBasicBlock &MBB,
+                                      MachineBasicBlock::iterator I,
+                                      const DebugLoc &DL,
+                                      const TargetInstrInfo &TII) {
+  auto MIB = buildAlu8(MBB, I, DL, TII, Z80::XOR_r, Z80::A);
+  markUndefUse(MIB, Z80::A);
+  return MIB;
+}
+
+/// Append `XOR A` to the end of \p MBB.
+inline MachineInstrBuilder buildZeroA(MachineBasicBlock *MBB,
+                                      const DebugLoc &DL,
+                                      const TargetInstrInfo &TII) {
+  auto MIB = buildAlu8(MBB, DL, TII, Z80::XOR_r, Z80::A);
+  markUndefUse(MIB, Z80::A);
+  return MIB;
+}
+
+/// Emit `SBC A,A`, which spreads the carry flag across every bit of A. Like
+/// `XOR A` the read of A is incidental, so it is marked undef.
+inline MachineInstrBuilder buildSbcAA(MachineBasicBlock &MBB,
+                                      MachineBasicBlock::iterator I,
+                                      const DebugLoc &DL,
+                                      const TargetInstrInfo &TII) {
+  auto MIB = buildAlu8(MBB, I, DL, TII, Z80::SBC_A_r, Z80::A);
+  markUndefUse(MIB, Z80::A);
+  return MIB;
+}
+
+/// Append `SBC A,A` to the end of \p MBB.
+inline MachineInstrBuilder buildSbcAA(MachineBasicBlock *MBB,
+                                      const DebugLoc &DL,
+                                      const TargetInstrInfo &TII) {
+  auto MIB = buildAlu8(MBB, DL, TII, Z80::SBC_A_r, Z80::A);
+  markUndefUse(MIB, Z80::A);
+  return MIB;
 }
 
 /// Whether \p Reg still carries a value where \p MI sits: the block receives it

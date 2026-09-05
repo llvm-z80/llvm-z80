@@ -149,7 +149,7 @@ MachineBasicBlock::iterator Z80FrameLowering::eliminateCallFramePseudoInstr(
   } else {
     // Larger amounts: LD HL, Amount; ADD HL, SP; LD SP, HL
     assert(callFrameDestroyScratch(STI, Amount) == Register(Z80::HL));
-    BuildMI(MBB, MI, DL, TII.get(Z80::LD_HL_nn)).addImm(Amount);
+    Z80::buildLD16n(MBB, MI, DL, TII, Z80::HL).addImm(Amount);
     BuildMI(MBB, MI, DL, TII.get(Z80::ADD_HL_SP));
     BuildMI(MBB, MI, DL, TII.get(Z80::LD_SP_HL));
   }
@@ -204,12 +204,12 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
         // Large frame: PUSH HL; LD HL,-(size-2); ADD HL,SP; LD SP,HL;
         // restore HL from IX-based save location.
         Z80::emitHLSavePush(MBB, MBBI, DL, TII);
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_HL_nn))
+        Z80::buildLD16n(MBB, MBBI, DL, TII, Z80::HL)
             .addImm(-(int64_t)(StackSize - 2) & 0xFFFF);
         BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_HL_SP));
         BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_SP_HL));
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_L_IXd)).addImm(-2);
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_H_IXd)).addImm(-1);
+        Z80::buildLoadIdx(MBB, MBBI, DL, TII, Z80::LD_r_IXd, Z80::L, -2);
+        Z80::buildLoadIdx(MBB, MBBI, DL, TII, Z80::LD_r_IXd, Z80::H, -1);
       }
     }
   } else {
@@ -247,7 +247,7 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
           BuildMI(MBB, MBBI, DL, TII.get(Z80::DEC_SP));
       } else {
         // Large frame, HL not live: LD HL, -LocalSize; ADD HL, SP; LD SP, HL
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_HL_nn))
+        Z80::buildLD16n(MBB, MBBI, DL, TII, Z80::HL)
             .addImm(-(int64_t)LocalSize & 0xFFFF);
         BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_HL_SP));
         BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_SP_HL));
@@ -328,8 +328,7 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
 
       if (!HLLive) {
         // HL free: LD HL,LocalSize; ADD HL,SP; LD SP,HL (5 bytes total).
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_HL_nn))
-            .addImm(LocalSize & 0xFFFF);
+        Z80::buildLD16n(MBB, MBBI, DL, TII, Z80::HL).addImm(LocalSize & 0xFFFF);
         BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_HL_SP));
         BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_SP_HL));
       } else if (!ALive) {

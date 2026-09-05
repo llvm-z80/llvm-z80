@@ -22,8 +22,8 @@ body:             |
 ...
 ---
 # CHECK-LABEL: name: never_defined
-# CHECK:      LD_HLind_C implicit $hl, implicit $c
-# CHECK:      LD_HLind_B implicit $hl, implicit undef $b
+# CHECK:      LD_HLind_r $c, implicit $hl
+# CHECK:      LD_HLind_r undef $b, implicit $hl
 ---
 name:            already_killed
 tracksRegLiveness: true
@@ -39,5 +39,5 @@ body:             |
 ...
 ---
 # CHECK-LABEL: name: already_killed
-# CHECK:      LD_HLind_C implicit $hl, implicit $c
-# CHECK:      LD_HLind_B implicit $hl, implicit undef $b
+# CHECK:      LD_HLind_r $c, implicit $hl
+# CHECK:      LD_HLind_r undef $b, implicit $hl

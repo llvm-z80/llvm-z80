@@ -23,7 +23,7 @@ body:             |
 ...
 ---
 # CHECK-LABEL: name: large_offset
-# CHECK:      ADD_HL_BC
+# CHECK:      ADD_HL_rr $bc
 # CHECK-NEXT: ADD_A_HLind
 ---
 name:            no_frame_pointer
@@ -38,5 +38,5 @@ body:             |
 ...
 ---
 # CHECK-LABEL: name: no_frame_pointer
-# CHECK:      LD_B_HLind
+# CHECK:      $b = LD_r_HLind
 # CHECK-NEXT: AND_r $b

@@ -25,5 +25,5 @@ body:             |
 # The frame slot resolves to an IX displacement, and the pseudo survives to the
 # post-RA expansion that splits it.
 # CHECK-LABEL: name: expanded_after_frame_layout
-# CHECK:      LD_IXd_E {{-?[0-9]+}}, implicit $e
-# CHECK-NEXT: LD_IXd_D {{-?[0-9]+}}, implicit undef $d
+# CHECK:      LD_IXd_r {{-?[0-9]+}}, $e
+# CHECK-NEXT: LD_IXd_r {{-?[0-9]+}}, undef $d

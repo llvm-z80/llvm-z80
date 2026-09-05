@@ -16,18 +16,18 @@ body:             |
   bb.0:
     liveins: $sp
     LDHL_SP_e 8, implicit-def $hl, implicit-def $flags, implicit $sp
-    LD_A_HLind implicit-def $a, implicit $hl
-    INC_HL implicit-def $hl, implicit $hl
-    LD_H_HLind implicit-def $h, implicit $hl
-    LD_L_A implicit-def $l, implicit killed $a
-    LD_C_L implicit-def $c, implicit $l
-    LD_B_H implicit-def $b, implicit $h
+    $a = LD_r_HLind implicit $hl
+    $hl = INC_rr $hl
+    $h = LD_r_HLind implicit $hl
+    $l = LD_r_r killed $a
+    $c = LD_r_r $l
+    $b = LD_r_r $h
     RET implicit killed $bc
 
 # CHECK-LABEL: name: into_pair
 # CHECK:      LD_A_HLI
-# CHECK-NEXT: LD_B_HLind
-# CHECK-NEXT: LD_C_A
+# CHECK-NEXT: $b = LD_r_HLind
+# CHECK-NEXT: $c = LD_r_r killed $a
 # CHECK-NEXT: RET
 
 ...
@@ -38,12 +38,12 @@ body:             |
   bb.0:
     liveins: $sp
     LDHL_SP_e 8, implicit-def $hl, implicit-def $flags, implicit $sp
-    LD_A_HLind implicit-def $a, implicit $hl
-    INC_HL implicit-def $hl, implicit $hl
-    LD_H_HLind implicit-def $h, implicit $hl
-    LD_L_A implicit-def $l, implicit killed $a
-    LD_C_L implicit-def $c, implicit $l
-    LD_B_H implicit-def $b, implicit $h
+    $a = LD_r_HLind implicit $hl
+    $hl = INC_rr $hl
+    $h = LD_r_HLind implicit $hl
+    $l = LD_r_r killed $a
+    $c = LD_r_r $l
+    $b = LD_r_r $h
     PUSH_HL implicit $hl, implicit-def $sp, implicit $sp
     RET implicit killed $bc
 
@@ -51,9 +51,9 @@ body:             |
 # out and the reload has to keep going through the pair.
 
 # CHECK-LABEL: name: hl_still_live
-# CHECK:      LD_L_A
-# CHECK-NEXT: LD_C_L
-# CHECK-NEXT: LD_B_H
+# CHECK:      $l = LD_r_r killed $a
+# CHECK-NEXT: $c = LD_r_r $l
+# CHECK-NEXT: $b = LD_r_r $h
 # CHECK-NEXT: PUSH_HL
 
 ...
@@ -64,7 +64,7 @@ body:             |
   bb.0:
     liveins: $hl
     LD_A_HLI implicit-def $a, implicit-def $hl, implicit $hl
-    LD_H_HLind implicit-def $h, implicit $hl
+    $h = LD_r_HLind implicit $hl
 
   bb.1:
     liveins: $a, $h
@@ -74,6 +74,6 @@ body:             |
 #
 # CHECK-LABEL: name: runs_off_the_block
 # CHECK:      LD_A_HLI
-# CHECK-NEXT: LD_H_HLind
+# CHECK-NEXT: $h = LD_r_HLind
 
 ...

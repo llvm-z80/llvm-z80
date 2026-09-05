@@ -16,14 +16,14 @@ body:             |
     liveins: $bc, $sp
     PUSH_BC implicit $bc, implicit-def $sp, implicit $sp
     LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
-    LD_A_HLind implicit-def $a, implicit $hl
+    $a = LD_r_HLind implicit $hl
     POP_BC implicit-def $bc, implicit-def $sp, implicit $sp
     RET implicit $bc, implicit $a
 
 # CHECK-LABEL: name: rebase
 # CHECK-NOT:  PUSH_BC
 # CHECK:      LDHL_SP_e 4
-# CHECK-NEXT: LD_A_HLind
+# CHECK-NEXT: $a = LD_r_HLind
 # CHECK-NEXT: RET
 
 ...
@@ -35,7 +35,7 @@ body:             |
     liveins: $hl, $sp
     PUSH_HL implicit $hl, implicit-def $sp, implicit $sp
     LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
-    LD_A_HLind implicit-def $a, implicit $hl
+    $a = LD_r_HLind implicit $hl
     POP_HL implicit-def $hl, implicit-def $sp, implicit $sp
     RET implicit $hl, implicit $a
 

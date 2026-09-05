@@ -31,7 +31,7 @@
 // Defs list and calls `clobberRegister()` for each one.  When MCP sees:
 //
 //   $h = COPY $e                    ; MCP tracks this copy
-//   LD_L_n 0, implicit-def $l, implicit-def $hl
+//   $l = LD_r_n 0, implicit-def $hl
 //
 // it treats HL as clobbered, which overlaps with H, so it removes the
 // $h copy as dead.  This is a miscompilation -- H still holds the value
@@ -64,8 +64,8 @@
 //
 // becomes
 //
-//   LD_E_L implicit-def $e, implicit $l
-//   LD_D_H implicit-def $d, implicit $h, implicit-def $e, implicit-def $d
+//   $e = LD_r_r $l
+//   $d = LD_r_r $h, implicit-def $e, implicit-def $d
 //
 // where the second move claims to write E, which the first one wrote.
 //
@@ -137,7 +137,7 @@ INITIALIZE_PASS(Z80FixupImplicitDefs, DEBUG_TYPE,
 
 /// Collect the set of physical sub-registers that the instruction is
 /// designed to define.  This includes:
-///  - MCInstrDesc static implicit defs (e.g. L from LD_L_n)
+///  - MCInstrDesc static implicit defs
 ///  - Explicit physical register def operands (e.g. $l from COPY)
 /// We exclude super-register defs (HL, DE, etc.) because those are
 /// exactly what we want to remove if added spuriously by LiveVariables.

@@ -16,12 +16,12 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $ix
-    LD_C_IXd -4, implicit-def $c
-    LD_A_C implicit-def $a, implicit killed $c
+    $c = LD_r_IXd -4
+    $a = LD_r_r killed $c
     RET implicit $a
 
 # CHECK-LABEL: name: reload_then_copy
-# CHECK:      LD_A_IXd -4
+# CHECK:      $a = LD_r_IXd -4
 # CHECK-NEXT: RET
 
 ...
@@ -31,8 +31,8 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $ix
-    LD_C_n 7, implicit-def $c
-    LD_IXd_C -4, implicit killed $c
+    $c = LD_r_n 7
+    LD_IXd_r -4, killed $c
     RET
 
 # CHECK-LABEL: name: const_then_store
@@ -46,12 +46,12 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $hl
-    LD_C_HLind implicit-def $c, implicit $hl
-    LD_A_C implicit-def $a, implicit killed $c
+    $c = LD_r_HLind implicit $hl
+    $a = LD_r_r killed $c
     RET implicit $a
 
 # CHECK-LABEL: name: via_hl
-# CHECK:      LD_A_HLind
+# CHECK:      $a = LD_r_HLind
 # CHECK-NEXT: RET
 
 ...
@@ -61,15 +61,15 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $hl
-    LD_C_HLind implicit-def $c, implicit $hl
-    LD_L_C implicit-def $l, implicit killed $c
+    $c = LD_r_HLind implicit $hl
+    $l = LD_r_r killed $c
     RET implicit $hl
 
 # Redirecting a load through HL into H or L would destroy the address
 # before anything else could use it.
 
 # CHECK-LABEL: name: hl_is_the_address
-# CHECK:      LD_C_HLind
-# CHECK-NEXT: LD_L_C
+# CHECK:      $c = LD_r_HLind
+# CHECK-NEXT: $l = LD_r_r killed $c
 
 ...

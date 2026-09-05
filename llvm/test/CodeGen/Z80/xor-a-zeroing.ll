@@ -7,7 +7,7 @@
 
 ; CHECK-LABEL: f:
 ; CHECK: xor a
-; MIR-NOT: XOR_A{{.*}}implicit $a
+; MIR: XOR_r undef $a{{.*}}implicit undef $a
 define i8 @f(ptr %p, i8 %n) {
 entry:
   %c = icmp eq i8 %n, 0

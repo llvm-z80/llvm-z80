@@ -130,17 +130,13 @@ def IM_2 : InstED8<"im 2", 0x5E>;
 
 // ADC HL,ss (ED prefixed) - Add with carry (reads carry flag)
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def ADC_HL_BC : InstED8<"adc hl,bc", 0x4A> { let Uses = [HL, BC, FLAGS]; let Defs = [HL, FLAGS]; }
-def ADC_HL_DE : InstED8<"adc hl,de", 0x5A> { let Uses = [HL, DE, FLAGS]; let Defs = [HL, FLAGS]; }
-def ADC_HL_HL : InstED8<"adc hl,hl", 0x6A> { let Uses = [HL, FLAGS]; let Defs = [HL, FLAGS]; }
+def ADC_HL_rr : ADCSBCHLrr<"adc", 0b1010> { let Uses = [HL, FLAGS]; let Defs = [HL, FLAGS]; }
 }
 def ADC_HL_SP : InstED8<"adc hl,sp", 0x7A> { let Uses = [HL, SP, FLAGS]; let Defs = [HL, FLAGS]; }
 
 // SBC HL,ss (ED prefixed) - Subtract with carry (reads carry flag)
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def SBC_HL_BC : InstED8<"sbc hl,bc", 0x42> { let Uses = [HL, BC, FLAGS]; let Defs = [HL, FLAGS]; }
-def SBC_HL_DE : InstED8<"sbc hl,de", 0x52> { let Uses = [HL, DE, FLAGS]; let Defs = [HL, FLAGS]; }
-def SBC_HL_HL : InstED8<"sbc hl,hl", 0x62> { let Uses = [HL, FLAGS]; let Defs = [HL, FLAGS]; }
+def SBC_HL_rr : ADCSBCHLrr<"sbc", 0b0010> { let Uses = [HL, FLAGS]; let Defs = [HL, FLAGS]; }
 }
 def SBC_HL_SP : InstED8<"sbc hl,sp", 0x72> { let Uses = [HL, SP, FLAGS]; let Defs = [HL, FLAGS]; }
 
@@ -316,23 +312,9 @@ def EX_SPind_IY : InstFD8<"ex (sp),iy", 0xE3> { let Uses = [SP, IY]; let Defs = 
 // Opcode: FD [46|4E|56|5E|66|6E|7E] d for IY
 //===----------------------------------------------------------------------===//
 
-// LD r,(IX+d) — loads define the destination register
-def LD_B_IXd : InstDD16<"ld b,", 0x46, IndexedIXMode> { let Defs = [B]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_C_IXd : InstDD16<"ld c,", 0x4E, IndexedIXMode> { let Defs = [C]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_D_IXd : InstDD16<"ld d,", 0x56, IndexedIXMode> { let Defs = [D]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_E_IXd : InstDD16<"ld e,", 0x5E, IndexedIXMode> { let Defs = [E]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_H_IXd : InstDD16<"ld h,", 0x66, IndexedIXMode> { let Defs = [H]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_L_IXd : InstDD16<"ld l,", 0x6E, IndexedIXMode> { let Defs = [L]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_A_IXd : InstDD16<"ld a,", 0x7E, IndexedIXMode> { let Defs = [A]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-
-// LD r,(IY+d) — loads define the destination register
-def LD_B_IYd : InstFD16<"ld b,", 0x46, IndexedIYMode> { let Defs = [B]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_C_IYd : InstFD16<"ld c,", 0x4E, IndexedIYMode> { let Defs = [C]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_D_IYd : InstFD16<"ld d,", 0x56, IndexedIYMode> { let Defs = [D]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_E_IYd : InstFD16<"ld e,", 0x5E, IndexedIYMode> { let Defs = [E]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_H_IYd : InstFD16<"ld h,", 0x66, IndexedIYMode> { let Defs = [H]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_L_IYd : InstFD16<"ld l,", 0x6E, IndexedIYMode> { let Defs = [L]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
-def LD_A_IYd : InstFD16<"ld a,", 0x7E, IndexedIYMode> { let Defs = [A]; let mayLoad = 1; let mayStore = 0; let hasSideEffects = 0; }
+// LD r,(IX+d) / LD r,(IY+d) — loads name the destination register
+def LD_r_IXd : LDrIdxd<"ld", 0xDD, "ix">;
+def LD_r_IYd : LDrIdxd<"ld", 0xFD, "iy">;
 
 //===----------------------------------------------------------------------===//
 // Indexed addressing: LD (IX+d),r / LD (IY+d),r
@@ -340,23 +322,20 @@ def LD_A_IYd : InstFD16<"ld a,", 0x7E, IndexedIYMode> { let Defs = [A]; let mayL
 // Opcode: FD [70|71|72|73|74|75|77] d for IY
 //===----------------------------------------------------------------------===//
 
-// LD (IX+d),r — stores use the source register
-def LD_IXd_B : InstDD16<"ld", 0x70, IndexedIXMode> { let Uses = [B]; let AsmString = "ld ( ix + $imm ), b"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IXd_C : InstDD16<"ld", 0x71, IndexedIXMode> { let Uses = [C]; let AsmString = "ld ( ix + $imm ), c"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IXd_D : InstDD16<"ld", 0x72, IndexedIXMode> { let Uses = [D]; let AsmString = "ld ( ix + $imm ), d"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IXd_E : InstDD16<"ld", 0x73, IndexedIXMode> { let Uses = [E]; let AsmString = "ld ( ix + $imm ), e"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IXd_H : InstDD16<"ld", 0x74, IndexedIXMode> { let Uses = [H]; let AsmString = "ld ( ix + $imm ), h"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IXd_L : InstDD16<"ld", 0x75, IndexedIXMode> { let Uses = [L]; let AsmString = "ld ( ix + $imm ), l"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IXd_A : InstDD16<"ld", 0x77, IndexedIXMode> { let Uses = [A]; let AsmString = "ld ( ix + $imm ), a"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
+// LD (IX+d),r / LD (IY+d),r — stores name the source register
+// The load and the store patterns overlap on the byte where both would name
+// the memory slot as their register, so the store decodes from its own table.
+// That byte is HALT under a DD or FD prefix, which the two-byte definitions
+// below catch first anyway.
+let DecoderNamespace = "Z80Idx" in {
+def LD_IXd_r : LDIdxdr<"ld", 0xDD, "ix">;
+def LD_IYd_r : LDIdxdr<"ld", 0xFD, "iy">;
+}
 
-// LD (IY+d),r — stores use the source register
-def LD_IYd_B : InstFD16<"ld", 0x70, IndexedIYMode> { let Uses = [B]; let AsmString = "ld ( iy + $imm ), b"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IYd_C : InstFD16<"ld", 0x71, IndexedIYMode> { let Uses = [C]; let AsmString = "ld ( iy + $imm ), c"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IYd_D : InstFD16<"ld", 0x72, IndexedIYMode> { let Uses = [D]; let AsmString = "ld ( iy + $imm ), d"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IYd_E : InstFD16<"ld", 0x73, IndexedIYMode> { let Uses = [E]; let AsmString = "ld ( iy + $imm ), e"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IYd_H : InstFD16<"ld", 0x74, IndexedIYMode> { let Uses = [H]; let AsmString = "ld ( iy + $imm ), h"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IYd_L : InstFD16<"ld", 0x75, IndexedIYMode> { let Uses = [L]; let AsmString = "ld ( iy + $imm ), l"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IYd_A : InstFD16<"ld", 0x77, IndexedIYMode> { let Uses = [A]; let AsmString = "ld ( iy + $imm ), a"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
+// A DD or FD prefix in front of HALT does nothing, and naming the pair keeps
+// it out of the three-byte indexed patterns it would otherwise sit inside.
+def HALT_DD : InstDD8<"halt", 0x76>;
+def HALT_FD : InstFD8<"halt", 0x76>;
 
 //===----------------------------------------------------------------------===//
 // Indexed addressing: LD (IX+d),n / LD (IY+d),n - Store immediate to indexed
@@ -688,39 +667,6 @@ def STORE8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
   let mayStore = true;
 }
 
-// LD_r8_n: Load 8-bit immediate into any GR8 register.
-// Expanded in expandPostRAPseudo to the concrete LD_r_n opcode.
-def LD_r8_n : Z80Pseudo<(outs GR8:$dst), (ins i8imm:$imm)> {
-  let mayLoad = false;
-  let mayStore = false;
-  let isAsCheapAsAMove = true;
-  let isMoveImm = true;
-  let isReMaterializable = true;
-}
-
-// LD_r16_nn: Load 16-bit immediate into any GR16 register.
-// Expanded in expandPostRAPseudo to the concrete LD_rr_nn opcode.
-def LD_r16_nn : Z80Pseudo<(outs GR16:$dst), (ins i16imm:$imm)> {
-  let mayLoad = false;
-  let mayStore = false;
-  let isAsCheapAsAMove = true;
-  let isMoveImm = true;
-  let isReMaterializable = true;
-}
-
-// INC/DEC 16-bit pseudo instructions.
-// Expanded in expandPostRAPseudo to the concrete INC/DEC opcode.
-def INC16 : Z80Pseudo<(outs GR16:$dst), (ins GR16:$src)> {
-  let Constraints = "$dst = $src";
-  let mayLoad = false;
-  let mayStore = false;
-}
-def DEC16 : Z80Pseudo<(outs GR16:$dst), (ins GR16:$src)> {
-  let Constraints = "$dst = $src";
-  let mayLoad = false;
-  let mayStore = false;
-}
-
 // SUB_HL_xx: 16-bit subtraction pseudo instructions.
 // Generalized 16-bit arithmetic pseudo instructions.
 // The second operand (rr) is a GR16_BCDE virtual register — the register
@@ -731,14 +677,6 @@ def DEC16 : Z80Pseudo<(outs GR16:$dst), (ins GR16:$src)> {
 // HL,rr only supports HL as destination).
 
 let isPseudo = true, isCodeGenOnly = true in {
-
-// ADD HL,rr (plain addition, no carry capture)
-def ADD_HL_rr : Z80Inst<"add_hl_rr"> {
-  let InOperandList = (ins GR16_BCDE:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, FLAGS];
-}
 
 // AND A; SBC HL,rr (subtraction without borrow)
 def SUB_HL_rr : Z80Inst<"sub_hl_rr"> {
@@ -786,57 +724,6 @@ def SBC_HL_rr_BIO : Z80Inst<"sbc_hl_rr_bio"> {
   let OutOperandList = (outs);
   let Uses = [HL];
   let Defs = [HL, A, FLAGS];
-}
-
-// Generalized 8-bit ALU pseudo instructions.
-// The second operand is a GR8 virtual register — the register allocator is
-// free to assign any of {A,B,C,D,E,H,L}.  expandPostRAPseudo inspects the
-// physical register and emits the correct real instruction (ADD_A_A/ADD_A_B/
-// ADD_A_C/etc).
-//
-// A is always the implicit first operand (hardware constraint: all 8-bit ALU
-// ops use A as the accumulator).
-
-def ADD_A_r : Z80Inst<"add_a_r"> {
-  let InOperandList = (ins GR8:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [A];
-  let Defs = [A, FLAGS];
-}
-
-def SUB_r : Z80Inst<"sub_r"> {
-  let InOperandList = (ins GR8:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [A];
-  let Defs = [A, FLAGS];
-}
-
-def AND_r : Z80Inst<"and_r"> {
-  let InOperandList = (ins GR8:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [A];
-  let Defs = [A, FLAGS];
-}
-
-def OR_r : Z80Inst<"or_r"> {
-  let InOperandList = (ins GR8:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [A];
-  let Defs = [A, FLAGS];
-}
-
-def XOR_r : Z80Inst<"xor_r"> {
-  let InOperandList = (ins GR8:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [A];
-  let Defs = [A, FLAGS];
-}
-
-def CP_r : Z80Inst<"cp_r"> {
-  let InOperandList = (ins GR8:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [A];
-  let Defs = [FLAGS];
 }
 
 } // isPseudo, isCodeGenOnly

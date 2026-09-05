@@ -14,8 +14,8 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $a, $ix
-    LD_C_IXd -4, implicit-def $c
-    XOR_C implicit-def $a, implicit-def $flags, implicit $a, implicit killed $c
+    $c = LD_r_IXd -4
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
     RET implicit $a
 
 # The Z80 can take an ALU operand straight from the slot, so the register
@@ -32,16 +32,16 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $a, $ix, $d
-    LD_C_IXd -4, implicit-def $c
-    LD_IXd_D -9, implicit $d
-    XOR_C implicit-def $a, implicit-def $flags, implicit $a, implicit killed $c
+    $c = LD_r_IXd -4
+    LD_IXd_r -9, $d
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
     RET implicit $a
 
 # The use does not have to come next. A store to another slot is provably a
 # different byte, so the read can still move down to it.
 
 # CHECK-LABEL: name: across_a_gap
-# CHECK:      LD_IXd_D -9
+# CHECK:      LD_IXd_r -9, killed $d
 # CHECK-NEXT: XOR_IXd -4
 
 ...
@@ -51,17 +51,17 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $a, $ix, $d
-    LD_C_IXd -4, implicit-def $c
-    LD_IXd_D -4, implicit $d
-    XOR_C implicit-def $a, implicit-def $flags, implicit $a, implicit killed $c
+    $c = LD_r_IXd -4
+    LD_IXd_r -4, $d
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
     RET implicit $a
 
 # Same slot, so moving the read past the store would read the new value.
 
 # CHECK-LABEL: name: slot_overwritten
-# CHECK:      LD_C_IXd -4
-# CHECK-NEXT: LD_IXd_D -4
-# CHECK-NEXT: XOR_C
+# CHECK:      $c = LD_r_IXd -4
+# CHECK-NEXT: LD_IXd_r -4, $d
+# CHECK-NEXT: XOR_r killed $c
 
 ...
 ---
@@ -70,17 +70,17 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $a, $ix, $hl, $d
-    LD_C_IXd -4, implicit-def $c
-    LD_HLind_D implicit $hl, implicit $d
-    XOR_C implicit-def $a, implicit-def $flags, implicit $a, implicit killed $c
+    $c = LD_r_IXd -4
+    LD_HLind_r $d, implicit $hl
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
     RET implicit $a
 
 # A store through a pointer could be pointing at this very local.
 
 # CHECK-LABEL: name: unknown_store
-# CHECK:      LD_C_IXd -4
-# CHECK-NEXT: LD_HLind_D
-# CHECK-NEXT: XOR_C
+# CHECK:      $c = LD_r_IXd -4
+# CHECK-NEXT: LD_HLind_r $d
+# CHECK-NEXT: XOR_r killed $c
 
 ...
 ---
@@ -89,18 +89,18 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $e, $h
-    LD_L_n 0, implicit-def $l
-    LD_A_L implicit-def $a, implicit killed $l
-    XOR_E implicit-def $a, implicit-def $flags, implicit $a, implicit $e
-    LD_E_A implicit-def $e, implicit killed $a
+    $l = LD_r_n 0
+    $a = LD_r_r killed $l
+    XOR_r $e, implicit-def $a, implicit-def $flags, implicit $a
+    $e = LD_r_r killed $a
     RET implicit $e, implicit $h
 
 # A zero accumulator makes XOR a plain move, and written as one the copy in
 # and the copy back out cancel.
 
 # CHECK-LABEL: name: zero_accumulator
-# CHECK-NOT:  XOR_E
-# CHECK:      LD_A_E
-# CHECK-NEXT: LD_E_A
+# CHECK-NOT:  XOR_r $e
+# CHECK:      $a = LD_r_r killed $e
+# CHECK-NEXT: $e = LD_r_r killed $a
 
 ...

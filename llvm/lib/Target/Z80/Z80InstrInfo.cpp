@@ -74,46 +74,6 @@ Register Z80InstrInfo::isStoreToStackSlot(const MachineInstr &MI,
   return 0;
 }
 
-// Get opcode for LD r,n (load immediate to 8-bit register)
-static unsigned getLoadImmR8Opcode(Register Reg) {
-  static const unsigned Opcodes[] = {Z80::LD_A_n, Z80::LD_B_n, Z80::LD_C_n,
-                                     Z80::LD_D_n, Z80::LD_E_n, Z80::LD_H_n,
-                                     Z80::LD_L_n};
-  int Idx = Z80::gr8RegToIndex(Reg);
-  return Idx >= 0 ? Opcodes[Idx] : 0;
-}
-
-static unsigned getSUBOpcode(Register Reg) {
-  static const unsigned T[] = {Z80::SUB_A, Z80::SUB_B, Z80::SUB_C, Z80::SUB_D,
-                               Z80::SUB_E, Z80::SUB_H, Z80::SUB_L};
-  int I = Z80::gr8RegToIndex(Reg);
-  return I >= 0 ? T[I] : 0;
-}
-
-static unsigned getSBCOpcode(Register Reg) {
-  static const unsigned T[] = {Z80::SBC_A_A, Z80::SBC_A_B, Z80::SBC_A_C,
-                               Z80::SBC_A_D, Z80::SBC_A_E, Z80::SBC_A_H,
-                               Z80::SBC_A_L};
-  int I = Z80::gr8RegToIndex(Reg);
-  return I >= 0 ? T[I] : 0;
-}
-
-static unsigned getADCOpcode(Register Reg) {
-  static const unsigned T[] = {Z80::ADC_A_A, Z80::ADC_A_B, Z80::ADC_A_C,
-                               Z80::ADC_A_D, Z80::ADC_A_E, Z80::ADC_A_H,
-                               Z80::ADC_A_L};
-  int I = Z80::gr8RegToIndex(Reg);
-  return I >= 0 ? T[I] : 0;
-}
-
-static unsigned getADD8Opcode(Register Reg) {
-  static const unsigned T[] = {Z80::ADD_A_A, Z80::ADD_A_B, Z80::ADD_A_C,
-                               Z80::ADD_A_D, Z80::ADD_A_E, Z80::ADD_A_H,
-                               Z80::ADD_A_L};
-  int I = Z80::gr8RegToIndex(Reg);
-  return I >= 0 ? T[I] : 0;
-}
-
 // Get low and high 8-bit sub-registers of a 16-bit register pair.
 static std::pair<Register, Register> getSubRegs16(Register Reg) {
   switch (Reg.id()) {
@@ -139,12 +99,11 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                Register SrcReg, bool KillSrc,
                                bool RenamableDest, bool RenamableSrc) const {
   // Handle 8-bit register copies: LD r,r'
-  if (Z80::GR8RegClass.contains(DestReg) && Z80::GR8RegClass.contains(SrcReg)) {
-    unsigned Opcode = Z80::getLD8RegOpcode(DestReg, SrcReg);
-    if (Opcode) {
-      BuildMI(MBB, I, DL, get(Opcode));
-      return;
-    }
+  if (Z80::canLD8(DestReg, SrcReg)) {
+    Z80::buildLD8(MBB, I, DL, *this, DestReg, SrcReg)
+        ->getOperand(1)
+        .setIsKill(KillSrc);
+    return;
   }
 
   // EX DE,HL: single-byte swap for DE<->HL copies (Z80 only).
@@ -183,11 +142,13 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Register SrcLo = TRI->getSubReg(SrcReg, Z80::sub_lo);
     Register SrcHi = TRI->getSubReg(SrcReg, Z80::sub_hi);
     if (DstLo && DstHi && SrcLo && SrcHi) {
-      unsigned LoOp = Z80::getLD8RegOpcode(DstLo, SrcLo);
-      unsigned HiOp = Z80::getLD8RegOpcode(DstHi, SrcHi);
-      if (LoOp && HiOp) {
-        BuildMI(MBB, I, DL, get(LoOp));
-        BuildMI(MBB, I, DL, get(HiOp));
+      if (Z80::canLD8(DstLo, SrcLo) && Z80::canLD8(DstHi, SrcHi)) {
+        Z80::buildLD8(MBB, I, DL, *this, DstLo, SrcLo)
+            ->getOperand(1)
+            .setIsKill(KillSrc);
+        Z80::buildLD8(MBB, I, DL, *this, DstHi, SrcHi)
+            ->getOperand(1)
+            .setIsKill(KillSrc);
         return;
       }
     }
@@ -243,7 +204,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     if (DestReg == Z80::HL) {
       if (FlagsLive)
         BuildMI(MBB, I, DL, get(Z80::PUSH_AF));
-      BuildMI(MBB, I, DL, get(Z80::LD_HL_nn)).addImm(SPComp);
+      Z80::buildLD16n(MBB, I, DL, *this, Z80::HL).addImm(SPComp);
       BuildMI(MBB, I, DL, get(Z80::ADD_HL_SP));
       if (FlagsLive)
         BuildMI(MBB, I, DL, get(Z80::POP_AF));
@@ -271,15 +232,15 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     // PUSH HL; LD HL,N; ADD HL,SP; LD r,H; LD r,L; POP HL
     // N compensates for PUSH HL (and PUSH AF if FLAGS is live).
     if (DestReg == Z80::BC || DestReg == Z80::DE) {
-      unsigned LdHiOp = (DestReg == Z80::BC) ? Z80::LD_B_H : Z80::LD_D_H;
-      unsigned LdLoOp = (DestReg == Z80::BC) ? Z80::LD_C_L : Z80::LD_E_L;
+      Register DstHi = (DestReg == Z80::BC) ? Z80::B : Z80::D;
+      Register DstLo = (DestReg == Z80::BC) ? Z80::C : Z80::E;
       if (FlagsLive)
         BuildMI(MBB, I, DL, get(Z80::PUSH_AF));
       Z80::emitHLSavePush(MBB, I, DL, *this);
-      BuildMI(MBB, I, DL, get(Z80::LD_HL_nn)).addImm(SPComp + 2);
+      Z80::buildLD16n(MBB, I, DL, *this, Z80::HL).addImm(SPComp + 2);
       BuildMI(MBB, I, DL, get(Z80::ADD_HL_SP));
-      BuildMI(MBB, I, DL, get(LdHiOp));
-      BuildMI(MBB, I, DL, get(LdLoOp));
+      Z80::buildLD8(MBB, I, DL, *this, DstHi, Z80::H);
+      Z80::buildLD8(MBB, I, DL, *this, DstLo, Z80::L);
       BuildMI(MBB, I, DL, get(Z80::POP_HL));
       if (FlagsLive)
         BuildMI(MBB, I, DL, get(Z80::POP_AF));
@@ -310,24 +271,21 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
           BuildMI(MBB, I, DL, get(Z80::POP_HL));
           if ((DestReg == Z80::H && SrcIsIndexLo) ||
               (DestReg == Z80::L && SrcIsIndexHi)) {
-            unsigned LdOp = Z80::getLD8RegOpcode(DestReg, ExtractReg);
-            BuildMI(MBB, I, DL, get(LdOp));
+            Z80::buildLD8(MBB, I, DL, *this, DestReg, ExtractReg);
           }
         } else {
           Register ScratchReg = SrcIsIndexHi ? Z80::D : Z80::E;
           BuildMI(MBB, I, DL, get(Z80::PUSH_DE));
           BuildMI(MBB, I, DL, get(PushOp));
           BuildMI(MBB, I, DL, get(Z80::POP_DE));
-          unsigned LdOp = Z80::getLD8RegOpcode(DestReg, ScratchReg);
-          BuildMI(MBB, I, DL, get(LdOp));
+          Z80::buildLD8(MBB, I, DL, *this, DestReg, ScratchReg);
           BuildMI(MBB, I, DL, get(Z80::POP_DE));
         }
       } else {
         Z80::emitHLSavePush(MBB, I, DL, *this);
         BuildMI(MBB, I, DL, get(PushOp));
         BuildMI(MBB, I, DL, get(Z80::POP_HL));
-        unsigned LdOp = Z80::getLD8RegOpcode(DestReg, ExtractReg);
-        BuildMI(MBB, I, DL, get(LdOp));
+        Z80::buildLD8(MBB, I, DL, *this, DestReg, ExtractReg);
         BuildMI(MBB, I, DL, get(Z80::POP_HL));
       }
       return;
@@ -349,13 +307,11 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
       if (SrcReg == Z80::H || SrcReg == Z80::L) {
         BuildMI(MBB, I, DL, get(Z80::PUSH_AF));
-        unsigned LdASrc = Z80::getLD8RegOpcode(Z80::A, SrcReg);
-        BuildMI(MBB, I, DL, get(LdASrc));
+        Z80::buildLD8(MBB, I, DL, *this, Z80::A, SrcReg);
         Z80::emitHLSavePush(MBB, I, DL, *this);
         BuildMI(MBB, I, DL, get(PushIR));
         BuildMI(MBB, I, DL, get(Z80::POP_HL));
-        unsigned LdTargetA = Z80::getLD8RegOpcode(TargetReg, Z80::A);
-        BuildMI(MBB, I, DL, get(LdTargetA));
+        Z80::buildLD8(MBB, I, DL, *this, TargetReg, Z80::A);
         BuildMI(MBB, I, DL, get(Z80::PUSH_HL));
         BuildMI(MBB, I, DL, get(PopIR));
         BuildMI(MBB, I, DL, get(Z80::POP_HL));
@@ -366,8 +322,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       Z80::emitHLSavePush(MBB, I, DL, *this);
       BuildMI(MBB, I, DL, get(PushIR));
       BuildMI(MBB, I, DL, get(Z80::POP_HL));
-      unsigned LdOp = Z80::getLD8RegOpcode(TargetReg, SrcReg);
-      BuildMI(MBB, I, DL, get(LdOp));
+      Z80::buildLD8(MBB, I, DL, *this, TargetReg, SrcReg);
       BuildMI(MBB, I, DL, get(Z80::PUSH_HL));
       BuildMI(MBB, I, DL, get(PopIR));
       BuildMI(MBB, I, DL, get(Z80::POP_HL));
@@ -376,23 +331,6 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
 
   llvm_unreachable("Cannot copy between these registers");
-}
-
-// Get the indexed store opcode for LD (IX+d),r
-static unsigned getStoreIXdOpcode(Register Reg) {
-  static const unsigned T[] = {Z80::LD_IXd_A, Z80::LD_IXd_B, Z80::LD_IXd_C,
-                               Z80::LD_IXd_D, Z80::LD_IXd_E, Z80::LD_IXd_H,
-                               Z80::LD_IXd_L};
-  int I = Z80::gr8RegToIndex(Reg);
-  return I >= 0 ? T[I] : 0;
-}
-
-static unsigned getLoadIXdOpcode(Register Reg) {
-  static const unsigned T[] = {Z80::LD_A_IXd, Z80::LD_B_IXd, Z80::LD_C_IXd,
-                               Z80::LD_D_IXd, Z80::LD_E_IXd, Z80::LD_H_IXd,
-                               Z80::LD_L_IXd};
-  int I = Z80::gr8RegToIndex(Reg);
-  return I >= 0 ? T[I] : 0;
 }
 
 void Z80InstrInfo::storeRegToStackSlot(
@@ -617,12 +555,14 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   case Z80::LOAD8_IND: {
     // Expand to LD A,(BC), LD A,(DE), or LD A,(HL) based on allocated register.
     Register Addr = MI.getOperand(0).getReg();
-    unsigned Opc;
-    if (Addr == Z80::BC) Opc = Z80::LD_A_BCind;
-    else if (Addr == Z80::DE) Opc = Z80::LD_A_DEind;
-    else if (Addr == Z80::HL) Opc = Z80::LD_A_HLind;
-    else llvm_unreachable("Invalid register for LOAD8_IND");
-    BuildMI(MBB, MI, DL, get(Opc));
+    if (Addr == Z80::HL) {
+      Z80::buildLoadHL(MBB, MI, DL, *this, Z80::A);
+    } else {
+      assert((Addr == Z80::BC || Addr == Z80::DE) &&
+             "Invalid register for LOAD8_IND");
+      BuildMI(MBB, MI, DL,
+              get(Addr == Z80::BC ? Z80::LD_A_BCind : Z80::LD_A_DEind));
+    }
     MI.eraseFromParent();
     return true;
   }
@@ -630,67 +570,14 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   case Z80::STORE8_IND: {
     // Expand to LD (BC),A, LD (DE),A, or LD (HL),A based on allocated register.
     Register Addr = MI.getOperand(0).getReg();
-    unsigned Opc;
-    if (Addr == Z80::BC) Opc = Z80::LD_BCind_A;
-    else if (Addr == Z80::DE) Opc = Z80::LD_DEind_A;
-    else if (Addr == Z80::HL) Opc = Z80::LD_HLind_A;
-    else llvm_unreachable("Invalid register for STORE8_IND");
-    BuildMI(MBB, MI, DL, get(Opc));
-    MI.eraseFromParent();
-    return true;
-  }
-
-  case Z80::LD_r8_n: {
-    // LD_r8_n dst, imm -> LD_A_n/LD_B_n/etc. based on dst register
-    Register DstReg = MI.getOperand(0).getReg();
-
-    unsigned Opcode;
-    switch (DstReg.id()) {
-    case Z80::A:
-      Opcode = Z80::LD_A_n;
-      break;
-    case Z80::B:
-      Opcode = Z80::LD_B_n;
-      break;
-    case Z80::C:
-      Opcode = Z80::LD_C_n;
-      break;
-    case Z80::D:
-      Opcode = Z80::LD_D_n;
-      break;
-    case Z80::E:
-      Opcode = Z80::LD_E_n;
-      break;
-    case Z80::H:
-      Opcode = Z80::LD_H_n;
-      break;
-    case Z80::L:
-      Opcode = Z80::LD_L_n;
-      break;
-    default:
-      llvm_unreachable("Unexpected register for LD_r8_n");
+    if (Addr == Z80::HL) {
+      Z80::buildStoreHL(MBB, MI, DL, *this, Z80::A);
+    } else {
+      assert((Addr == Z80::BC || Addr == Z80::DE) &&
+             "Invalid register for STORE8_IND");
+      BuildMI(MBB, MI, DL,
+              get(Addr == Z80::BC ? Z80::LD_BCind_A : Z80::LD_DEind_A));
     }
-
-    BuildMI(MBB, MI, DL, get(Opcode)).add(MI.getOperand(1));
-    MI.eraseFromParent();
-    return true;
-  }
-
-  case Z80::LD_r16_nn: {
-    // LD_r16_nn dst, imm -> LD_BC_nn/LD_DE_nn/LD_HL_nn based on dst register
-    Register DstReg = MI.getOperand(0).getReg();
-
-    unsigned Opcode;
-    if (DstReg == Z80::BC)
-      Opcode = Z80::LD_BC_nn;
-    else if (DstReg == Z80::DE)
-      Opcode = Z80::LD_DE_nn;
-    else if (DstReg == Z80::HL)
-      Opcode = Z80::LD_HL_nn;
-    else
-      llvm_unreachable("Unexpected register for LD_r16_nn");
-
-    BuildMI(MBB, MI, DL, get(Opcode)).add(MI.getOperand(1));
     MI.eraseFromParent();
     return true;
   }
@@ -706,16 +593,14 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
 
     // Copy source to low byte (skip if already in place)
     if (SrcReg != LoReg) {
-      unsigned CopyOp = Z80::getLD8RegOpcode(LoReg, SrcReg);
-      if (!CopyOp)
+      if (!Z80::canLD8(LoReg, SrcReg))
         return false;
-      BuildMI(MBB, MI, DL, get(CopyOp));
+      Z80::buildLD8(MBB, MI, DL, *this, LoReg, SrcReg);
     }
     // Set high byte to 0
-    unsigned ImmOp = getLoadImmR8Opcode(HiReg);
-    if (!ImmOp)
+    if (!Z80::GR8RegClass.contains(HiReg))
       return false;
-    BuildMI(MBB, MI, DL, get(ImmOp)).addImm(0);
+    Z80::buildLD8n(MBB, MI, DL, *this, HiReg).addImm(0);
     MI.eraseFromParent();
     return true;
   }
@@ -732,28 +617,25 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
 
     // Copy source to A (for sign-bit extraction)
     if (SrcReg != Z80::A) {
-      unsigned CopyToA = Z80::getLD8RegOpcode(Z80::A, SrcReg);
-      if (!CopyToA)
+      if (!Z80::canLD8(Z80::A, SrcReg))
         return false;
-      BuildMI(MBB, MI, DL, get(CopyToA));
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, SrcReg);
     }
     // Copy A to low byte
     if (LoReg != Z80::A) {
-      unsigned CopyToLo = Z80::getLD8RegOpcode(LoReg, Z80::A);
-      if (!CopyToLo)
+      if (!Z80::canLD8(LoReg, Z80::A))
         return false;
-      BuildMI(MBB, MI, DL, get(CopyToLo));
+      Z80::buildLD8(MBB, MI, DL, *this, LoReg, Z80::A);
     }
     // RLCA rotates bit 7 into carry
     BuildMI(MBB, MI, DL, get(Z80::RLCA));
     // SBC A,A: A = 0xFF if carry (negative), 0x00 if not
-    Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::SBC_A_A)), Z80::A);
+    Z80::buildSbcAA(MBB, MI, DL, *this);
     // Copy A (sign extension) to high byte
     if (HiReg != Z80::A) {
-      unsigned CopyToHi = Z80::getLD8RegOpcode(HiReg, Z80::A);
-      if (!CopyToHi)
+      if (!Z80::canLD8(HiReg, Z80::A))
         return false;
-      BuildMI(MBB, MI, DL, get(CopyToHi));
+      Z80::buildLD8(MBB, MI, DL, *this, HiReg, Z80::A);
     }
     MI.eraseFromParent();
     return true;
@@ -799,10 +681,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
 
     assert(Offset >= -128 && Offset <= 127 &&
            "Large offset should have been expanded in eliminateFrameIndex");
-    unsigned Opcode = getStoreIXdOpcode(SrcReg);
-    if (!Opcode)
+    if (!Z80::isEncodableGR8(SrcReg))
       return false;
-    BuildMI(MBB, MI, DL, get(Opcode)).addImm(Offset);
+    Z80::buildStoreIdx(MBB, MI, DL, *this, Z80::LD_IXd_r, Offset, SrcReg);
     MI.eraseFromParent();
     return true;
   }
@@ -818,10 +699,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
 
     assert(Offset >= -128 && Offset <= 127 &&
            "Large offset should have been expanded in eliminateFrameIndex");
-    unsigned Opcode = getLoadIXdOpcode(DstReg);
-    if (!Opcode)
+    if (!Z80::isEncodableGR8(DstReg))
       return false;
-    BuildMI(MBB, MI, DL, get(Opcode)).addImm(Offset);
+    Z80::buildLoadIdx(MBB, MI, DL, *this, Z80::LD_r_IXd, DstReg, Offset);
     MI.eraseFromParent();
     return true;
   }
@@ -848,10 +728,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     if (!LoReg || !HiReg)
       return false;
 
-    unsigned LoOp = getStoreIXdOpcode(LoReg);
-    unsigned HiOp = getStoreIXdOpcode(HiReg);
+    bool Encodable = Z80::isEncodableGR8(LoReg) && Z80::isEncodableGR8(HiReg);
 
-    if (!LoOp || !HiOp) {
+    if (!Encodable) {
       if (SrcReg == Z80::IY) {
         // IY has no IX-indexed store opcodes, so transfer via HL.
         // Check if HL is live and save/restore it if needed.
@@ -865,8 +744,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
           Z80::emitHLSavePush(MBB, MI, DL, *this);
         BuildMI(MBB, MI, DL, get(Z80::PUSH_IY));
         BuildMI(MBB, MI, DL, get(Z80::POP_HL));
-        BuildMI(MBB, MI, DL, get(Z80::LD_IXd_L)).addImm(Offset);
-        BuildMI(MBB, MI, DL, get(Z80::LD_IXd_H)).addImm(Offset + 1);
+        Z80::buildStoreIdx(MBB, MI, DL, *this, Z80::LD_IXd_r, Offset, Z80::L);
+        Z80::buildStoreIdx(MBB, MI, DL, *this, Z80::LD_IXd_r, Offset + 1,
+                           Z80::H);
         if (NeedSaveHL)
           BuildMI(MBB, MI, DL, get(Z80::POP_HL));
         MI.eraseFromParent();
@@ -875,8 +755,8 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       return false;
     }
 
-    BuildMI(MBB, MI, DL, get(LoOp)).addImm(Offset);
-    BuildMI(MBB, MI, DL, get(HiOp)).addImm(Offset + 1);
+    Z80::buildStoreIdx(MBB, MI, DL, *this, Z80::LD_IXd_r, Offset, LoReg);
+    Z80::buildStoreIdx(MBB, MI, DL, *this, Z80::LD_IXd_r, Offset + 1, HiReg);
     MI.eraseFromParent();
     return true;
   }
@@ -903,10 +783,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     if (!LoReg || !HiReg)
       return false;
 
-    unsigned LoOp = getLoadIXdOpcode(LoReg);
-    unsigned HiOp = getLoadIXdOpcode(HiReg);
+    bool Encodable = Z80::isEncodableGR8(LoReg) && Z80::isEncodableGR8(HiReg);
 
-    if (!LoOp || !HiOp) {
+    if (!Encodable) {
       if (DestReg == Z80::IY) {
         // IY has no IX-indexed load opcodes, so transfer via HL.
         // Check if HL is live and save/restore it if needed.
@@ -918,8 +797,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
             LiveRegs.contains(Z80::H) || LiveRegs.contains(Z80::L);
         if (NeedSaveHL)
           Z80::emitHLSavePush(MBB, MI, DL, *this);
-        BuildMI(MBB, MI, DL, get(Z80::LD_L_IXd)).addImm(Offset);
-        BuildMI(MBB, MI, DL, get(Z80::LD_H_IXd)).addImm(Offset + 1);
+        Z80::buildLoadIdx(MBB, MI, DL, *this, Z80::LD_r_IXd, Z80::L, Offset);
+        Z80::buildLoadIdx(MBB, MI, DL, *this, Z80::LD_r_IXd, Z80::H,
+                          Offset + 1);
         BuildMI(MBB, MI, DL, get(Z80::PUSH_HL));
         BuildMI(MBB, MI, DL, get(Z80::POP_IY));
         if (NeedSaveHL)
@@ -930,8 +810,8 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       return false;
     }
 
-    BuildMI(MBB, MI, DL, get(LoOp)).addImm(Offset);
-    BuildMI(MBB, MI, DL, get(HiOp)).addImm(Offset + 1);
+    Z80::buildLoadIdx(MBB, MI, DL, *this, Z80::LD_r_IXd, LoReg, Offset);
+    Z80::buildLoadIdx(MBB, MI, DL, *this, Z80::LD_r_IXd, HiReg, Offset + 1);
     MI.eraseFromParent();
     return true;
   }
@@ -948,13 +828,13 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register RhsLo = TRI->getSubReg(RHSReg, Z80::sub_lo);
     Register RhsHi = TRI->getSubReg(RHSReg, Z80::sub_hi);
 
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, LhsLo)));
-    BuildMI(MBB, MI, DL, get(getSUBOpcode(RhsLo)));
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, LhsHi)));
-    BuildMI(MBB, MI, DL, get(getSBCOpcode(RhsHi)));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LhsLo);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::SUB_r, RhsLo);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LhsHi);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, RhsHi);
 
     if (MI.getOpcode() == Z80::CMP16_ULT) {
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::SBC_A_A)), Z80::A);
+      Z80::buildSbcAA(MBB, MI, DL, *this);
       BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
     }
 
@@ -973,10 +853,10 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register RhsLo = TRI->getSubReg(RHSReg, Z80::sub_lo);
     Register RhsHi = TRI->getSubReg(RHSReg, Z80::sub_hi);
 
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, LhsLo)));
-    BuildMI(MBB, MI, DL, get(getSBCOpcode(RhsLo)));
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, LhsHi)));
-    BuildMI(MBB, MI, DL, get(getSBCOpcode(RhsHi)));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LhsLo);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, RhsLo);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LhsHi);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, RhsHi);
 
     MI.eraseFromParent();
     return true;
@@ -1000,18 +880,14 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register RHS_lo = TRI->getSubReg(RHSReg, Z80::sub_lo);
 
     // XOR opcode table indexed by gr8RegToIndex
-    static const unsigned XorOpcodes[] = {Z80::XOR_A, Z80::XOR_B, Z80::XOR_C,
-                                          Z80::XOR_D, Z80::XOR_E, Z80::XOR_H,
-                                          Z80::XOR_L};
-
     // XOR high bytes, save to B
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, LHS_hi)));
-    BuildMI(MBB, MI, DL, get(XorOpcodes[Z80::gr8RegToIndex(RHS_hi)]));
-    BuildMI(MBB, MI, DL, get(Z80::LD_B_A));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LHS_hi);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, RHS_hi);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::B, Z80::A);
     // XOR low bytes, OR with saved high result
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, LHS_lo)));
-    BuildMI(MBB, MI, DL, get(XorOpcodes[Z80::gr8RegToIndex(RHS_lo)]));
-    BuildMI(MBB, MI, DL, get(Z80::OR_B));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LHS_lo);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, RHS_lo);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::OR_r, Z80::B);
 
     // Normalize to 0/1
     if (MI.getOpcode() == Z80::XOR_CMP_EQ16) {
@@ -1021,7 +897,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       // A=0 (equal) → ADD 0xFF no carry → SBC A,A → 0 → AND 1 → 0
       BuildMI(MBB, MI, DL, get(Z80::ADD_A_n)).addImm(0xFF);
     }
-    Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::SBC_A_A)), Z80::A);
+    Z80::buildSbcAA(MBB, MI, DL, *this);
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
 
     MI.eraseFromParent();
@@ -1035,12 +911,8 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register Lo = TRI->getSubReg(SrcReg, Z80::sub_lo);
     Register Hi = TRI->getSubReg(SrcReg, Z80::sub_hi);
 
-    static const unsigned OrOpcodes[] = {Z80::OR_A, Z80::OR_B, Z80::OR_C,
-                                         Z80::OR_D, Z80::OR_E, Z80::OR_H,
-                                         Z80::OR_L};
-
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, Lo)));
-    BuildMI(MBB, MI, DL, get(OrOpcodes[Z80::gr8RegToIndex(Hi)]));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Lo);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::OR_r, Hi);
 
     MI.eraseFromParent();
     return true;
@@ -1057,32 +929,13 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register RHS_hi = TRI->getSubReg(RHSReg, Z80::sub_hi);
     Register RHS_lo = TRI->getSubReg(RHSReg, Z80::sub_lo);
 
-    static const unsigned XorOpcodes[] = {Z80::XOR_A, Z80::XOR_B, Z80::XOR_C,
-                                          Z80::XOR_D, Z80::XOR_E, Z80::XOR_H,
-                                          Z80::XOR_L};
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LHS_hi);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, RHS_hi);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::B, Z80::A);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LHS_lo);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, RHS_lo);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::OR_r, Z80::B);
 
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, LHS_hi)));
-    BuildMI(MBB, MI, DL, get(XorOpcodes[Z80::gr8RegToIndex(RHS_hi)]));
-    BuildMI(MBB, MI, DL, get(Z80::LD_B_A));
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, LHS_lo)));
-    BuildMI(MBB, MI, DL, get(XorOpcodes[Z80::gr8RegToIndex(RHS_lo)]));
-    BuildMI(MBB, MI, DL, get(Z80::OR_B));
-
-    MI.eraseFromParent();
-    return true;
-  }
-
-  case Z80::ADD_HL_rr: {
-    // ADD HL,rr — select ADD_HL_BC or ADD_HL_DE based on allocated register.
-    Register RHS = MI.getOperand(0).getReg();
-    unsigned AddOpc;
-    if (RHS == Z80::BC)
-      AddOpc = Z80::ADD_HL_BC;
-    else if (RHS == Z80::DE)
-      AddOpc = Z80::ADD_HL_DE;
-    else
-      llvm_unreachable("ADD_HL_rr: unexpected register");
-    BuildMI(MBB, MI, DL, get(AddOpc));
     MI.eraseFromParent();
     return true;
   }
@@ -1094,17 +947,17 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       // SM83: byte-by-byte SUB/SBC (no 16-bit SBC HL,rr instruction).
       // LD A,L; SUB lo; LD L,A; LD A,H; SBC A,hi; LD H,A
       auto [Lo, Hi] = getSubRegs16(RHS);
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_L));
-      BuildMI(MBB, MI, DL, get(getSUBOpcode(Lo)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_L_A));
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_H));
-      BuildMI(MBB, MI, DL, get(getSBCOpcode(Hi)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_H_A));
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::SUB_r, Lo);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, Hi);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
     } else {
       // Z80: AND A; SBC HL,rr — atomic to prevent FLAGS clobbering.
-      unsigned SbcOpc = (RHS == Z80::BC) ? Z80::SBC_HL_BC : Z80::SBC_HL_DE;
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::AND_A)), Z80::A);
-      BuildMI(MBB, MI, DL, get(SbcOpc));
+      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Z80::A),
+                        Z80::A);
+      Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::SBC_HL_rr, RHS);
     }
     MI.eraseFromParent();
     return true;
@@ -1117,17 +970,17 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       // SM83: byte-by-byte ADD/ADC (no ADC HL,rr; no P/V flag).
       // LD A,L; ADD A,lo; LD L,A; LD A,H; ADC A,hi; LD H,A
       auto [Lo, Hi] = getSubRegs16(RHS);
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_L));
-      BuildMI(MBB, MI, DL, get(getADD8Opcode(Lo)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_L_A));
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_H));
-      BuildMI(MBB, MI, DL, get(getADCOpcode(Hi)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_H_A));
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADD_A_r, Lo);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADC_A_r, Hi);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
     } else {
       // Z80: AND A; ADC HL,rr — sets P/V for overflow detection.
-      unsigned AdcOpc = (RHS == Z80::BC) ? Z80::ADC_HL_BC : Z80::ADC_HL_DE;
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::AND_A)), Z80::A);
-      BuildMI(MBB, MI, DL, get(AdcOpc));
+      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Z80::A),
+                        Z80::A);
+      Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::ADC_HL_rr, RHS);
     }
     MI.eraseFromParent();
     return true;
@@ -1136,15 +989,8 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   case Z80::ADD_HL_rr_CO: {
     // ADD HL,rr; SBC A,A; AND 1 — carry out in A.
     Register RHS = MI.getOperand(0).getReg();
-    unsigned AddOpc;
-    if (RHS == Z80::BC)
-      AddOpc = Z80::ADD_HL_BC;
-    else if (RHS == Z80::DE)
-      AddOpc = Z80::ADD_HL_DE;
-    else
-      llvm_unreachable("ADD_HL_rr_CO: unexpected register");
-    BuildMI(MBB, MI, DL, get(AddOpc));
-    Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::SBC_A_A)), Z80::A);
+    Z80::buildAddHL(MBB, MI, DL, *this, RHS);
+    Z80::buildSbcAA(MBB, MI, DL, *this);
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
     MI.eraseFromParent();
     return true;
@@ -1157,20 +1003,20 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       // SM83: byte-by-byte SUB/SBC + capture borrow.
       // LD A,L; SUB lo; LD L,A; LD A,H; SBC A,hi; LD H,A; SBC A,A; AND 1
       auto [Lo, Hi] = getSubRegs16(RHS);
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_L));
-      BuildMI(MBB, MI, DL, get(getSUBOpcode(Lo)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_L_A));
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_H));
-      BuildMI(MBB, MI, DL, get(getSBCOpcode(Hi)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_H_A));
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::SUB_r, Lo);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, Hi);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
     } else {
       // Z80: AND A; SBC HL,rr
-      unsigned SbcOpc = (RHS == Z80::BC) ? Z80::SBC_HL_BC : Z80::SBC_HL_DE;
-      Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::AND_A)), Z80::A);
-      BuildMI(MBB, MI, DL, get(SbcOpc));
+      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Z80::A),
+                        Z80::A);
+      Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::SBC_HL_rr, RHS);
     }
     // Capture borrow out: SBC A,A; AND 1
-    Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::SBC_A_A)), Z80::A);
+    Z80::buildSbcAA(MBB, MI, DL, *this);
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
     MI.eraseFromParent();
     return true;
@@ -1182,28 +1028,27 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register CarryReg = MI.getOperand(1).getReg();
     // Restore carry flag from carry_in register: LD A,carry; RRCA
     if (CarryReg != Z80::A) {
-      unsigned LdOpc = Z80::getLD8RegOpcode(Z80::A, CarryReg);
-      assert(LdOpc && "unexpected carry register for ADC_HL_rr_CIO");
-      BuildMI(MBB, MI, DL, get(LdOpc));
+      assert(Z80::canLD8(Z80::A, CarryReg) &&
+             "unexpected carry register for ADC_HL_rr_CIO");
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, CarryReg);
     }
     BuildMI(MBB, MI, DL, get(Z80::RRCA));
     if (STI->hasSM83()) {
       // SM83: byte-by-byte ADC (carry flag set by RRCA above).
       // LD A,L; ADC A,lo; LD L,A; LD A,H; ADC A,hi; LD H,A
       auto [Lo, Hi] = getSubRegs16(RHS);
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_L));
-      BuildMI(MBB, MI, DL, get(getADCOpcode(Lo)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_L_A));
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_H));
-      BuildMI(MBB, MI, DL, get(getADCOpcode(Hi)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_H_A));
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADC_A_r, Lo);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADC_A_r, Hi);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
     } else {
       // Z80: ADC HL,rr (reads carry from RRCA above).
-      unsigned AdcOpc = (RHS == Z80::BC) ? Z80::ADC_HL_BC : Z80::ADC_HL_DE;
-      BuildMI(MBB, MI, DL, get(AdcOpc));
+      Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::ADC_HL_rr, RHS);
     }
     // Capture carry out: SBC A,A; AND 1
-    Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::SBC_A_A)), Z80::A);
+    Z80::buildSbcAA(MBB, MI, DL, *this);
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
     MI.eraseFromParent();
     return true;
@@ -1215,82 +1060,28 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register BorrowReg = MI.getOperand(1).getReg();
     // Restore borrow flag from borrow_in register: LD A,borrow; RRCA
     if (BorrowReg != Z80::A) {
-      unsigned LdOpc = Z80::getLD8RegOpcode(Z80::A, BorrowReg);
-      assert(LdOpc && "unexpected borrow register for SBC_HL_rr_BIO");
-      BuildMI(MBB, MI, DL, get(LdOpc));
+      assert(Z80::canLD8(Z80::A, BorrowReg) &&
+             "unexpected borrow register for SBC_HL_rr_BIO");
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, BorrowReg);
     }
     BuildMI(MBB, MI, DL, get(Z80::RRCA));
     if (STI->hasSM83()) {
       // SM83: byte-by-byte SBC (borrow flag set by RRCA above).
       // LD A,L; SBC A,lo; LD L,A; LD A,H; SBC A,hi; LD H,A
       auto [Lo, Hi] = getSubRegs16(RHS);
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_L));
-      BuildMI(MBB, MI, DL, get(getSBCOpcode(Lo)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_L_A));
-      BuildMI(MBB, MI, DL, get(Z80::LD_A_H));
-      BuildMI(MBB, MI, DL, get(getSBCOpcode(Hi)));
-      BuildMI(MBB, MI, DL, get(Z80::LD_H_A));
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, Lo);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
+      Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, Hi);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
     } else {
       // Z80: SBC HL,rr (reads borrow from RRCA above).
-      unsigned SbcOpc = (RHS == Z80::BC) ? Z80::SBC_HL_BC : Z80::SBC_HL_DE;
-      BuildMI(MBB, MI, DL, get(SbcOpc));
+      Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::SBC_HL_rr, RHS);
     }
     // Capture borrow out: SBC A,A; AND 1
-    Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::SBC_A_A)), Z80::A);
+    Z80::buildSbcAA(MBB, MI, DL, *this);
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
-    MI.eraseFromParent();
-    return true;
-  }
-
-  case Z80::ADD_A_r:
-  case Z80::SUB_r:
-  case Z80::AND_r:
-  case Z80::OR_r:
-  case Z80::XOR_r:
-  case Z80::CP_r: {
-    // 8-bit ALU pseudo: select concrete opcode based on allocated register.
-    Register RHS = MI.getOperand(0).getReg();
-    static const unsigned AluOpcodes[][7] = {
-        // A,       B,       C,       D,       E,       H,       L
-        {Z80::ADD_A_A, Z80::ADD_A_B, Z80::ADD_A_C, Z80::ADD_A_D, Z80::ADD_A_E,
-         Z80::ADD_A_H, Z80::ADD_A_L}, // ADD_A_r
-        {Z80::SUB_A, Z80::SUB_B, Z80::SUB_C, Z80::SUB_D, Z80::SUB_E, Z80::SUB_H,
-         Z80::SUB_L}, // SUB_r
-        {Z80::AND_A, Z80::AND_B, Z80::AND_C, Z80::AND_D, Z80::AND_E, Z80::AND_H,
-         Z80::AND_L}, // AND_r
-        {Z80::OR_A, Z80::OR_B, Z80::OR_C, Z80::OR_D, Z80::OR_E, Z80::OR_H,
-         Z80::OR_L}, // OR_r
-        {Z80::XOR_A, Z80::XOR_B, Z80::XOR_C, Z80::XOR_D, Z80::XOR_E, Z80::XOR_H,
-         Z80::XOR_L}, // XOR_r
-        {Z80::CP_A, Z80::CP_B, Z80::CP_C, Z80::CP_D, Z80::CP_E, Z80::CP_H,
-         Z80::CP_L}, // CP_r
-    };
-    unsigned TableIdx;
-    switch (MI.getOpcode()) {
-    case Z80::ADD_A_r:
-      TableIdx = 0;
-      break;
-    case Z80::SUB_r:
-      TableIdx = 1;
-      break;
-    case Z80::AND_r:
-      TableIdx = 2;
-      break;
-    case Z80::OR_r:
-      TableIdx = 3;
-      break;
-    case Z80::XOR_r:
-      TableIdx = 4;
-      break;
-    case Z80::CP_r:
-      TableIdx = 5;
-      break;
-    default:
-      llvm_unreachable("unexpected 8-bit ALU pseudo");
-    }
-    int RegIdx = Z80::gr8RegToIndex(Register(RHS));
-    assert(RegIdx >= 0 && "unexpected register for 8-bit ALU pseudo");
-    BuildMI(MBB, MI, DL, get(AluOpcodes[TableIdx][RegIdx]));
     MI.eraseFromParent();
     return true;
   }
@@ -1301,7 +1092,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     // PUSH/POP/LD don't affect flags, so P/V is preserved until RRCA.
     BuildMI(MBB, MI, DL, get(Z80::PUSH_AF));
     BuildMI(MBB, MI, DL, get(Z80::POP_HL));
-    BuildMI(MBB, MI, DL, get(Z80::LD_A_L));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
     BuildMI(MBB, MI, DL, get(Z80::RRCA));
     BuildMI(MBB, MI, DL, get(Z80::RRCA));
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
@@ -1318,26 +1109,25 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     // Use a temp from the "other" register pair.
     Register Temp = (RHS == Z80::DE) ? Z80::B : Z80::D;
     // Save lhs_hi before the addition overwrites H.
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Temp, Z80::H)));
+    Z80::buildLD8(MBB, MI, DL, *this, Temp, Z80::H);
     // HL = HL + rr (byte-by-byte)
-    BuildMI(MBB, MI, DL, get(Z80::LD_A_L));
-    BuildMI(MBB, MI, DL, get(getADD8Opcode(Lo)));
-    BuildMI(MBB, MI, DL, get(Z80::LD_L_A));
-    BuildMI(MBB, MI, DL, get(Z80::LD_A_H));
-    BuildMI(MBB, MI, DL, get(getADCOpcode(Hi)));
-    BuildMI(MBB, MI, DL, get(Z80::LD_H_A));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADD_A_r, Lo);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADC_A_r, Hi);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
     // A = result_hi. Compute overflow:
     // T1 = result_hi ^ lhs_hi (Temp has lhs_hi)
-    unsigned XorTemp = (Temp == Z80::B) ? Z80::XOR_B : Z80::XOR_D;
-    BuildMI(MBB, MI, DL, get(XorTemp)); // A = result_hi ^ lhs_hi
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Temp, Z80::A))); // Temp = T1
-    BuildMI(MBB, MI, DL, get(Z80::LD_A_H)); // A = result_hi
+    // A = result_hi ^ lhs_hi
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, Temp);
+    Z80::buildLD8(MBB, MI, DL, *this, Temp, Z80::A);   // Temp = T1
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H); // A = result_hi
     // T2 = result_hi ^ rhs_hi
-    unsigned XorHi = (Hi == Z80::B) ? Z80::XOR_B : Z80::XOR_D;
-    BuildMI(MBB, MI, DL, get(XorHi)); // A = result_hi ^ rhs_hi
+    // A = result_hi ^ rhs_hi
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, Hi);
     // A = T1 & T2
-    unsigned AndTemp = (Temp == Z80::B) ? Z80::AND_B : Z80::AND_D;
-    BuildMI(MBB, MI, DL, get(AndTemp)); // A = (res^lhs) & (res^rhs)
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Temp);
     // Bit 7 → bit 0
     BuildMI(MBB, MI, DL, get(Z80::RLCA));
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
@@ -1355,28 +1145,25 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register Temp1 = (RHS == Z80::DE) ? Z80::B : Z80::D; // lhs_hi
     Register Temp2 = (RHS == Z80::DE) ? Z80::C : Z80::E; // XOR intermediate
     // Save lhs_hi before the subtraction overwrites H.
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Temp1, Z80::H)));
+    Z80::buildLD8(MBB, MI, DL, *this, Temp1, Z80::H);
     // HL = HL - rr (byte-by-byte)
-    BuildMI(MBB, MI, DL, get(Z80::LD_A_L));
-    BuildMI(MBB, MI, DL, get(getSUBOpcode(Lo)));
-    BuildMI(MBB, MI, DL, get(Z80::LD_L_A));
-    BuildMI(MBB, MI, DL, get(Z80::LD_A_H));
-    BuildMI(MBB, MI, DL, get(getSBCOpcode(Hi)));
-    BuildMI(MBB, MI, DL, get(Z80::LD_H_A));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::SUB_r, Lo);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, Hi);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
     // A = result_hi. Compute overflow:
     // T1 = result_hi ^ lhs_hi (Temp1 has lhs_hi)
-    unsigned XorTemp1 = (Temp1 == Z80::B) ? Z80::XOR_B : Z80::XOR_D;
-    BuildMI(MBB, MI, DL, get(XorTemp1)); // A = result_hi ^ lhs_hi
-    BuildMI(MBB, MI, DL,
-            get(Z80::getLD8RegOpcode(Temp2, Z80::A))); // Temp2 = T1
+    // A = result_hi ^ lhs_hi
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, Temp1);
+    Z80::buildLD8(MBB, MI, DL, *this, Temp2, Z80::A); // Temp2 = T1
     // T2 = lhs_hi ^ rhs_hi (need lhs_hi again, still in Temp1)
-    BuildMI(MBB, MI, DL,
-            get(Z80::getLD8RegOpcode(Z80::A, Temp1))); // A = lhs_hi
-    unsigned XorHi = (Hi == Z80::B) ? Z80::XOR_B : Z80::XOR_D;
-    BuildMI(MBB, MI, DL, get(XorHi)); // A = lhs_hi ^ rhs_hi
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Temp1); // A = lhs_hi
+    // A = lhs_hi ^ rhs_hi
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, Hi);
     // A = T1 & T2
-    unsigned AndTemp2 = (Temp2 == Z80::C) ? Z80::AND_C : Z80::AND_E;
-    BuildMI(MBB, MI, DL, get(AndTemp2)); // A = (res^lhs) & (lhs^rhs)
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Temp2);
     // Bit 7 → bit 0
     BuildMI(MBB, MI, DL, get(Z80::RLCA));
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
@@ -1393,21 +1180,10 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register Hi = TRI->getSubReg(Reg, Z80::sub_hi);
     Register Lo = TRI->getSubReg(Reg, Z80::sub_lo);
 
-    static const unsigned SrlOps[] = {Z80::SRL_A, Z80::SRL_B, Z80::SRL_C,
-                                      Z80::SRL_D, Z80::SRL_E, Z80::SRL_H,
-                                      Z80::SRL_L};
-    static const unsigned SraOps[] = {Z80::SRA_A, Z80::SRA_B, Z80::SRA_C,
-                                      Z80::SRA_D, Z80::SRA_E, Z80::SRA_H,
-                                      Z80::SRA_L};
-    static const unsigned RrOps[] = {Z80::RR_A, Z80::RR_B, Z80::RR_C, Z80::RR_D,
-                                     Z80::RR_E, Z80::RR_H, Z80::RR_L};
-    auto getSrlOp = [](Register R) { return SrlOps[Z80::gr8RegToIndex(R)]; };
-    auto getSraOp = [](Register R) { return SraOps[Z80::gr8RegToIndex(R)]; };
-    auto getRrOp = [](Register R) { return RrOps[Z80::gr8RegToIndex(R)]; };
-
     bool IsLogical = (MI.getOpcode() == Z80::LSHR16);
-    BuildMI(MBB, MI, DL, get(IsLogical ? getSrlOp(Hi) : getSraOp(Hi)));
-    BuildMI(MBB, MI, DL, get(getRrOp(Lo)));
+    Z80::buildRotate8(MBB, MI, DL, *this, IsLogical ? Z80::SRL_r : Z80::SRA_r,
+                      Hi);
+    Z80::buildRotate8(MBB, MI, DL, *this, Z80::RR_r, Lo);
     MI.eraseFromParent();
     return true;
   }
@@ -1479,7 +1255,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     } else {
       // Z80 large: POP BC; LD HL,N; ADD HL,SP; LD SP,HL; PUSH BC; RET
       BuildMI(MBB, MI, DL, get(Z80::POP_BC));
-      BuildMI(MBB, MI, DL, get(Z80::LD_HL_nn)).addImm(Amount);
+      Z80::buildLD16n(MBB, MI, DL, *this, Z80::HL).addImm(Amount);
       BuildMI(MBB, MI, DL, get(Z80::ADD_HL_SP));
       BuildMI(MBB, MI, DL, get(Z80::LD_SP_HL));
       BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
@@ -1503,38 +1279,15 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register DstLo = TRI->getSubReg(DstReg, Z80::sub_lo);
 
     // LD A, src_hi - read the sign byte
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(Z80::A, SrcHi)));
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, SrcHi);
     // ADD A,A - shift sign bit into carry
-    BuildMI(MBB, MI, DL, get(Z80::ADD_A_A));
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADD_A_r, Z80::A);
     // SBC A,A - A = 0xFF if carry (negative), 0x00 if no carry (positive)
-    Z80::markUndefUse(BuildMI(MBB, MI, DL, get(Z80::SBC_A_A)), Z80::A);
+    Z80::buildSbcAA(MBB, MI, DL, *this);
     // LD dst_lo, A; LD dst_hi, A
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(DstLo, Z80::A)));
-    BuildMI(MBB, MI, DL, get(Z80::getLD8RegOpcode(DstHi, Z80::A)));
+    Z80::buildLD8(MBB, MI, DL, *this, DstLo, Z80::A);
+    Z80::buildLD8(MBB, MI, DL, *this, DstHi, Z80::A);
 
-    MI.eraseFromParent();
-    return true;
-  }
-
-  case Z80::INC16:
-  case Z80::DEC16: {
-    // INC16/DEC16 pseudo: expand to the correct INC/DEC based on physical reg
-    Register Reg = MI.getOperand(0).getReg();
-    unsigned Opc;
-    bool IsInc = (MI.getOpcode() == Z80::INC16);
-    if (Reg == Z80::BC)
-      Opc = IsInc ? Z80::INC_BC : Z80::DEC_BC;
-    else if (Reg == Z80::DE)
-      Opc = IsInc ? Z80::INC_DE : Z80::DEC_DE;
-    else if (Reg == Z80::HL)
-      Opc = IsInc ? Z80::INC_HL : Z80::DEC_HL;
-    else if (Reg == Z80::IX)
-      Opc = IsInc ? Z80::INC_IX : Z80::DEC_IX;
-    else if (Reg == Z80::IY)
-      Opc = IsInc ? Z80::INC_IY : Z80::DEC_IY;
-    else
-      return false;
-    BuildMI(MBB, MI, DL, get(Opc));
     MI.eraseFromParent();
     return true;
   }
@@ -1804,132 +1557,24 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::NOP:
   case Z80::HALT:
   case Z80::RET:
-  case Z80::LD_A_A:
-  case Z80::LD_A_B:
-  case Z80::LD_A_C:
-  case Z80::LD_A_D:
-  case Z80::LD_A_E:
-  case Z80::LD_A_H:
-  case Z80::LD_A_L:
-  case Z80::LD_B_A:
-  case Z80::LD_B_B:
-  case Z80::LD_B_C:
-  case Z80::LD_B_D:
-  case Z80::LD_B_E:
-  case Z80::LD_B_H:
-  case Z80::LD_B_L:
-  case Z80::LD_C_A:
-  case Z80::LD_C_B:
-  case Z80::LD_C_C:
-  case Z80::LD_C_D:
-  case Z80::LD_C_E:
-  case Z80::LD_C_H:
-  case Z80::LD_C_L:
-  case Z80::LD_D_A:
-  case Z80::LD_D_B:
-  case Z80::LD_D_C:
-  case Z80::LD_D_D:
-  case Z80::LD_D_E:
-  case Z80::LD_D_H:
-  case Z80::LD_D_L:
-  case Z80::LD_E_A:
-  case Z80::LD_E_B:
-  case Z80::LD_E_C:
-  case Z80::LD_E_D:
-  case Z80::LD_E_E:
-  case Z80::LD_E_H:
-  case Z80::LD_E_L:
-  case Z80::LD_H_A:
-  case Z80::LD_H_B:
-  case Z80::LD_H_C:
-  case Z80::LD_H_D:
-  case Z80::LD_H_E:
-  case Z80::LD_H_H:
-  case Z80::LD_H_L:
-  case Z80::LD_L_A:
-  case Z80::LD_L_B:
-  case Z80::LD_L_C:
-  case Z80::LD_L_D:
-  case Z80::LD_L_E:
-  case Z80::LD_L_H:
-  case Z80::LD_L_L:
-  case Z80::LD_A_HLind:
-  case Z80::LD_HLind_A:
-  case Z80::ADD_A_A:
-  case Z80::ADD_A_B:
-  case Z80::ADD_A_C:
-  case Z80::ADD_A_D:
-  case Z80::ADD_A_E:
-  case Z80::ADD_A_H:
-  case Z80::ADD_A_L:
-  case Z80::SUB_A:
-  case Z80::SUB_B:
-  case Z80::SUB_C:
-  case Z80::SUB_D:
-  case Z80::SUB_E:
-  case Z80::SUB_H:
-  case Z80::SUB_L:
-  case Z80::AND_A:
-  case Z80::AND_B:
-  case Z80::AND_C:
-  case Z80::AND_D:
-  case Z80::AND_E:
-  case Z80::AND_H:
-  case Z80::AND_L:
-  case Z80::OR_A:
-  case Z80::OR_B:
-  case Z80::OR_C:
-  case Z80::OR_D:
-  case Z80::OR_E:
-  case Z80::OR_H:
-  case Z80::OR_L:
-  case Z80::XOR_A:
-  case Z80::XOR_B:
-  case Z80::XOR_C:
-  case Z80::XOR_D:
-  case Z80::XOR_E:
-  case Z80::XOR_H:
-  case Z80::XOR_L:
-  case Z80::CP_A:
-  case Z80::CP_B:
-  case Z80::CP_C:
-  case Z80::CP_D:
-  case Z80::CP_E:
-  case Z80::CP_H:
-  case Z80::CP_L:
-  case Z80::INC_A:
-  case Z80::INC_B:
-  case Z80::INC_C:
-  case Z80::INC_D:
-  case Z80::INC_E:
-  case Z80::INC_H:
-  case Z80::INC_L:
-  case Z80::DEC_A:
-  case Z80::DEC_B:
-  case Z80::DEC_C:
-  case Z80::DEC_D:
-  case Z80::DEC_E:
-  case Z80::DEC_H:
-  case Z80::DEC_L:
-  case Z80::INC_BC:
-  case Z80::INC_DE:
-  case Z80::INC_HL:
-  case Z80::INC_SP:
-  case Z80::DEC_BC:
-  case Z80::DEC_DE:
-  case Z80::DEC_HL:
-  case Z80::DEC_SP:
-  case Z80::ADD_HL_BC:
-  case Z80::ADD_HL_DE:
-  case Z80::ADD_HL_HL:
-  case Z80::ADD_HL_SP:
-  case Z80::ADD_HL_rr: // pseudo → 1-byte ADD HL,rr
+  case Z80::LD_r_r:
+  case Z80::LD_r_HLind:
+  case Z80::LD_HLind_r:
   case Z80::ADD_A_r:
   case Z80::SUB_r:
   case Z80::AND_r:
   case Z80::OR_r:
   case Z80::XOR_r:
-  case Z80::CP_r: // 8-bit ALU pseudos → 1 byte
+  case Z80::CP_r:
+  case Z80::INC_r:
+  case Z80::DEC_r:
+  case Z80::INC_rr:
+  case Z80::INC_SP:
+  case Z80::DEC_rr:
+  case Z80::DEC_SP:
+  case Z80::ADD_HL_rr:
+  case Z80::ADD_HL_HL:
+  case Z80::ADD_HL_SP:
   case Z80::PUSH_AF:
   case Z80::PUSH_BC:
   case Z80::PUSH_DE:
@@ -1944,51 +1589,24 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::RRA:
   case Z80::SCF:
   case Z80::CCF:
-  case Z80::SBC_A_A:
+  case Z80::ADC_A_r:
+  case Z80::SBC_A_r:
     return 1;
 
   // Two-byte instructions (with immediate or CB prefix)
-  case Z80::LD_A_n:
-  case Z80::LD_B_n:
-  case Z80::LD_C_n:
-  case Z80::LD_D_n:
-  case Z80::LD_E_n:
-  case Z80::LD_H_n:
-  case Z80::LD_L_n:
+  case Z80::LD_r_n:
   case Z80::ADD_A_n:
   case Z80::SUB_n:
   case Z80::AND_n:
   case Z80::OR_n:
   case Z80::XOR_n:
   case Z80::CP_n:
-  case Z80::SLA_A:
-  case Z80::SLA_B:
-  case Z80::SLA_C:
-  case Z80::SLA_D:
-  case Z80::SLA_E:
-  case Z80::SLA_H:
-  case Z80::SLA_L:
-  case Z80::SRA_A:
-  case Z80::SRA_B:
-  case Z80::SRA_C:
-  case Z80::SRA_D:
-  case Z80::SRA_E:
-  case Z80::SRA_H:
-  case Z80::SRA_L:
-  case Z80::SRL_A:
-  case Z80::SRL_B:
-  case Z80::SRL_C:
-  case Z80::SRL_D:
-  case Z80::SRL_E:
-  case Z80::SRL_H:
-  case Z80::SRL_L:
-  case Z80::SBC_HL_BC:
-  case Z80::SBC_HL_DE:
-  case Z80::SBC_HL_HL:
+  case Z80::SLA_r:
+  case Z80::SRA_r:
+  case Z80::SRL_r:
+  case Z80::SBC_HL_rr:
   case Z80::SBC_HL_SP:
-  case Z80::ADC_HL_BC:
-  case Z80::ADC_HL_DE:
-  case Z80::ADC_HL_HL:
+  case Z80::ADC_HL_rr:
   case Z80::ADC_HL_SP:
   case Z80::PUSH_IX:
   case Z80::PUSH_IY:
@@ -2004,9 +1622,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::JP_C_nn:
   case Z80::JP_NC_nn:
   case Z80::CALL_nn:
-  case Z80::LD_BC_nn:
-  case Z80::LD_DE_nn:
-  case Z80::LD_HL_nn:
+  case Z80::LD_rr_nn:
   case Z80::LD_SP_nn:
   case Z80::SUB_HL_rr:  // AND A(1) + SBC HL,rr(2) = 3
   case Z80::SADD_HL_rr: // AND A(1) + ADC HL,rr(2) = 3

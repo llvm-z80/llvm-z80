@@ -14,15 +14,15 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $a
-    LD_L_n 0, implicit-def $l
-    OR_L implicit-def $a, implicit-def $flags, implicit $a, implicit $l
-    LD_IXd_A -2, implicit $a, implicit $ix
+    $l = LD_r_n 0
+    OR_r $l, implicit-def $a, implicit-def $flags, implicit $a
+    LD_IXd_r -2, $a, implicit $ix
     RET
 
 # CHECK-LABEL: name: zero_operand
-# CHECK-NOT:  LD_L_n
-# CHECK-NOT:  OR_L
-# CHECK:      LD_IXd_A
+# CHECK-NOT:  LD_r_n
+# CHECK-NOT:  OR_r
+# CHECK:      LD_IXd_r -2, killed $a
 
 ...
 ---
@@ -31,8 +31,8 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $a
-    LD_L_n 0, implicit-def $l
-    OR_L implicit-def $a, implicit-def $flags, implicit $a, implicit $l
+    $l = LD_r_n 0
+    OR_r $l, implicit-def $a, implicit-def $flags, implicit $a
     JP_Z_nn %bb.1, implicit $flags
   bb.1:
     RET
@@ -40,8 +40,8 @@ body:             |
 # The flags are the whole point here, so the instruction stays.
 
 # CHECK-LABEL: name: flags_live
-# CHECK:      LD_L_n 0
-# CHECK-NEXT: OR_L
+# CHECK:      $l = LD_r_n 0
+# CHECK-NEXT: OR_r $l
 # CHECK-NEXT: JP_Z_nn
 
 ...

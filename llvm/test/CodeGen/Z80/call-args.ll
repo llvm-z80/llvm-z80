@@ -1,7 +1,7 @@
 ; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 
 ; Test: calling with 3 i8 args (1st→A, 2nd→L, 3rd→stack)
-; Verifies LD_r8_n pseudo: ld l,#2 instead of ld a,#2; ld l,a
+; Verifies LD r,n: ld l,#2 instead of ld a,#2; ld l,a
 declare i8 @callee_i8(i8, i8, i8)
 
 define i8 @call_i8_args() {

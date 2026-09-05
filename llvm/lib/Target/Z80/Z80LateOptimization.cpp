@@ -50,28 +50,163 @@ struct IXOffsetInfo {
   static bool isEqual(int LHS, int RHS) { return LHS == RHS; }
 };
 
-// Get the source register for an IX-indexed store instruction.
-// Returns the physical register being stored, or Register() if not an
-// IX-indexed store.
-static Register getStoreIXdSrcReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::LD_IXd_A:
-    return Z80::A;
-  case Z80::LD_IXd_B:
-    return Z80::B;
-  case Z80::LD_IXd_C:
-    return Z80::C;
-  case Z80::LD_IXd_D:
-    return Z80::D;
-  case Z80::LD_IXd_E:
-    return Z80::E;
-  case Z80::LD_IXd_H:
-    return Z80::H;
-  case Z80::LD_IXd_L:
-    return Z80::L;
-  default:
+// --- Asking an instruction what it is ---
+//
+// Most instructions here name their registers as operands, so a peephole
+// matches on the opcode and the registers together rather than on one of the
+// many opcodes a register pair used to have. These are the vocabulary for
+// that; each returns an invalid register, or false, for anything else.
+
+/// Whether \p MI is the 8-bit register copy.
+static bool isLD8(const MachineInstr &MI) {
+  return MI.getOpcode() == Z80::LD_r_r;
+}
+
+static bool isLD8(const MachineInstr &MI, Register Dst, Register Src) {
+  return isLD8(MI) && MI.getOperand(0).getReg() == Dst &&
+         MI.getOperand(1).getReg() == Src;
+}
+
+/// The source of a copy into \p Dst, or an invalid register if \p MI is not
+/// a copy into that register.
+static Register getLD8Src(const MachineInstr &MI, Register Dst) {
+  if (!isLD8(MI) || MI.getOperand(0).getReg() != Dst)
     return Register();
-  }
+  return MI.getOperand(1).getReg();
+}
+
+/// The destination of a copy out of \p Src, or an invalid register if \p MI
+/// is not a copy out of that register.
+static Register getLD8Dst(const MachineInstr &MI, Register Src) {
+  if (!isLD8(MI) || MI.getOperand(1).getReg() != Src)
+    return Register();
+  return MI.getOperand(0).getReg();
+}
+
+/// Whether \p MI is the 8-bit immediate load.
+static bool isLD8n(const MachineInstr &MI) {
+  return MI.getOpcode() == Z80::LD_r_n;
+}
+
+/// The register an `LD r, n` writes, or an invalid register if \p MI is not
+/// one. The immediate is its second operand, and can be a symbol reference
+/// rather than a constant.
+static Register getLD8nDst(const MachineInstr &MI) {
+  return isLD8n(MI) ? MI.getOperand(0).getReg() : Register();
+}
+
+/// The pair an `LD rr, nn` writes, or an invalid register if \p MI is not
+/// one. Like LD r,n the immediate is the second operand.
+static Register getLD16nDst(const MachineInstr &MI) {
+  return MI.getOpcode() == Z80::LD_rr_nn ? MI.getOperand(0).getReg()
+                                         : Register();
+}
+
+/// Whether \p MI loads \p Dst from the byte HL points at.
+static bool isLoadHL(const MachineInstr &MI, Register Dst) {
+  return MI.getOpcode() == Z80::LD_r_HLind && MI.getOperand(0).getReg() == Dst;
+}
+
+/// Whether \p MI stores \p Src to the byte HL points at.
+static bool isStoreHL(const MachineInstr &MI, Register Src) {
+  return MI.getOpcode() == Z80::LD_HLind_r && MI.getOperand(0).getReg() == Src;
+}
+
+/// Whether \p R carries data rather than the address of an HL-indirect
+/// access. H and L hold the address, and a rewrite that moved such an access
+/// would be reasoning about the address as if it were data.
+static bool isAccessDataReg(Register R) {
+  return R.isValid() && R != Z80::H && R != Z80::L;
+}
+
+/// The register an `LD r, (HL)` loads, leaving out the halves of the address
+/// itself, or an invalid register if \p MI is not such a load.
+static Register getLoadHLindDstReg(const MachineInstr &MI) {
+  if (MI.getOpcode() != Z80::LD_r_HLind)
+    return Register();
+  Register Dst = MI.getOperand(0).getReg();
+  return isAccessDataReg(Dst) ? Dst : Register();
+}
+
+/// The register an `LD (HL), r` stores, leaving out the halves of the address
+/// itself, or an invalid register if \p MI is not such a store.
+static Register getStoreHLindSrcReg(const MachineInstr &MI) {
+  if (MI.getOpcode() != Z80::LD_HLind_r)
+    return Register();
+  Register Src = MI.getOperand(0).getReg();
+  return isAccessDataReg(Src) ? Src : Register();
+}
+
+/// The register an `LD (IX+d), r` stores, or an invalid register if \p MI is
+/// not such a store.
+static Register getStoreIXdSrcReg(const MachineInstr &MI) {
+  return MI.getOpcode() == Z80::LD_IXd_r ? MI.getOperand(1).getReg()
+                                         : Register();
+}
+
+/// The register an `LD r, (IX+d)` loads, or an invalid register if \p MI is
+/// not such a load.
+static Register getLoadIXdDstReg(const MachineInstr &MI) {
+  return MI.getOpcode() == Z80::LD_r_IXd ? MI.getOperand(0).getReg()
+                                         : Register();
+}
+
+/// Whether \p MI is the accumulator operation \p Opc against \p Src.
+static bool isAlu8(const MachineInstr &MI, unsigned Opc, Register Src) {
+  return MI.getOpcode() == Opc && MI.getOperand(0).getReg() == Src;
+}
+
+/// Whether \p MI is `XOR A`, which sets A to zero rather than combining it
+/// with another register.
+static bool isZeroA(const MachineInstr &MI) {
+  return isAlu8(MI, Z80::XOR_r, Z80::A);
+}
+
+// Get the register an OR r / XOR r reads besides A, or Register(). Both
+// leave A untouched when that register holds zero. A itself is excluded:
+// OR A and XOR A mean something else.
+static Register getZeroNeutralAluSrcReg(const MachineInstr &MI) {
+  unsigned Opc = MI.getOpcode();
+  if (Opc != Z80::OR_r && Opc != Z80::XOR_r)
+    return Register();
+  Register Src = MI.getOperand(0).getReg();
+  return Src == Z80::A ? Register() : Src;
+}
+
+// Get the register an OR r / XOR r / ADD A,r reads besides A, or Register().
+// All three copy that register into A when A holds zero.
+static Register getAccumulatorNeutralAluSrcReg(const MachineInstr &MI) {
+  unsigned Opc = MI.getOpcode();
+  if (Opc != Z80::OR_r && Opc != Z80::XOR_r && Opc != Z80::ADD_A_r)
+    return Register();
+  Register Src = MI.getOperand(0).getReg();
+  return Src == Z80::A ? Register() : Src;
+}
+
+// For an 8-bit ALU instruction that reads a register, give back that
+// register and the IX-indexed form of the same operation. A is excluded:
+// the folded form addresses memory, which A cannot stand in for.
+static Register getAluRegSrc(const MachineInstr &MI, unsigned &IXdOpc) {
+  unsigned Opc = Z80::getAluRegIXdOpcode(MI.getOpcode());
+  if (!Opc)
+    return Register();
+  Register Src = MI.getOperand(0).getReg();
+  if (Src == Z80::A)
+    return Register();
+  IXdOpc = Opc;
+  return Src;
+}
+
+/// Whether \p MI increments or decrements \p Reg. \p Opc is Z80::INC_r or
+/// Z80::DEC_r.
+static bool isIncDec8(const MachineInstr &MI, unsigned Opc, Register Reg) {
+  return MI.getOpcode() == Opc && MI.getOperand(0).getReg() == Reg;
+}
+
+/// Whether \p MI increments or decrements \p Pair. \p Opc is Z80::INC_rr or
+/// Z80::DEC_rr.
+static bool isIncDec16(const MachineInstr &MI, unsigned Opc, Register Pair) {
+  return MI.getOpcode() == Opc && MI.getOperand(0).getReg() == Pair;
 }
 
 // Whether a stack access may be reasoned about as an ordinary read or write
@@ -84,85 +219,6 @@ static bool isPlainSlotAccess(const MachineInstr &MI) {
          llvm::all_of(MI.memoperands(), [](const MachineMemOperand *MMO) {
            return MMO->isUnordered() && !MMO->isVolatile();
          });
-}
-
-// Get the destination register for an IX-indexed load instruction.
-// Returns the physical register being loaded, or Register() if not an
-// IX-indexed load.
-static Register getLoadIXdDstReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::LD_A_IXd:
-    return Z80::A;
-  case Z80::LD_B_IXd:
-    return Z80::B;
-  case Z80::LD_C_IXd:
-    return Z80::C;
-  case Z80::LD_D_IXd:
-    return Z80::D;
-  case Z80::LD_E_IXd:
-    return Z80::E;
-  case Z80::LD_H_IXd:
-    return Z80::H;
-  case Z80::LD_L_IXd:
-    return Z80::L;
-  default:
-    return Register();
-  }
-}
-
-// Get the LD r,r' opcode for two 8-bit physical registers.
-// Returns 0 if no direct LD exists.
-static unsigned getLD8Opcode(Register Dst, Register Src) {
-  // Map register to table index
-  auto regIdx = [](Register R) -> int {
-    switch (R.id()) {
-    case Z80::A:
-      return 0;
-    case Z80::B:
-      return 1;
-    case Z80::C:
-      return 2;
-    case Z80::D:
-      return 3;
-    case Z80::E:
-      return 4;
-    case Z80::H:
-      return 5;
-    case Z80::L:
-      return 6;
-    default:
-      return -1;
-    }
-  };
-
-  static const unsigned LDOpcodes[7][7] = {
-      //       A            B            C            D            E H L
-      /*A*/ {Z80::LD_A_A, Z80::LD_A_B, Z80::LD_A_C, Z80::LD_A_D, Z80::LD_A_E,
-             Z80::LD_A_H, Z80::LD_A_L},
-      /*B*/
-      {Z80::LD_B_A, Z80::LD_B_B, Z80::LD_B_C, Z80::LD_B_D, Z80::LD_B_E,
-       Z80::LD_B_H, Z80::LD_B_L},
-      /*C*/
-      {Z80::LD_C_A, Z80::LD_C_B, Z80::LD_C_C, Z80::LD_C_D, Z80::LD_C_E,
-       Z80::LD_C_H, Z80::LD_C_L},
-      /*D*/
-      {Z80::LD_D_A, Z80::LD_D_B, Z80::LD_D_C, Z80::LD_D_D, Z80::LD_D_E,
-       Z80::LD_D_H, Z80::LD_D_L},
-      /*E*/
-      {Z80::LD_E_A, Z80::LD_E_B, Z80::LD_E_C, Z80::LD_E_D, Z80::LD_E_E,
-       Z80::LD_E_H, Z80::LD_E_L},
-      /*H*/
-      {Z80::LD_H_A, Z80::LD_H_B, Z80::LD_H_C, Z80::LD_H_D, Z80::LD_H_E,
-       Z80::LD_H_H, Z80::LD_H_L},
-      /*L*/
-      {Z80::LD_L_A, Z80::LD_L_B, Z80::LD_L_C, Z80::LD_L_D, Z80::LD_L_E,
-       Z80::LD_L_H, Z80::LD_L_L},
-  };
-
-  int di = regIdx(Dst), si = regIdx(Src);
-  if (di < 0 || si < 0)
-    return 0;
-  return LDOpcodes[di][si];
 }
 
 // Invalidate all AvailValues entries where the stored register overlaps
@@ -208,215 +264,12 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
                              const TargetInstrInfo *TII,
                              const TargetRegisterInfo *TRI);
 
-// Get the destination register for a LD r,(HL) instruction,
-// or Register() if not one.
-static Register getLoadHLindDstReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::LD_A_HLind:
-    return Z80::A;
-  case Z80::LD_B_HLind:
-    return Z80::B;
-  case Z80::LD_C_HLind:
-    return Z80::C;
-  case Z80::LD_D_HLind:
-    return Z80::D;
-  case Z80::LD_E_HLind:
-    return Z80::E;
-  default:
-    return Register();
-  }
-}
-
-// Get the source register for a LD (HL),r instruction,
-// or Register() if not one.
-static Register getStoreHLindSrcReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::LD_HLind_A:
-    return Z80::A;
-  case Z80::LD_HLind_B:
-    return Z80::B;
-  case Z80::LD_HLind_C:
-    return Z80::C;
-  case Z80::LD_HLind_D:
-    return Z80::D;
-  case Z80::LD_HLind_E:
-    return Z80::E;
-  default:
-    return Register();
-  }
-}
-
-// Get the source register for a LD A,r instruction, or Register() if not one.
-static Register getLDArSrcReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::LD_A_B:
-    return Z80::B;
-  case Z80::LD_A_C:
-    return Z80::C;
-  case Z80::LD_A_D:
-    return Z80::D;
-  case Z80::LD_A_E:
-    return Z80::E;
-  case Z80::LD_A_H:
-    return Z80::H;
-  case Z80::LD_A_L:
-    return Z80::L;
-  default:
-    return Register();
-  }
-}
-
-// Get the LD r,A opcode for a given register r. Returns 0 if invalid.
-static unsigned getLDrAOpcode(Register R) {
-  switch (R.id()) {
-  case Z80::B:
-    return Z80::LD_B_A;
-  case Z80::C:
-    return Z80::LD_C_A;
-  case Z80::D:
-    return Z80::LD_D_A;
-  case Z80::E:
-    return Z80::LD_E_A;
-  case Z80::H:
-    return Z80::LD_H_A;
-  case Z80::L:
-    return Z80::LD_L_A;
-  default:
-    return 0;
-  }
-}
-
-// Get the DEC r opcode for a given register r. Returns 0 if invalid.
-static unsigned getDECrOpcode(Register R) {
-  switch (R.id()) {
-  case Z80::B:
-    return Z80::DEC_B;
-  case Z80::C:
-    return Z80::DEC_C;
-  case Z80::D:
-    return Z80::DEC_D;
-  case Z80::E:
-    return Z80::DEC_E;
-  case Z80::H:
-    return Z80::DEC_H;
-  case Z80::L:
-    return Z80::DEC_L;
-  default:
-    return 0;
-  }
-}
-
-// Get the LD r,#imm opcode for a given register r. Returns 0 if invalid.
-static unsigned getLDrnOpcode(Register R) {
-  switch (R.id()) {
-  case Z80::A:
-    return Z80::LD_A_n;
-  case Z80::B:
-    return Z80::LD_B_n;
-  case Z80::C:
-    return Z80::LD_C_n;
-  case Z80::D:
-    return Z80::LD_D_n;
-  case Z80::E:
-    return Z80::LD_E_n;
-  case Z80::H:
-    return Z80::LD_H_n;
-  case Z80::L:
-    return Z80::LD_L_n;
-  default:
-    return 0;
-  }
-}
-
 // Whether nothing at or below \p After wants the value in \p Reg, which is
 // what lets a transformation clobber it.
 static bool isRegDeadAfter(MachineBasicBlock::iterator After,
                            MachineBasicBlock &MBB,
                            const TargetRegisterInfo *TRI, MCPhysReg Reg) {
   return !Z80::isLiveAt(MBB, After, Reg, TRI);
-}
-
-// Get the register an LD r,#imm writes, or Register().
-static Register getLDrnDstReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::LD_A_n:
-    return Z80::A;
-  case Z80::LD_B_n:
-    return Z80::B;
-  case Z80::LD_C_n:
-    return Z80::C;
-  case Z80::LD_D_n:
-    return Z80::D;
-  case Z80::LD_E_n:
-    return Z80::E;
-  case Z80::LD_H_n:
-    return Z80::H;
-  case Z80::LD_L_n:
-    return Z80::L;
-  default:
-    return Register();
-  }
-}
-
-// Get the register an OR r / XOR r reads besides A, or Register(). Both
-// leave A untouched when that register holds zero. A itself is excluded:
-// OR A and XOR A mean something else.
-static Register getZeroNeutralAluSrcReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::OR_B:
-  case Z80::XOR_B:
-    return Z80::B;
-  case Z80::OR_C:
-  case Z80::XOR_C:
-    return Z80::C;
-  case Z80::OR_D:
-  case Z80::XOR_D:
-    return Z80::D;
-  case Z80::OR_E:
-  case Z80::XOR_E:
-    return Z80::E;
-  case Z80::OR_H:
-  case Z80::XOR_H:
-    return Z80::H;
-  case Z80::OR_L:
-  case Z80::XOR_L:
-    return Z80::L;
-  default:
-    return Register();
-  }
-}
-
-// Get the register an OR r / XOR r / ADD A,r reads besides A, or Register().
-// All three copy that register into A when A holds zero.
-static Register getAccumulatorNeutralAluSrcReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::OR_B:
-  case Z80::XOR_B:
-  case Z80::ADD_A_B:
-    return Z80::B;
-  case Z80::OR_C:
-  case Z80::XOR_C:
-  case Z80::ADD_A_C:
-    return Z80::C;
-  case Z80::OR_D:
-  case Z80::XOR_D:
-  case Z80::ADD_A_D:
-    return Z80::D;
-  case Z80::OR_E:
-  case Z80::XOR_E:
-  case Z80::ADD_A_E:
-    return Z80::E;
-  case Z80::OR_H:
-  case Z80::XOR_H:
-  case Z80::ADD_A_H:
-    return Z80::H;
-  case Z80::OR_L:
-  case Z80::XOR_L:
-  case Z80::ADD_A_L:
-    return Z80::L;
-  default:
-    return Register();
-  }
 }
 
 // OR or XOR against a register holding zero leaves A exactly as it was, so
@@ -437,7 +290,7 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
   for (auto MII = MBB.begin(); MII != MBB.end();) {
     MachineInstr &MI = *MII;
 
-    if (Register Src = getZeroNeutralAluSrcReg(MI.getOpcode());
+    if (Register Src = getZeroNeutralAluSrcReg(MI);
         Src.isValid() && Zero.count(Src.asMCReg()) &&
         isRegDeadAfter(std::next(MII), MBB, TRI, Z80::FLAGS)) {
       LLVM_DEBUG(dbgs() << "  Zero operand, no effect: " << MI);
@@ -449,12 +302,11 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
     // The mirror case: a zero accumulator makes OR, XOR and ADD A a plain
     // move. Written as one, the copy in and the copy back out cancel, and
     // the peepholes below take both.
-    if (Register Src = getAccumulatorNeutralAluSrcReg(MI.getOpcode());
+    if (Register Src = getAccumulatorNeutralAluSrcReg(MI);
         Src.isValid() && Zero.count(Z80::A) &&
         isRegDeadAfter(std::next(MII), MBB, TRI, Z80::FLAGS)) {
       LLVM_DEBUG(dbgs() << "  Zero accumulator, is a move: " << MI);
-      BuildMI(MBB, MII, MI.getDebugLoc(),
-              TII->get(getLD8Opcode(Z80::A, Src)));
+      Z80::buildLD8(MBB, MII, MI.getDebugLoc(), *TII, Z80::A, Src);
       MII = MBB.erase(MII);
       Zero.erase(Z80::A);
       Changed = true;
@@ -470,24 +322,21 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
             if (TRI->regsOverlap(MO.getReg(), R))
               Zero.erase(R);
 
-      unsigned Opc = MI.getOpcode();
-      if (Opc == Z80::XOR_A)
+      if (isZeroA(MI))
         Zero.insert(Z80::A);
-      for (MCPhysReg R : Regs8)
-        if (R != Z80::A && getLD8Opcode(Z80::A, R) == Opc && Zero.count(R))
-          Zero.insert(Z80::A);
-      bool Wide = Opc == Z80::LD_BC_nn || Opc == Z80::LD_DE_nn ||
-                  Opc == Z80::LD_HL_nn;
-      if ((getLDrnDstReg(Opc).isValid() || Wide) &&
-          MI.getOperand(0).isImm() && MI.getOperand(0).getImm() == 0) {
-        if (Wide) {
-          Register Pair = Opc == Z80::LD_BC_nn   ? Z80::BC
-                          : Opc == Z80::LD_DE_nn ? Z80::DE
-                                                 : Z80::HL;
-          for (MCSubRegIterator SR(Pair, TRI); SR.isValid(); ++SR)
-            Zero.insert(*SR);
-        } else {
-          Zero.insert(getLDrnDstReg(Opc).asMCReg());
+      if (Register Src = getLD8Src(MI, Z80::A);
+          Src.isValid() && Src != Z80::A && Zero.count(Src))
+        Zero.insert(Z80::A);
+      Register Narrow = getLD8nDst(MI);
+      Register Pair = getLD16nDst(MI);
+      if (Narrow.isValid() || Pair.isValid()) {
+        const MachineOperand &Val = MI.getOperand(1);
+        if (Val.isImm() && Val.getImm() == 0) {
+          if (Pair.isValid())
+            for (MCSubRegIterator SR(Pair, TRI); SR.isValid(); ++SR)
+              Zero.insert(*SR);
+          else
+            Zero.insert(Narrow.asMCReg());
         }
       }
     }
@@ -496,88 +345,6 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
   if (Changed)
     recomputeLivenessFlags(MBB);
   return Changed;
-}
-
-// Get the LD r,(IX+d) opcode for a register, or 0.
-static unsigned getLoadIXdOpcode(Register R) {
-  switch (R.id()) {
-  case Z80::A:
-    return Z80::LD_A_IXd;
-  case Z80::B:
-    return Z80::LD_B_IXd;
-  case Z80::C:
-    return Z80::LD_C_IXd;
-  case Z80::D:
-    return Z80::LD_D_IXd;
-  case Z80::E:
-    return Z80::LD_E_IXd;
-  case Z80::H:
-    return Z80::LD_H_IXd;
-  case Z80::L:
-    return Z80::LD_L_IXd;
-  default:
-    return 0;
-  }
-}
-
-// Get the LD r,(HL) opcode for a register, or 0.
-static unsigned getLoadHLindOpcode(Register R) {
-  switch (R.id()) {
-  case Z80::A:
-    return Z80::LD_A_HLind;
-  case Z80::B:
-    return Z80::LD_B_HLind;
-  case Z80::C:
-    return Z80::LD_C_HLind;
-  case Z80::D:
-    return Z80::LD_D_HLind;
-  case Z80::E:
-    return Z80::LD_E_HLind;
-  case Z80::H:
-    return Z80::LD_H_HLind;
-  case Z80::L:
-    return Z80::LD_L_HLind;
-  default:
-    return 0;
-  }
-}
-
-// For an 8-bit ALU instruction that reads a register, give back that
-// register and the IX-indexed form of the same operation.
-static Register getAluRegSrc(unsigned Opc, unsigned &IXdOpc) {
-  static const struct {
-    unsigned Regs[6]; // B, C, D, E, H, L
-    unsigned IXd;
-  } Ops[] = {
-      {{Z80::ADD_A_B, Z80::ADD_A_C, Z80::ADD_A_D, Z80::ADD_A_E, Z80::ADD_A_H,
-        Z80::ADD_A_L},
-       Z80::ADD_A_IXd},
-      {{Z80::ADC_A_B, Z80::ADC_A_C, Z80::ADC_A_D, Z80::ADC_A_E, Z80::ADC_A_H,
-        Z80::ADC_A_L},
-       Z80::ADC_A_IXd},
-      {{Z80::SUB_B, Z80::SUB_C, Z80::SUB_D, Z80::SUB_E, Z80::SUB_H, Z80::SUB_L},
-       Z80::SUB_IXd},
-      {{Z80::SBC_A_B, Z80::SBC_A_C, Z80::SBC_A_D, Z80::SBC_A_E, Z80::SBC_A_H,
-        Z80::SBC_A_L},
-       Z80::SBC_A_IXd},
-      {{Z80::AND_B, Z80::AND_C, Z80::AND_D, Z80::AND_E, Z80::AND_H, Z80::AND_L},
-       Z80::AND_IXd},
-      {{Z80::XOR_B, Z80::XOR_C, Z80::XOR_D, Z80::XOR_E, Z80::XOR_H, Z80::XOR_L},
-       Z80::XOR_IXd},
-      {{Z80::OR_B, Z80::OR_C, Z80::OR_D, Z80::OR_E, Z80::OR_H, Z80::OR_L},
-       Z80::OR_IXd},
-      {{Z80::CP_B, Z80::CP_C, Z80::CP_D, Z80::CP_E, Z80::CP_H, Z80::CP_L},
-       Z80::CP_IXd},
-  };
-  static const MCPhysReg Regs[] = {Z80::B, Z80::C, Z80::D,
-                                   Z80::E, Z80::H, Z80::L};
-  for (const auto &Op : Ops)
-    for (unsigned I = 0; I != 6; ++I)
-      if (Op.Regs[I] == Opc) {
-        IXdOpc = Op.IXd;
-        return Regs[I];
-      }
-  return Register();
 }
 
 // Ways a register ends up carrying a value between memory and somewhere it
@@ -602,11 +369,11 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
     }
     const DebugLoc &DL = MII->getDebugLoc();
 
-    bool FromSlot = getLoadIXdDstReg(MII->getOpcode()).isValid();
-    Register Loaded = FromSlot ? getLoadIXdDstReg(MII->getOpcode())
-                               : getLoadHLindDstReg(MII->getOpcode());
+    bool FromSlot = getLoadIXdDstReg(*MII).isValid();
+    Register Loaded =
+        FromSlot ? getLoadIXdDstReg(*MII) : getLoadHLindDstReg(*MII);
     if (Loaded.isValid()) {
-      int64_t Slot = FromSlot ? MII->getOperand(0).getImm() : 0;
+      int64_t Slot = FromSlot ? Z80::idxSlotOperand(*MII).getImm() : 0;
       // The consumer to fold into. It need not come next, as long as
       // nothing in between disturbs the register or what the load reads.
       auto Use = MBB.end();
@@ -614,14 +381,11 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
       unsigned IXdOpc = 0;
       unsigned Budget = 32;
       for (auto Scan = Next; Scan != MBB.end() && Budget; ++Scan, --Budget) {
-        if (FromSlot && getAluRegSrc(Scan->getOpcode(), IXdOpc) == Loaded) {
+        if (FromSlot && getAluRegSrc(*Scan, IXdOpc) == Loaded) {
           Use = Scan;
           break;
         }
-        for (MCPhysReg R : {Z80::A, Z80::B, Z80::C, Z80::D, Z80::E, Z80::H,
-                            Z80::L})
-          if (getLD8Opcode(R, Loaded) == Scan->getOpcode())
-            Copied = R;
+        Copied = getLD8Dst(*Scan, Loaded);
         if (Copied.isValid()) {
           Use = Scan;
           break;
@@ -635,9 +399,9 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
         // byte; anything else could be a pointer into this one.
         if (Scan->mayStore()) {
           bool OtherSlot = FromSlot &&
-                           (getStoreIXdSrcReg(Scan->getOpcode()).isValid() ||
+                           (getStoreIXdSrcReg(*Scan).isValid() ||
                             Scan->getOpcode() == Z80::LD_IXd_n) &&
-                           Scan->getOperand(0).getImm() != Slot;
+                           Z80::idxSlotOperand(*Scan).getImm() != Slot;
           if (!OtherSlot)
             break;
         }
@@ -655,11 +419,9 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
           isRegDeadAfter(std::next(Use), MBB, TRI, Loaded.asMCReg())) {
         const DebugLoc &UseDL = Use->getDebugLoc();
         if (Copied.isValid()) {
-          unsigned Opc = FromSlot ? getLoadIXdOpcode(Copied)
-                                  : getLoadHLindOpcode(Copied);
-          auto MIB = BuildMI(MBB, Use, UseDL, TII->get(Opc));
-          if (FromSlot)
-            MIB.addImm(Slot);
+          auto MIB = FromSlot ? Z80::buildLoadIdx(MBB, Use, UseDL, *TII,
+                                                  Z80::LD_r_IXd, Copied, Slot)
+                              : Z80::buildLoadHL(MBB, Use, UseDL, *TII, Copied);
           MIB.cloneMemRefs(*MII);
         } else {
           BuildMI(MBB, Use, UseDL, TII->get(IXdOpc))
@@ -673,13 +435,13 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
       }
     }
 
-    if (Register Held = getLDrnDstReg(MII->getOpcode());
-        Held.isValid() && getStoreIXdSrcReg(Next->getOpcode()) == Held &&
-        MII->getOperand(0).isImm() &&
+    if (Register Held = getLD8nDst(*MII);
+        Held.isValid() && getStoreIXdSrcReg(*Next) == Held &&
+        MII->getOperand(1).isImm() &&
         isRegDeadAfter(std::next(Next), MBB, TRI, Held.asMCReg())) {
       BuildMI(MBB, MII, DL, TII->get(Z80::LD_IXd_n))
           .addImm(Next->getOperand(0).getImm())
-          .addImm(MII->getOperand(0).getImm() & 0xFF)
+          .addImm(MII->getOperand(1).getImm() & 0xFF)
           .cloneMemRefs(*Next);
       MII = MBB.erase(MII);
       MII = MBB.erase(MII);
@@ -702,34 +464,14 @@ static bool eraseDeadFrameReloads(MachineBasicBlock &MBB,
                                   const TargetRegisterInfo *TRI) {
   bool Changed = false;
   for (auto MII = MBB.begin(); MII != MBB.end();) {
-    Register Dst = getLoadIXdDstReg(MII->getOpcode());
+    Register Dst = getLoadIXdDstReg(*MII);
     bool IsSlotLoad = Dst.isValid();
     if (!Dst.isValid())
-      Dst = getLDrnDstReg(MII->getOpcode());
+      Dst = getLD8nDst(*MII);
+    if (!Dst.isValid() && isLD8(*MII))
+      Dst = MII->getOperand(0).getReg();
     if (!Dst.isValid())
-      for (MCPhysReg D : {Z80::A, Z80::B, Z80::C, Z80::D, Z80::E, Z80::H,
-                          Z80::L}) {
-        for (MCPhysReg S : {Z80::A, Z80::B, Z80::C, Z80::D, Z80::E, Z80::H,
-                            Z80::L})
-          if (getLD8Opcode(D, S) == MII->getOpcode())
-            Dst = D;
-        if (Dst.isValid())
-          break;
-      }
-    if (!Dst.isValid())
-      switch (MII->getOpcode()) {
-      case Z80::LD_BC_nn:
-        Dst = Z80::BC;
-        break;
-      case Z80::LD_DE_nn:
-        Dst = Z80::DE;
-        break;
-      case Z80::LD_HL_nn:
-        Dst = Z80::HL;
-        break;
-      default:
-        break;
-      }
+      Dst = getLD16nDst(*MII);
     if (!Dst.isValid() || (IsSlotLoad && !isPlainSlotAccess(*MII)) ||
         !isRegDeadAfter(std::next(MII), MBB, TRI, Dst)) {
       ++MII;
@@ -758,9 +500,7 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
                                    const TargetRegisterInfo *TRI) {
   static const struct {
     MCPhysReg Lo, Hi;
-    unsigned LoadHiOpc;
-  } Pairs[] = {{Z80::C, Z80::B, Z80::LD_B_HLind},
-               {Z80::E, Z80::D, Z80::LD_D_HLind}};
+  } Pairs[] = {{Z80::C, Z80::B}, {Z80::E, Z80::D}};
 
   bool Changed = false;
   for (auto MII = MBB.begin(); MII != MBB.end();) {
@@ -770,12 +510,12 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
       continue;
     }
     auto LoadHi = std::next(Load);
-    if (LoadHi == MBB.end() || LoadHi->getOpcode() != Z80::LD_H_HLind) {
+    if (LoadHi == MBB.end() || !isLoadHL(*LoadHi, Z80::H)) {
       ++MII;
       continue;
     }
     auto SetL = std::next(LoadHi);
-    if (SetL == MBB.end() || SetL->getOpcode() != Z80::LD_L_A) {
+    if (SetL == MBB.end() || !isLD8(*SetL, Z80::L, Z80::A)) {
       ++MII;
       continue;
     }
@@ -791,8 +531,7 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
     }
 
     const auto *P = llvm::find_if(Pairs, [&](const auto &P) {
-      return SetLo->getOpcode() == getLD8Opcode(P.Lo, Z80::L) &&
-             SetHi->getOpcode() == getLD8Opcode(P.Hi, Z80::H);
+      return isLD8(*SetLo, P.Lo, Z80::L) && isLD8(*SetHi, P.Hi, Z80::H);
     });
     if (P == std::end(Pairs) ||
         !isRegDeadAfter(std::next(SetHi), MBB, TRI, Z80::HL)) {
@@ -801,10 +540,9 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
     }
 
     LLVM_DEBUG(dbgs() << "  Reload straight into pair: " << *SetLo);
-    BuildMI(MBB, LoadHi, LoadHi->getDebugLoc(), TII->get(P->LoadHiOpc))
+    Z80::buildLoadHL(MBB, LoadHi, LoadHi->getDebugLoc(), *TII, P->Hi)
         .cloneMemRefs(*LoadHi);
-    BuildMI(MBB, LoadHi, LoadHi->getDebugLoc(),
-            TII->get(getLD8Opcode(P->Lo, Z80::A)));
+    Z80::buildLD8(MBB, LoadHi, LoadHi->getDebugLoc(), *TII, P->Lo, Z80::A);
     MII = std::next(SetHi);
     MBB.erase(LoadHi, MII);
     Changed = true;
@@ -812,66 +550,6 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
   if (Changed)
     recomputeLivenessFlags(MBB);
   return Changed;
-}
-
-// Get the destination register of a LD r,A instruction, or Register().
-static Register getLDrADstReg(unsigned Opc) {
-  switch (Opc) {
-  case Z80::LD_B_A:
-    return Z80::B;
-  case Z80::LD_C_A:
-    return Z80::C;
-  case Z80::LD_D_A:
-    return Z80::D;
-  case Z80::LD_E_A:
-    return Z80::E;
-  case Z80::LD_H_A:
-    return Z80::H;
-  case Z80::LD_L_A:
-    return Z80::L;
-  default:
-    return Register();
-  }
-}
-
-// Get the LD A,r opcode for a given register r, or 0.
-static unsigned getLDArOpcode(Register R) {
-  switch (R.id()) {
-  case Z80::B:
-    return Z80::LD_A_B;
-  case Z80::C:
-    return Z80::LD_A_C;
-  case Z80::D:
-    return Z80::LD_A_D;
-  case Z80::E:
-    return Z80::LD_A_E;
-  case Z80::H:
-    return Z80::LD_A_H;
-  case Z80::L:
-    return Z80::LD_A_L;
-  default:
-    return 0;
-  }
-}
-
-// Get the INC r / DEC r opcode for a given register r, or 0.
-static unsigned getIncDecROpcode(Register R, bool IsInc) {
-  switch (R.id()) {
-  case Z80::B:
-    return IsInc ? Z80::INC_B : Z80::DEC_B;
-  case Z80::C:
-    return IsInc ? Z80::INC_C : Z80::DEC_C;
-  case Z80::D:
-    return IsInc ? Z80::INC_D : Z80::DEC_D;
-  case Z80::E:
-    return IsInc ? Z80::INC_E : Z80::DEC_E;
-  case Z80::H:
-    return IsInc ? Z80::INC_H : Z80::DEC_H;
-  case Z80::L:
-    return IsInc ? Z80::INC_L : Z80::DEC_L;
-  default:
-    return 0;
-  }
 }
 
 // --- Increment a register where it lives ---
@@ -885,18 +563,25 @@ static bool directIncDec(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
   bool Changed = false;
   for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
     auto Next = std::next(MII);
-    Register R = getLDArSrcReg(MII->getOpcode());
+    Register R = getLD8Src(*MII, Z80::A);
     if (!R || Next == MIE) {
       MII = Next;
       continue;
     }
-    unsigned Op2 = Next->getOpcode();
-    if (Op2 != Z80::INC_A && Op2 != Z80::DEC_A) {
+    bool IsInc = isIncDec8(*Next, Z80::INC_r, Z80::A);
+    if (!IsInc && !isIncDec8(*Next, Z80::DEC_r, Z80::A)) {
+      MII = Next;
+      continue;
+    }
+    // A register the field cannot name has no INC r form to fold into. A
+    // itself does, so a round trip through A of A is folded like any other;
+    // it is only the index registers this turns away.
+    if (!Z80::isEncodableGR8(R)) {
       MII = Next;
       continue;
     }
     auto Third = std::next(Next);
-    if (Third == MIE || getLDrADstReg(Third->getOpcode()) != R) {
+    if (Third == MIE || getLD8Dst(*Third, Z80::A) != R) {
       MII = Next;
       continue;
     }
@@ -906,8 +591,8 @@ static bool directIncDec(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
       continue;
     }
     LLVM_DEBUG(dbgs() << "  Direct inc/dec: " << *MII);
-    BuildMI(MBB, MII, MII->getDebugLoc(),
-            TII->get(getIncDecROpcode(R, Op2 == Z80::INC_A)));
+    Z80::buildIncDec8(MBB, MII, MII->getDebugLoc(), *TII,
+                      IsInc ? Z80::INC_r : Z80::DEC_r, R);
     MBB.erase(MII);
     MBB.erase(Next);
     MBB.erase(Third);
@@ -1060,9 +745,8 @@ static bool fusePostIncAccess(MachineBasicBlock &MBB,
   bool Changed = false;
   for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
     MachineInstr &MI = *MII;
-    unsigned Opc = MI.getOpcode();
     auto Next = std::next(MII);
-    if (Next == MIE || Next->getOpcode() != Z80::INC_HL) {
+    if (Next == MIE || !isIncDec16(*Next, Z80::INC_rr, Z80::HL)) {
       MII = Next;
       continue;
     }
@@ -1076,18 +760,18 @@ static bool fusePostIncAccess(MachineBasicBlock &MBB,
     bool AtStart = MII == MBB.begin();
     auto Prev = AtStart ? MBB.end() : std::prev(MII);
 
-    if (Opc == Z80::LD_A_HLind) {
+    if (isLoadHL(MI, Z80::A)) {
       BuildMI(MBB, MII, DL, TII->get(Z80::LD_A_HLI));
-    } else if (Opc == Z80::LD_HLind_A) {
+    } else if (isStoreHL(MI, Z80::A)) {
       BuildMI(MBB, MII, DL, TII->get(Z80::LD_HLI_A));
-    } else if (Register Dst = getLoadHLindDstReg(Opc);
+    } else if (Register Dst = getLoadHLindDstReg(MI);
                Dst && isRegDeadAfter(After, MBB, TRI, Z80::A)) {
       BuildMI(MBB, MII, DL, TII->get(Z80::LD_A_HLI));
-      BuildMI(MBB, MII, DL, TII->get(getLDrAOpcode(Dst)));
-    } else if (Register Src = getStoreHLindSrcReg(Opc);
+      Z80::buildLD8(MBB, MII, DL, *TII, Dst, Z80::A);
+    } else if (Register Src = getStoreHLindSrcReg(MI);
                Src && Src != Z80::A &&
                isRegDeadAfter(After, MBB, TRI, Z80::A)) {
-      BuildMI(MBB, MII, DL, TII->get(getLDArOpcode(Src)));
+      Z80::buildLD8(MBB, MII, DL, *TII, Z80::A, Src);
       BuildMI(MBB, MII, DL, TII->get(Z80::LD_HLI_A));
     } else {
       MII = Next;
@@ -1153,7 +837,7 @@ static bool materializeConstantStores(MachineBasicBlock &MBB,
     for (auto It : Stores) {
       int64_t V = It->getOperand(0).getImm() & 0xFF;
       bool Fused = std::next(It) != MBB.end() &&
-                   std::next(It)->getOpcode() == Z80::INC_HL;
+                   isIncDec16(*std::next(It), Z80::INC_rr, Z80::HL);
       auto *G = llvm::find_if(Groups, [&](auto &P) { return P.first == V; });
       if (G == Groups.end())
         Groups.push_back({V, Fused ? 2u : 1u});
@@ -1178,20 +862,20 @@ static bool materializeConstantStores(MachineBasicBlock &MBB,
       // Materialize the constant once, before its first store.
       const DebugLoc &DL = FirstIt->getDebugLoc();
       if (Value == 0 && FlagsDead)
-        BuildMI(MBB, FirstIt, DL, TII->get(Z80::XOR_A));
+        Z80::buildZeroA(MBB, FirstIt, DL, *TII);
       else
-        BuildMI(MBB, FirstIt, DL, TII->get(Z80::LD_A_n)).addImm(Value);
+        Z80::buildLD8n(MBB, FirstIt, DL, *TII, Z80::A).addImm(Value);
 
       for (auto It : Stores) {
         if ((It->getOperand(0).getImm() & 0xFF) != Value)
           continue;
         auto NextIt = std::next(It);
-        if (NextIt != MBB.end() && NextIt->getOpcode() == Z80::INC_HL) {
+        if (NextIt != MBB.end() && isIncDec16(*NextIt, Z80::INC_rr, Z80::HL)) {
           BuildMI(MBB, It, It->getDebugLoc(), TII->get(Z80::LD_HLI_A));
           MBB.erase(It);
           MBB.erase(NextIt);
         } else {
-          BuildMI(MBB, It, It->getDebugLoc(), TII->get(Z80::LD_HLind_A));
+          Z80::buildStoreHL(MBB, It, It->getDebugLoc(), *TII, Z80::A);
           MBB.erase(It);
         }
       }
@@ -1262,16 +946,15 @@ static bool materializeIXConstantStores(MachineBasicBlock &MBB,
 
     const DebugLoc &DL = FirstIt->getDebugLoc();
     if (Value == 0 && FlagsDead)
-      Z80::markUndefUse(BuildMI(MBB, FirstIt, DL, TII->get(Z80::XOR_A)),
-                        Z80::A);
+      Z80::buildZeroA(MBB, FirstIt, DL, *TII);
     else
-      BuildMI(MBB, FirstIt, DL, TII->get(Z80::LD_A_n)).addImm(Value);
+      Z80::buildLD8n(MBB, FirstIt, DL, *TII, Z80::A).addImm(Value);
 
     for (auto It : Stores) {
       if ((It->getOperand(1).getImm() & 0xFF) != Value)
         continue;
-      BuildMI(MBB, It, It->getDebugLoc(), TII->get(Z80::LD_IXd_A))
-          .addImm(It->getOperand(0).getImm());
+      Z80::buildStoreIdx(MBB, It, It->getDebugLoc(), *TII, Z80::LD_IXd_r,
+                         It->getOperand(0).getImm(), Z80::A);
       MBB.erase(It);
     }
     Changed = true;
@@ -1304,7 +987,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
     // is dropped outright.
     if (Opc == Z80::LD_HLind_n && AKnown &&
         (MI.getOperand(0).getImm() & 0xFF) == (AVal & 0xFF)) {
-      if (Next != MIE && Next->getOpcode() == Z80::INC_HL) {
+      if (Next != MIE && isIncDec16(*Next, Z80::INC_rr, Z80::HL)) {
         LLVM_DEBUG(dbgs() << "  A reuse: fusing to (hl+) " << MI);
         BuildMI(MBB, MII, MI.getDebugLoc(), TII->get(Z80::LD_HLI_A));
         auto AfterInc = std::next(Next);
@@ -1316,20 +999,20 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
         continue;
       }
       LLVM_DEBUG(dbgs() << "  A reuse: store via A " << MI);
-      BuildMI(MBB, MII, MI.getDebugLoc(), TII->get(Z80::LD_HLind_A));
+      Z80::buildStoreHL(MBB, MII, MI.getDebugLoc(), *TII, Z80::A);
       MII = MBB.erase(MII);
       Changed = true;
       continue;
     }
-    if (Opc == Z80::LD_A_n && AKnown && MI.getOperand(0).isImm() &&
-        (MI.getOperand(0).getImm() & 0xFF) == (AVal & 0xFF)) {
+    if (getLD8nDst(MI) == Z80::A && AKnown && MI.getOperand(1).isImm() &&
+        (MI.getOperand(1).getImm() & 0xFF) == (AVal & 0xFF)) {
       // LD A,n leaves flags alone, so the reload can simply go.
       LLVM_DEBUG(dbgs() << "  A reuse: erasing reload " << MI);
       MII = MBB.erase(MII);
       Changed = true;
       continue;
     }
-    if (Opc == Z80::XOR_A && AKnown && (AVal & 0xFF) == 0 &&
+    if (isZeroA(MI) && AKnown && (AVal & 0xFF) == 0 &&
         isRegDeadAfter(Next, MBB, TRI, Z80::FLAGS)) {
       LLVM_DEBUG(dbgs() << "  A reuse: erasing xor a " << MI);
       MII = MBB.erase(MII);
@@ -1340,10 +1023,10 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
     // Track what A holds. LD A,n can carry a link-time symbol byte instead
     // of an immediate; its value is unknown here, so it falls through to
     // the modifiesRegister case and invalidates the tracking.
-    if (Opc == Z80::LD_A_n && MI.getOperand(0).isImm()) {
+    if (getLD8nDst(MI) == Z80::A && MI.getOperand(1).isImm()) {
       AKnown = true;
-      AVal = MI.getOperand(0).getImm() & 0xFF;
-    } else if (Opc == Z80::XOR_A) {
+      AVal = MI.getOperand(1).getImm() & 0xFF;
+    } else if (isZeroA(MI)) {
       AKnown = true;
       AVal = 0;
     } else if (MI.isCall() || MI.isInlineAsm() ||
@@ -1364,8 +1047,8 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
         }
         if (D == 1 || D == -1) {
           LLVM_DEBUG(dbgs() << "  LDHL reuse: inc/dec for " << MI);
-          BuildMI(MBB, MII, MI.getDebugLoc(),
-                  TII->get(D == 1 ? Z80::INC_HL : Z80::DEC_HL));
+          Z80::buildIncDec16(MBB, MII, MI.getDebugLoc(), *TII,
+                             D == 1 ? Z80::INC_rr : Z80::DEC_rr, Z80::HL);
           MII = MBB.erase(MII);
           Off = N;
           Changed = true;
@@ -1378,13 +1061,18 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
       continue;
     }
 
-    switch (Opc) {
-    case Z80::INC_HL:
+    if (isIncDec16(MI, Z80::INC_rr, Z80::HL)) {
       Off += 1;
-      break;
-    case Z80::DEC_HL:
+      MII = Next;
+      continue;
+    }
+    if (isIncDec16(MI, Z80::DEC_rr, Z80::HL)) {
       Off -= 1;
-      break;
+      MII = Next;
+      continue;
+    }
+
+    switch (Opc) {
     case Z80::LD_HLI_A:
     case Z80::LD_A_HLI:
       Off += 1;
@@ -1504,8 +1192,9 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
     for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
          MII != MIE;) {
       // Match: LD A,r (identify counter register r)
-      Register CounterReg = getLDArSrcReg(MII->getOpcode());
-      if (!CounterReg.isValid()) {
+      Register CounterReg = getLD8Src(*MII, Z80::A);
+      if (!CounterReg.isValid() || CounterReg == Z80::A ||
+          !Z80::isEncodableGR8(CounterReg)) {
         ++MII;
         continue;
       }
@@ -1532,9 +1221,9 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       }
 
       // Match: DEC A; LD r,A; OR A; JR NZ,target
-      if (I2->getOpcode() != Z80::DEC_A ||
-          I3->getOpcode() != getLDrAOpcode(CounterReg) ||
-          I4->getOpcode() != Z80::OR_A || I5->getOpcode() != Z80::JR_NZ_e) {
+      if (!isIncDec8(*I2, Z80::DEC_r, Z80::A) ||
+          !isLD8(*I3, CounterReg, Z80::A) || !isAlu8(*I4, Z80::OR_r, Z80::A) ||
+          I5->getOpcode() != Z80::JR_NZ_e) {
         ++MII;
         continue;
       }
@@ -1548,7 +1237,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
 
       MachineBasicBlock *TargetMBB = I5->getOperand(0).getMBB();
       DebugLoc DL = I1->getDebugLoc();
-      unsigned DECOpc = getDECrOpcode(CounterReg);
+
       LLVM_DEBUG(dbgs() << "  Loop counter peephole: LD A,"
                         << printReg(CounterReg, TRI) << " sequence → DEC "
                         << printReg(CounterReg, TRI) << "; JR NZ\n");
@@ -1557,7 +1246,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       I3->eraseFromParent();
       I2->eraseFromParent();
       MII = MBB.erase(I1);
-      BuildMI(MBB, MII, DL, TII->get(DECOpc));
+      Z80::buildIncDec8(MBB, MII, DL, *TII, Z80::DEC_r, CounterReg);
       BuildMI(MBB, MII, DL, TII->get(Z80::JR_NZ_e)).addMBB(TargetMBB);
       Changed = BlockChanged = true;
     }
@@ -1588,12 +1277,12 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
     for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
          MII != MIE;) {
       MachineInstr &MI = *MII;
-      if (MI.getOpcode() == Z80::LD_A_n && MI.getOperand(0).isImm() &&
-          MI.getOperand(0).getImm() == 0) {
+      if (getLD8nDst(MI) == Z80::A && MI.getOperand(1).isImm() &&
+          MI.getOperand(1).getImm() == 0) {
         auto After = std::next(MII);
         if (isRegDeadAfter(After, MBB, TRI, Z80::FLAGS)) {
           LLVM_DEBUG(dbgs() << "  LD A,#0 → XOR A: " << MI);
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(Z80::XOR_A));
+          Z80::buildZeroA(MBB, MI, MI.getDebugLoc(), *TII);
           MII = MBB.erase(MII);
           Changed = BlockChanged = true;
           continue;
@@ -1630,15 +1319,14 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE;) {
         MachineInstr &MI = *MII;
-        unsigned Opc = MI.getOpcode();
-
-        bool IsBC = (Opc == Z80::LD_BC_nn);
-        bool IsDE = (Opc == Z80::LD_DE_nn);
+        Register Pair = getLD16nDst(MI);
+        bool IsBC = Pair == Z80::BC;
+        bool IsDE = Pair == Z80::DE;
         if (!IsBC && !IsDE) {
           ++MII;
           continue;
         }
-        if (!MI.getOperand(0).isImm()) {
+        if (!MI.getOperand(1).isImm()) {
           ++MII;
           continue;
         }
@@ -1654,14 +1342,13 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           ++MII;
           continue;
         }
-        unsigned ExpLo = IsBC ? Z80::LD_HLind_C : Z80::LD_HLind_E;
-        if (I3->getOpcode() != ExpLo) {
+        if (!isStoreHL(*I3, IsBC ? Z80::C : Z80::E)) {
           ++MII;
           continue;
         }
 
         auto I4 = std::next(I3);
-        if (I4 == MIE || I4->getOpcode() != Z80::INC_HL) {
+        if (I4 == MIE || !isIncDec16(*I4, Z80::INC_rr, Z80::HL)) {
           ++MII;
           continue;
         }
@@ -1670,8 +1357,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           ++MII;
           continue;
         }
-        unsigned ExpHi = IsBC ? Z80::LD_HLind_B : Z80::LD_HLind_D;
-        if (I5->getOpcode() != ExpHi) {
+        if (!isStoreHL(*I5, IsBC ? Z80::B : Z80::D)) {
           ++MII;
           continue;
         }
@@ -1683,7 +1369,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
 
-        int64_t Imm = MI.getOperand(0).getImm();
+        int64_t Imm = MI.getOperand(1).getImm();
         LLVM_DEBUG(dbgs() << "  Folding 16-bit const store: " << MI);
 
         // Replace LD (HL),lo → LD (HL),#imm_lo
@@ -1772,10 +1458,10 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         if (!isRegDeadAfter(std::next(It), MBB, TRI, Z80::FLAGS))
           continue;
 
-        unsigned NewOpc = (Diff == 1) ? Z80::INC_HL : Z80::DEC_HL;
         LLVM_DEBUG(dbgs() << "  LDHL SP,#" << Offset2 << " → "
                           << (Diff == 1 ? "INC" : "DEC") << " HL\n");
-        BuildMI(MBB, *It, It->getDebugLoc(), TII->get(NewOpc));
+        Z80::buildIncDec16(MBB, *It, It->getDebugLoc(), *TII,
+                           Diff == 1 ? Z80::INC_rr : Z80::DEC_rr, Z80::HL);
         It->eraseFromParent();
         Changed = BlockChanged = true;
       }
@@ -1792,15 +1478,14 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE;) {
         MachineInstr &MI = *MII;
-        unsigned Opc = MI.getOpcode();
-
-        bool IsBC = (Opc == Z80::LD_BC_nn);
-        bool IsDE = (Opc == Z80::LD_DE_nn);
+        Register Pair = getLD16nDst(MI);
+        bool IsBC = Pair == Z80::BC;
+        bool IsDE = Pair == Z80::DE;
         if (!IsBC && !IsDE) {
           ++MII;
           continue;
         }
-        if (!MI.getOperand(0).isImm()) {
+        if (!MI.getOperand(1).isImm()) {
           ++MII;
           continue;
         }
@@ -1812,8 +1497,8 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
         // I2: LD A,X (load high byte of compared value)
-        Register I2Src = getLDArSrcReg(I2->getOpcode());
-        if (!I2Src.isValid() && I2->getOpcode() != Z80::LD_A_HLind) {
+        Register I2Src = getLD8Src(*I2, Z80::A);
+        if (!I2Src.isValid() && !isLoadHL(*I2, Z80::A)) {
           ++MII;
           continue;
         }
@@ -1823,14 +1508,13 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           ++MII;
           continue;
         }
-        unsigned ExpXorHi = IsBC ? Z80::XOR_B : Z80::XOR_D;
-        if (I3->getOpcode() != ExpXorHi) {
+        if (!isAlu8(*I3, Z80::XOR_r, IsBC ? Z80::B : Z80::D)) {
           ++MII;
           continue;
         }
 
         auto I4 = std::next(I3);
-        if (I4 == MIE || I4->getOpcode() != Z80::LD_B_A) {
+        if (I4 == MIE || !isLD8(*I4, Z80::B, Z80::A)) {
           ++MII;
           continue;
         }
@@ -1841,8 +1525,8 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
         // I5: LD A,Y (load low byte of compared value)
-        Register I5Src = getLDArSrcReg(I5->getOpcode());
-        if (!I5Src.isValid() && I5->getOpcode() != Z80::LD_A_HLind) {
+        Register I5Src = getLD8Src(*I5, Z80::A);
+        if (!I5Src.isValid() && !isLoadHL(*I5, Z80::A)) {
           ++MII;
           continue;
         }
@@ -1852,14 +1536,13 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           ++MII;
           continue;
         }
-        unsigned ExpXorLo = IsBC ? Z80::XOR_C : Z80::XOR_E;
-        if (I6->getOpcode() != ExpXorLo) {
+        if (!isAlu8(*I6, Z80::XOR_r, IsBC ? Z80::C : Z80::E)) {
           ++MII;
           continue;
         }
 
         auto I7 = std::next(I6);
-        if (I7 == MIE || I7->getOpcode() != Z80::OR_B) {
+        if (I7 == MIE || !isAlu8(*I7, Z80::OR_r, Z80::B)) {
           ++MII;
           continue;
         }
@@ -1891,7 +1574,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           }
         }
 
-        int64_t Imm = MI.getOperand(0).getImm();
+        int64_t Imm = MI.getOperand(1).getImm();
         int64_t HiByte = (Imm >> 8) & 0xFF;
         int64_t LoByte = Imm & 0xFF;
         LLVM_DEBUG(dbgs() << "  Folding CMP_Z16 constant: " << MI);
@@ -1903,15 +1586,17 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         } else {
           // XOR #0 is identity. Also fold LD A,X; LD B,A → LD B,X.
           // I2 is LD A,X, I4 is LD B,A. With XOR removed, this is LD B,X.
-          unsigned LdBOpc = 0;
-          if (I2Src.isValid())
-            LdBOpc = getLD8Opcode(Z80::B, I2Src);
-          else if (I2->getOpcode() == Z80::LD_A_HLind)
-            LdBOpc = Z80::LD_B_HLind;
-          if (LdBOpc) {
+          bool Folded = false;
+          if (I2Src.isValid()) {
             // Skip LD B,B (self-move NOP when I2Src == B).
-            if (!(I2Src.isValid() && I2Src == Z80::B))
-              BuildMI(MBB, *I2, I2->getDebugLoc(), TII->get(LdBOpc));
+            if (I2Src != Z80::B)
+              Z80::buildLD8(MBB, *I2, I2->getDebugLoc(), *TII, Z80::B, I2Src);
+            Folded = true;
+          } else if (isLoadHL(*I2, Z80::A)) {
+            Z80::buildLoadHL(MBB, *I2, I2->getDebugLoc(), *TII, Z80::B);
+            Folded = true;
+          }
+          if (Folded) {
             I2->eraseFromParent();
             I4->eraseFromParent();
           }
@@ -1954,20 +1639,17 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
 
-        unsigned Opc = MI.getOpcode();
-        unsigned NextOpc = NextIt->getOpcode();
-
         // Direct r=A patterns: 2B → 1B (size + speed win)
         unsigned NewOpc = 0;
-        if (NextOpc == Z80::INC_HL) {
-          if (Opc == Z80::LD_A_HLind)
+        if (isIncDec16(*NextIt, Z80::INC_rr, Z80::HL)) {
+          if (isLoadHL(MI, Z80::A))
             NewOpc = Z80::LD_A_HLI;
-          else if (Opc == Z80::LD_HLind_A)
+          else if (isStoreHL(MI, Z80::A))
             NewOpc = Z80::LD_HLI_A;
-        } else if (NextOpc == Z80::DEC_HL) {
-          if (Opc == Z80::LD_A_HLind)
+        } else if (isIncDec16(*NextIt, Z80::DEC_rr, Z80::HL)) {
+          if (isLoadHL(MI, Z80::A))
             NewOpc = Z80::LD_A_HLD;
-          else if (Opc == Z80::LD_HLind_A)
+          else if (isStoreHL(MI, Z80::A))
             NewOpc = Z80::LD_HLD_A;
         }
 
@@ -1993,11 +1675,12 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         // Extended r!=A patterns: 2B → 2B (speed win only, saves 4T)
         // LD r,(HL); INC/DEC HL → LD A,(HL+/-); LD r,A  (requires A dead)
         // LD (HL),r; INC/DEC HL → LD A,r; LD (HL+/-),A  (requires A dead)
-        if (NextOpc == Z80::INC_HL || NextOpc == Z80::DEC_HL) {
-          bool IsInc = (NextOpc == Z80::INC_HL);
+        if (isIncDec16(*NextIt, Z80::INC_rr, Z80::HL) ||
+            isIncDec16(*NextIt, Z80::DEC_rr, Z80::HL)) {
+          bool IsInc = isIncDec16(*NextIt, Z80::INC_rr, Z80::HL);
 
-          Register LoadDst = getLoadHLindDstReg(Opc);
-          Register StoreSrc = getStoreHLindSrcReg(Opc);
+          Register LoadDst = getLoadHLindDstReg(MI);
+          Register StoreSrc = getStoreHLindSrcReg(MI);
           // Exclude A: LD A,(HL) → LD A,(HL+) is handled directly,
           // and LD (HL),A → LD A,A; LD (HL+),A produces a useless LD A,A.
           if (LoadDst == Z80::A)
@@ -2011,10 +1694,10 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           if (LoadDst.isValid() && IsInc) {
             auto I3 = std::next(NextIt);
             if (I3 != MIE) {
-              unsigned HiOpc = (LoadDst == Z80::C)   ? Z80::LD_B_HLind
-                               : (LoadDst == Z80::E) ? Z80::LD_D_HLind
-                                                     : 0;
-              if (HiOpc && I3->getOpcode() == HiOpc) {
+              Register HiReg = (LoadDst == Z80::C)   ? Z80::B
+                               : (LoadDst == Z80::E) ? Z80::D
+                                                     : Register();
+              if (HiReg.isValid() && isLoadHL(*I3, HiReg)) {
                 ++MII;
                 continue; // Let 16-bit HL load peephole handle it
               }
@@ -2032,11 +1715,11 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                 // LD r,(HL); INC/DEC HL → LD A,(HL+/-); LD r,A
                 LLVM_DEBUG(dbgs() << "  LD r,(HL)+INC/DEC → HL+/-: " << MI);
                 BuildMI(MBB, MI, DL, TII->get(HLOpc));
-                BuildMI(MBB, MI, DL, TII->get(getLDrAOpcode(LoadDst)));
+                Z80::buildLD8(MBB, MI, DL, *TII, LoadDst, Z80::A);
               } else {
                 // LD (HL),r; INC/DEC HL → LD A,r; LD (HL+/-),A
                 LLVM_DEBUG(dbgs() << "  LD (HL),r+INC/DEC → HL+/-: " << MI);
-                BuildMI(MBB, MI, DL, TII->get(getLD8Opcode(Z80::A, StoreSrc)));
+                Z80::buildLD8(MBB, MI, DL, *TII, Z80::A, StoreSrc);
                 BuildMI(MBB, MI, DL, TII->get(HLSOpc));
               }
 
@@ -2064,18 +1747,17 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE;) {
         MachineInstr &MI = *MII;
-        unsigned Opc = MI.getOpcode();
 
         // I1: LD C,(HL) or LD E,(HL)
-        bool IsBC = (Opc == Z80::LD_C_HLind);
-        bool IsDE = (Opc == Z80::LD_E_HLind);
+        bool IsBC = isLoadHL(MI, Z80::C);
+        bool IsDE = isLoadHL(MI, Z80::E);
         if (!IsBC && !IsDE) {
           ++MII;
           continue;
         }
 
         auto I2 = std::next(MII);
-        if (I2 == MIE || I2->getOpcode() != Z80::INC_HL) {
+        if (I2 == MIE || !isIncDec16(*I2, Z80::INC_rr, Z80::HL)) {
           ++MII;
           continue;
         }
@@ -2084,8 +1766,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           ++MII;
           continue;
         }
-        unsigned ExpHi = IsBC ? Z80::LD_B_HLind : Z80::LD_D_HLind;
-        if (I3->getOpcode() != ExpHi) {
+        if (!isLoadHL(*I3, IsBC ? Z80::B : Z80::D)) {
           ++MII;
           continue;
         }
@@ -2095,8 +1776,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           ++MII;
           continue;
         }
-        unsigned ExpLdL = IsBC ? Z80::LD_L_C : Z80::LD_L_E;
-        if (I4->getOpcode() != ExpLdL) {
+        if (!isLD8(*I4, Z80::L, IsBC ? Z80::C : Z80::E)) {
           ++MII;
           continue;
         }
@@ -2106,8 +1786,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           ++MII;
           continue;
         }
-        unsigned ExpLdH = IsBC ? Z80::LD_H_B : Z80::LD_H_D;
-        if (I5->getOpcode() != ExpLdH) {
+        if (!isLD8(*I5, Z80::H, IsBC ? Z80::B : Z80::D)) {
           ++MII;
           continue;
         }
@@ -2126,8 +1805,8 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         LLVM_DEBUG(dbgs() << "  16-bit HL load via HL+: " << MI);
         DebugLoc DL = MI.getDebugLoc();
         BuildMI(MBB, MI, DL, TII->get(Z80::LD_A_HLI));
-        BuildMI(MBB, MI, DL, TII->get(Z80::LD_H_HLind));
-        BuildMI(MBB, MI, DL, TII->get(Z80::LD_L_A));
+        Z80::buildLoadHL(MBB, MI, DL, *TII, Z80::H);
+        Z80::buildLD8(MBB, MI, DL, *TII, Z80::L, Z80::A);
 
         I5->eraseFromParent();
         I4->eraseFromParent();
@@ -2277,7 +1956,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           // --- 16-bit immediate store: LDHL; LD (HL),#lo; INC HL; LD (HL),#hi
           if (It1->getOpcode() == Z80::LD_HLind_n) {
             auto It2 = std::next(It1);
-            if (It2 != MIE && It2->getOpcode() == Z80::INC_HL) {
+            if (It2 != MIE && isIncDec16(*It2, Z80::INC_rr, Z80::HL)) {
               auto It3 = std::next(It2);
               if (It3 != MIE && It3->getOpcode() == Z80::LD_HLind_n) {
                 uint8_t LoVal = (uint8_t)(It1->getOperand(0).getImm() & 0xFF);
@@ -2310,13 +1989,13 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           }
 
           // --- 16-bit register store: LDHL; LD (HL),rlo; INC HL; LD (HL),rhi
-          Register StoreSrc1 = getStoreHLindSrcReg(It1->getOpcode());
+          Register StoreSrc1 = getStoreHLindSrcReg(*It1);
           if (StoreSrc1.isValid()) {
             auto It2 = std::next(It1);
-            if (It2 != MIE && It2->getOpcode() == Z80::INC_HL) {
+            if (It2 != MIE && isIncDec16(*It2, Z80::INC_rr, Z80::HL)) {
               auto It3 = std::next(It2);
               if (It3 != MIE) {
-                Register StoreSrc2 = getStoreHLindSrcReg(It3->getOpcode());
+                Register StoreSrc2 = getStoreHLindSrcReg(*It3);
                 if (StoreSrc2.isValid()) {
                   // Try redundant store elimination.
                   if (tryElimRedundantStore(AbsOff, false, StoreSrc1, 0, false,
@@ -2346,14 +2025,14 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
 
           // --- HL+ register store: LDHL; LD A,r; LD (HL+),A; LD (HL),r2
           {
-            Register SrcLo = getLDArSrcReg(It1->getOpcode());
+            Register SrcLo = getLD8Src(*It1, Z80::A);
             // Only B/C/D/E — H/L can't be source (LDHL clobbered HL).
             if (SrcLo.isValid() && SrcLo != Z80::H && SrcLo != Z80::L) {
               auto It2 = std::next(It1);
               if (It2 != MIE && It2->getOpcode() == Z80::LD_HLI_A) {
                 auto It3 = std::next(It2);
                 if (It3 != MIE) {
-                  Register StoreSrc2 = getStoreHLindSrcReg(It3->getOpcode());
+                  Register StoreSrc2 = getStoreHLindSrcReg(*It3);
                   if (StoreSrc2.isValid()) {
                     // Try redundant store elimination.
                     if (tryElimRedundantStore(AbsOff, false, SrcLo, 0, false,
@@ -2377,13 +2056,13 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           }
 
           // --- 16-bit load: LDHL; LD lo,(HL); INC HL; LD hi,(HL)
-          Register LoadDst1 = getLoadHLindDstReg(It1->getOpcode());
+          Register LoadDst1 = getLoadHLindDstReg(*It1);
           if (LoadDst1.isValid()) {
             auto It2 = std::next(It1);
-            if (It2 != MIE && It2->getOpcode() == Z80::INC_HL) {
+            if (It2 != MIE && isIncDec16(*It2, Z80::INC_rr, Z80::HL)) {
               auto It3 = std::next(It2);
               if (It3 != MIE) {
-                Register LoadDst2 = getLoadHLindDstReg(It3->getOpcode());
+                Register LoadDst2 = getLoadHLindDstReg(*It3);
                 if (LoadDst2.isValid()) {
                   auto AvLo = SPSlots.find(AbsOff);
                   auto AvHi = SPSlots.find(AbsOff + 1);
@@ -2416,13 +2095,11 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                       // Both register: check for circular dependency.
                       bool LoIsNop = (LoadDst1 == SLo.Reg);
                       bool HiIsNop = (LoadDst2 == SHi.Reg);
-                      unsigned OpcLo =
-                          LoIsNop ? 0 : getLD8Opcode(LoadDst1, SLo.Reg);
-                      unsigned OpcHi =
-                          HiIsNop ? 0 : getLD8Opcode(LoadDst2, SHi.Reg);
-                      if (!LoIsNop && !OpcLo)
+                      bool CopyLo = !LoIsNop && Z80::canLD8(LoadDst1, SLo.Reg);
+                      bool CopyHi = !HiIsNop && Z80::canLD8(LoadDst2, SHi.Reg);
+                      if (!LoIsNop && !CopyLo)
                         CanForward = false;
-                      if (!HiIsNop && !OpcHi)
+                      if (!HiIsNop && !CopyHi)
                         CanForward = false;
                       if (CanForward) {
                         bool HiFirst = TRI->regsOverlap(LoadDst1, SHi.Reg);
@@ -2431,16 +2108,22 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                         if (CanForward) {
                           LLVM_DEBUG(dbgs() << "  SM83 fwd 16-bit reg SP+"
                                             << AbsOff << "\n");
+                          auto emitCopyHi = [&] {
+                            if (CopyHi)
+                              Z80::buildLD8(MBB, MI, DL, *TII, LoadDst2,
+                                            SHi.Reg);
+                          };
+                          auto emitCopyLo = [&] {
+                            if (CopyLo)
+                              Z80::buildLD8(MBB, MI, DL, *TII, LoadDst1,
+                                            SLo.Reg);
+                          };
                           if (HiFirst) {
-                            if (OpcHi)
-                              BuildMI(MBB, MI, DL, TII->get(OpcHi));
-                            if (OpcLo)
-                              BuildMI(MBB, MI, DL, TII->get(OpcLo));
+                            emitCopyHi();
+                            emitCopyLo();
                           } else {
-                            if (OpcLo)
-                              BuildMI(MBB, MI, DL, TII->get(OpcLo));
-                            if (OpcHi)
-                              BuildMI(MBB, MI, DL, TII->get(OpcHi));
+                            emitCopyLo();
+                            emitCopyHi();
                           }
                           It3->eraseFromParent();
                           It2->eraseFromParent();
@@ -2460,15 +2143,13 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                     if (CanForward) {
                       // Pre-validate all opcodes before emitting anything,
                       // to avoid partially-emitted instructions on failure.
-                      auto getSlotOpc = [&](Register Dst,
-                                            SlotVal &S) -> unsigned {
+                      auto slotIsLoadable = [&](Register Dst, SlotVal &S) {
                         if (S.IsImm)
-                          return getLDrnOpcode(Dst);
-                        return (Dst == S.Reg) ? ~0u : getLD8Opcode(Dst, S.Reg);
+                          return Z80::isEncodableGR8(Dst);
+                        return Dst == S.Reg || Z80::canLD8(Dst, S.Reg);
                       };
-                      unsigned OpcLo = getSlotOpc(LoadDst1, SLo);
-                      unsigned OpcHi = getSlotOpc(LoadDst2, SHi);
-                      if (!OpcLo || !OpcHi)
+                      if (!slotIsLoadable(LoadDst1, SLo) ||
+                          !slotIsLoadable(LoadDst2, SHi))
                         CanForward = false;
                     }
                     if (CanForward) {
@@ -2480,11 +2161,9 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                                         << AbsOff << "\n");
                       auto emitLoad = [&](Register Dst, SlotVal &S) {
                         if (S.IsImm) {
-                          BuildMI(MBB, MI, DL, TII->get(getLDrnOpcode(Dst)))
-                              .addImm(S.Imm);
+                          Z80::buildLD8n(MBB, MI, DL, *TII, Dst).addImm(S.Imm);
                         } else if (Dst != S.Reg) {
-                          BuildMI(MBB, MI, DL,
-                                  TII->get(getLD8Opcode(Dst, S.Reg)));
+                          Z80::buildLD8(MBB, MI, DL, *TII, Dst, S.Reg);
                         }
                       };
                       if (HiFirst) {
@@ -2532,24 +2211,23 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
               DebugLoc DL = MI.getDebugLoc();
               bool Done = false;
               if (S.IsImm) {
-                unsigned LdOpc = getLDrnOpcode(LoadDst1);
-                if (LdOpc) {
+                if (Z80::isEncodableGR8(LoadDst1)) {
                   LLVM_DEBUG(dbgs() << "  SM83 fwd 8-bit imm SP+" << AbsOff
                                     << " #" << (int)S.Imm << "\n");
-                  BuildMI(MBB, MI, DL, TII->get(LdOpc)).addImm(S.Imm);
+                  Z80::buildLD8n(MBB, MI, DL, *TII, LoadDst1).addImm(S.Imm);
                   It1->eraseFromParent();
                   MII = MBB.erase(MII);
                   Changed = BlockChanged = true;
                   Done = true;
                 }
               } else if (S.Reg != Z80::H && S.Reg != Z80::L) {
-                unsigned CopyOpc =
-                    (LoadDst1 == S.Reg) ? 0 : getLD8Opcode(LoadDst1, S.Reg);
-                if (LoadDst1 == S.Reg || CopyOpc) {
+                bool NeedCopy =
+                    LoadDst1 != S.Reg && Z80::canLD8(LoadDst1, S.Reg);
+                if (LoadDst1 == S.Reg || NeedCopy) {
                   LLVM_DEBUG(dbgs()
                              << "  SM83 fwd 8-bit reg SP+" << AbsOff << "\n");
-                  if (CopyOpc)
-                    BuildMI(MBB, MI, DL, TII->get(CopyOpc));
+                  if (NeedCopy)
+                    Z80::buildLD8(MBB, MI, DL, *TII, LoadDst1, S.Reg);
                   It1->eraseFromParent();
                   MII = MBB.erase(MII);
                   Changed = BlockChanged = true;
@@ -2602,9 +2280,9 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       unsigned Opc = MI.getOpcode();
 
       // Case 1: IX-indexed store — LD (IX+d), R
-      Register StoreSrc = getStoreIXdSrcReg(Opc);
+      Register StoreSrc = getStoreIXdSrcReg(MI);
       if (StoreSrc.isValid()) {
-        int Offset = MI.getOperand(0).getImm();
+        int Offset = Z80::idxSlotOperand(MI).getImm();
         if (isPlainSlotAccess(MI) && !Z80::readsUndef(MI, StoreSrc))
           AvailValues[Offset] = StoreSrc;
         else
@@ -2613,9 +2291,9 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       }
 
       // Case 2: IX-indexed load — LD R', (IX+d)
-      Register LoadDst = getLoadIXdDstReg(Opc);
+      Register LoadDst = getLoadIXdDstReg(MI);
       if (LoadDst.isValid()) {
-        int Offset = MI.getOperand(0).getImm();
+        int Offset = Z80::idxSlotOperand(MI).getImm();
 
         if (isPlainSlotAccess(MI)) {
           auto It = AvailValues.find(Offset);
@@ -2630,14 +2308,13 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
               continue;
             }
             // Replace LD R', (IX+d) with LD R', R_src.
-            unsigned NewOpc = getLD8Opcode(LoadDst, SrcReg);
-            if (NewOpc) {
+            if (Z80::canLD8(LoadDst, SrcReg)) {
               LLVM_DEBUG(dbgs() << "  Forwarding: " << MI << "  -> LD "
                                 << printReg(LoadDst, TRI) << ", "
                                 << printReg(SrcReg, TRI) << "\n");
               // R' gets a new value — invalidate other entries pointing to R'.
               invalidateReg(AvailValues, TRI, LoadDst);
-              BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(NewOpc));
+              Z80::buildLD8(MBB, MI, MI.getDebugLoc(), *TII, LoadDst, SrcReg);
               MI.eraseFromParent();
               Changed = BlockChanged = true;
               AvailValues[Offset] = LoadDst;
@@ -2656,7 +2333,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
 
       // Case 3: LD (IX+d), n — immediate store to IX slot
       if (Opc == Z80::LD_IXd_n) {
-        int Offset = MI.getOperand(0).getImm();
+        int Offset = Z80::idxSlotOperand(MI).getImm();
         AvailValues.erase(Offset);
         continue;
       }
@@ -2680,7 +2357,6 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
     if (BlockChanged)
       recomputeLivenessFlags(MBB);
   }
-
 
   // Run last: earlier peepholes pattern-match LDHL-based slot accesses
   // (redundant store elimination keys slot identity on them), so the

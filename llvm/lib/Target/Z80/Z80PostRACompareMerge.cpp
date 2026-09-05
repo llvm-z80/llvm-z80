@@ -79,7 +79,9 @@ bool Z80PostRACompareMerge::runOnMachineFunction(MachineFunction &MF) {
     SmallVector<MachineInstr *, 4> ToErase;
 
     for (MachineInstr &MI : MBB) {
-      if (MI.getOpcode() == Z80::OR_A && ZFlagValid) {
+      // OR A only re-tests what A already holds.
+      if (MI.getOpcode() == Z80::OR_r && MI.getOperand(0).getReg() == Z80::A &&
+          ZFlagValid) {
         LLVM_DEBUG(dbgs() << "  Removing redundant: " << MI);
         ToErase.push_back(&MI);
         continue;
@@ -104,9 +106,11 @@ bool Z80PostRACompareMerge::runOnMachineFunction(MachineFunction &MF) {
         }
         if (MI.getDesc().hasImplicitDefOfPhysReg(Z80::A))
           SetsZForA = true;
-        // CP doesn't def A but sets Z based on A's comparison.
-        if (MI.getOpcode() == Z80::CP_r || MI.getOpcode() == Z80::CP_n ||
-            MI.getOpcode() == Z80::CP_HLind || MI.getOpcode() == Z80::CP_IXd)
+        // CP doesn't def A but sets Z based on A's comparison. A compare
+        // against a register is left out: Z then describes the difference
+        // rather than A, which is not what OR A would have tested.
+        if (MI.getOpcode() == Z80::CP_n || MI.getOpcode() == Z80::CP_HLind ||
+            MI.getOpcode() == Z80::CP_IXd)
           SetsZForA = true;
 
         ZFlagValid = SetsZForA;

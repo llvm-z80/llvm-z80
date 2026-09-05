@@ -24,9 +24,9 @@ body:             |
     RET
 
 # CHECK-LABEL: name: two_zeros
-# CHECK:      XOR_A
-# CHECK-NEXT: LD_IXd_A -2
-# CHECK-NEXT: LD_IXd_A -3
+# CHECK:      XOR_r undef $a
+# CHECK-NEXT: LD_IXd_r -2, $a
+# CHECK-NEXT: LD_IXd_r -3, killed $a
 # CHECK-NEXT: LD_IXd_n -4, 7
 
 ...
@@ -61,7 +61,7 @@ body:             |
 # Saving a byte for a few cycles is not the trade optsize takes.
 #
 # CHECK-LABEL: name: optsize_only
-# CHECK-NOT:  XOR_A
+# CHECK-NOT:  XOR_r
 # CHECK:      LD_IXd_n -2, 0
 
 ...
@@ -77,7 +77,7 @@ body:             |
     RET
 
 # CHECK-LABEL: name: tuned_for_speed
-# CHECK-NOT:  XOR_A
+# CHECK-NOT:  XOR_r
 # CHECK:      LD_IXd_n -2, 0
 
 ...
