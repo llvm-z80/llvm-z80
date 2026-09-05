@@ -792,16 +792,20 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
         VarReg = RHS;
 
       if (VarReg.isValid() && !STI.hasSM83()) {
-        // Z80: Optimized small-constant EQ/NE test via SUB+OR.
+        // Z80: Optimized small-constant EQ/NE test via SUB+OR. Both halves are
+        // named where the value already sits, as the byte-wise paths below do:
+        // moving it into HL first would tie the allocator to one pair and leave
+        // a definition of that pair which the halves outlive.
         if (!RBI.constrainGenericRegister(VarReg, Z80::GR16RegClass, MRI))
           return false;
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
-            .addReg(VarReg);
+        Register VarHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
+        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), VarHi)
+            .addReg(VarReg, RegState{}, Z80::sub_hi);
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-            .addReg(Z80::L);
+            .addReg(VarReg, RegState{}, Z80::sub_lo);
         if (ConstVal != 0)
           BuildMI(MBB, MI, DL, TII.get(Z80::SUB_n)).addImm(ConstVal);
-        BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(Z80::H);
+        BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(VarHi);
       } else if (STI.hasSM83()) {
         // Check if RHS is constant 0 — use lightweight OR-based zero test.
         bool RHSIsZero = false;
