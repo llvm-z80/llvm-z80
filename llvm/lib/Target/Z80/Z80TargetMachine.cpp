@@ -614,6 +614,9 @@ void Z80PassConfig::addPreSched2() {
   addPass(&FinalizeISelID);
   // Lower pseudos produced by control flow pseudos.
   addPass(&ExpandPostRAPseudosID);
+  // Copy lowering leaves the halves of a pair copy declared on the wrong one
+  // of the two byte moves. See Z80FixupImplicitDefs.cpp.
+  addPass(createZ80FixupImplicitDefsPass());
   addPass(createZ80PostRAScavengingPass());
 
   // This is currently mandatory, since it lowers CMPTermZ.

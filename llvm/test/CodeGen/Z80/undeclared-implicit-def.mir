@@ -1,37 +1,33 @@
-# RUN: llc -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
-
+# RUN: llc -mtriple=z80 -run-pass=z80-fixup-implicit-defs %s -o - | FileCheck %s
+#
 # Lowering a pair copy leaves every implicit def the copy carried on the last
-# byte move, so a move can claim to write the byte its predecessor wrote. A
-# liveness query must not read such a def as the place the write happens.
+# byte move, so a move can claim to write the byte its predecessor wrote. The
+# claim is dropped here, before anything reads liveness off it.
 
 ---
-# CHECK-LABEL: name: undeclared_def_not_trusted
-# CHECK: POP_DE
-# CHECK: PUSH_DE
-name:            undeclared_def_not_trusted
+# CHECK-LABEL: name: relocated_def_removed
+# CHECK:      LD_E_C implicit-def $e, implicit $c
+# CHECK-NEXT: LD_D_B implicit-def $d, implicit $b, implicit-def $d
+# CHECK-NEXT: RET
+name:            relocated_def_removed
 tracksRegLiveness: true
 body:             |
   bb.0:
-    liveins: $bc, $sp
-    POP_DE implicit-def $de, implicit-def $sp, implicit $sp
-    LD_A_B implicit-def $a, implicit $b
-    PUSH_DE implicit $de, implicit-def $sp, implicit $sp
-    LD_D_B implicit-def $d, implicit $b, implicit-def $e
+    liveins: $bc
+    LD_E_C implicit-def $e, implicit $c
+    LD_D_B implicit-def $d, implicit $b, implicit-def $e, implicit-def $d
     RET implicit $de
 ...
 ---
-# CHECK-LABEL: name: declared_def_trusted
-# CHECK-NOT: POP_DE
-# CHECK-NOT: PUSH_DE
-name:            declared_def_trusted
+# A byte widened to a pair leaves the upper half unwritten and says so with a
+# def nothing else makes. Dropping that one would leave the pair undefined.
+# CHECK-LABEL: name: undefined_half_kept
+# CHECK: LD_L_A implicit-def $l, implicit $a, implicit-def $h
+name:            undefined_half_kept
 tracksRegLiveness: true
 body:             |
   bb.0:
-    liveins: $bc, $sp
-    POP_DE implicit-def $de, implicit-def $sp, implicit $sp
-    LD_A_B implicit-def $a, implicit $b
-    PUSH_DE implicit $de, implicit-def $sp, implicit $sp
-    LD_E_C implicit-def $e, implicit $c
-    LD_D_B implicit-def $d, implicit $b
-    RET implicit $de
+    liveins: $a
+    LD_L_A implicit-def $l, implicit $a, implicit-def $h
+    RET implicit $hl
 ...

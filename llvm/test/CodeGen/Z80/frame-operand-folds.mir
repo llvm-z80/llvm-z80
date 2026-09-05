@@ -104,24 +104,3 @@ body:             |
 # CHECK-NEXT: LD_E_A
 
 ...
----
-name:            pair_copy_halves
-tracksRegLiveness: true
-body:             |
-  bb.0:
-    liveins: $bc
-    LD_L_C implicit-def $l, implicit $c
-    LD_H_B implicit-def $h, implicit $b, implicit-def $l
-    LD_A_L implicit-def $a, implicit killed $l
-    RET implicit $a, implicit $h
-
-# Lowering a pair copy leaves both sub-register defs on the second byte
-# move. Believing the one it does not declare would make the first move,
-# which is what actually writes that byte, look dead.
-
-# CHECK-LABEL: name: pair_copy_halves
-# CHECK:      LD_L_C
-# CHECK-NEXT: LD_H_B
-# CHECK-NEXT: LD_A_L
-
-...
