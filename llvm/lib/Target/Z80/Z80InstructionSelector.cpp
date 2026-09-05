@@ -3889,29 +3889,35 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return false;
 
     const DebugLoc &DL = MI.getDebugLoc();
-    Register LowByte;
+    // The low byte is the source itself where that is already a byte, and
+    // otherwise the low half of the pair the source occupies. Naming the half
+    // in place leaves the value wherever it is: moving it into a fixed pair
+    // first would tie the allocator's hands and leave a definition of that
+    // pair which the value outlives.
+    Register LowByte = SrcReg;
+    unsigned LowSubReg = 0;
 
     if (SrcBits <= 8) {
       if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
         return false;
-      LowByte = SrcReg;
     } else {
-      // s16 → s8/s1: extract low byte
       if (!RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
         return false;
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(SrcReg);
-      LowByte = Z80::L;
+      LowSubReg = Z80::sub_lo;
     }
 
     if (DstBits == 1) {
       // The rest of the backend reads an s1 in a GR8 as exactly 0 or 1.
       // Truncation is the one producer that can leave other bits set.
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(LowByte);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
+          .addReg(LowByte, RegState{}, LowSubReg);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);
       LowByte = Z80::A;
+      LowSubReg = 0;
     }
 
-    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(LowByte);
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
+        .addReg(LowByte, RegState{}, LowSubReg);
     MI.eraseFromParent();
     return true;
   }
