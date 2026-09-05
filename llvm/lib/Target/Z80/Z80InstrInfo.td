@@ -615,14 +615,14 @@ def RELOAD_ANY16 : Z80Pseudo<(outs Anyi16:$dst), (ins i32imm:$fi, i32imm:$offset
 // ADD_HL_FI expands to: LD A,L; ADD A,(IX+d); LD L,A; LD A,H; ADC A,(IX+d+1); LD H,A
 // SUB_HL_FI expands to: LD A,L; SUB (IX+d); LD L,A; LD A,H; SBC A,(IX+d+1); LD H,A
 // These avoid allocating a GR16_BCDE register pair, reducing register pressure.
-def ADD_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi)> {
+def ADD_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi, i32imm:$offset)> {
   let Uses = [HL];
   let Defs = [HL, A, FLAGS];
   let mayLoad = true;
   let mayStore = false;
   let Predicates = [HasZ80];
 }
-def SUB_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi)> {
+def SUB_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi, i32imm:$offset)> {
   let Uses = [HL];
   let Defs = [HL, A, FLAGS];
   let mayLoad = true;

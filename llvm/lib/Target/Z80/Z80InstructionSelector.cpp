@@ -1535,9 +1535,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
         .addReg(HLSrcReg);
     auto MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(FoldOpc));
-    MIB.addFrameIndex(FIInfo.FI);
-    if (FIInfo.Offset)
-      MIB.addImm(FIInfo.Offset);
+    MIB.addFrameIndex(FIInfo.FI).addImm(FIInfo.Offset);
     // The pseudo performs the load the fold is about to erase.
     MIB.cloneMemRefs(*FIInfo.LoadMI);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
