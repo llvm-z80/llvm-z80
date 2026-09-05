@@ -1661,8 +1661,20 @@ LegalizerHelper::LegalizeResult LegalizerHelper::narrowScalar(MachineInstr &MI,
       return UnableToLegalize;
     }
 
+    // The result keeps its own type, which need not be the one the source was
+    // split into: a truncation to a byte of a value narrowed to halfwords
+    // still has to drop the rest of the low half.
+    LLT DstTy = MRI.getType(MI.getOperand(0).getReg());
+    if (DstTy.getSizeInBits() > NarrowTy.getSizeInBits()) {
+      LLVM_DEBUG(dbgs() << "Can't narrow trunc to type " << NarrowTy << "\n");
+      return UnableToLegalize;
+    }
+
     auto Unmerge = MIRBuilder.buildUnmerge(NarrowTy, MI.getOperand(1));
-    MIRBuilder.buildCopy(MI.getOperand(0), Unmerge.getReg(0));
+    if (DstTy == NarrowTy)
+      MIRBuilder.buildCopy(MI.getOperand(0), Unmerge.getReg(0));
+    else
+      MIRBuilder.buildTrunc(MI.getOperand(0), Unmerge.getReg(0));
     MI.eraseFromParent();
     return Legalized;
   }
