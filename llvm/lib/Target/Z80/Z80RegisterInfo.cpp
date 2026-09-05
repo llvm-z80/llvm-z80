@@ -909,10 +909,19 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   MachineBasicBlock::iterator Prev = AtStart ? MBB.end() : std::prev(MI);
   MachineBasicBlock::iterator Next = std::next(MI);
 
+  // Which bytes of the reads hold nothing has to be settled before the
+  // expansion replaces them with byte accesses.
+  SmallVector<MCRegister, 4> EmptyBytes;
+  Z80::collectEmptyReadBytes(MBB, MI, this, EmptyBytes);
+  Z80::collectUndefReads(*MI, this, EmptyBytes);
+
   bool Res = eliminateFrameIndexImpl(MI, SPAdj, FIOperandNum, RS);
 
+  MachineBasicBlock::iterator Begin = AtStart ? MBB.begin() : std::next(Prev);
+  Z80::markEmptyReads(Begin, Next, this, EmptyBytes);
+
   if (!MMOs.empty())
-    for (auto It = AtStart ? MBB.begin() : std::next(Prev); It != Next; ++It)
+    for (auto It = Begin; It != Next; ++It)
       if (It->mayLoadOrStore() && It->memoperands_empty() &&
           TII.getSPAdjust(*It) == 0)
         It->setMemRefs(MF, MMOs);

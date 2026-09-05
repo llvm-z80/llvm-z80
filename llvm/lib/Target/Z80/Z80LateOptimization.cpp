@@ -1068,6 +1068,13 @@ static bool fusePostIncAccess(MachineBasicBlock &MBB,
     }
     auto After = std::next(Next);
     const DebugLoc &DL = MI.getDebugLoc();
+    // A pair the register allocator filled in one half only reaches here as a
+    // byte store of the empty half, and the trip through A re-expresses that
+    // read without giving it a value.
+    SmallVector<MCRegister, 4> Empty;
+    Z80::collectUndefReads(MI, TRI, Empty);
+    bool AtStart = MII == MBB.begin();
+    auto Prev = AtStart ? MBB.end() : std::prev(MII);
 
     if (Opc == Z80::LD_A_HLind) {
       BuildMI(MBB, MII, DL, TII->get(Z80::LD_A_HLI));
@@ -1087,6 +1094,8 @@ static bool fusePostIncAccess(MachineBasicBlock &MBB,
       continue;
     }
     LLVM_DEBUG(dbgs() << "  Post-inc fuse: " << MI);
+    Z80::markEmptyReads(AtStart ? MBB.begin() : std::next(Prev), MII, TRI,
+                        Empty);
     MBB.erase(MII);
     MBB.erase(Next);
     MII = After;
@@ -1955,9 +1964,19 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
             NewOpc = Z80::LD_HLD_A;
         }
 
+        // A pair the register allocator filled in one half only reaches here
+        // as a byte access reading nothing, and the replacement re-expresses
+        // that read without giving it a value.
+        SmallVector<MCRegister, 4> Empty;
+        Z80::collectUndefReads(MI, TRI, Empty);
+        bool AtStart = MII == MBB.begin();
+        auto Prev = AtStart ? MBB.end() : std::prev(MII);
+        auto newRange = [&] { return AtStart ? MBB.begin() : std::next(Prev); };
+
         if (NewOpc) {
           LLVM_DEBUG(dbgs() << "  LD+INC/DEC HL → LD (HL+/-): " << MI);
           BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(NewOpc));
+          Z80::markEmptyReads(newRange(), MII, TRI, Empty);
           NextIt->eraseFromParent();
           MII = MBB.erase(MII);
           Changed = true;
@@ -2014,6 +2033,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                 BuildMI(MBB, MI, DL, TII->get(HLSOpc));
               }
 
+              Z80::markEmptyReads(newRange(), MII, TRI, Empty);
               NextIt->eraseFromParent();
               MII = MBB.erase(MII);
               Changed = true;

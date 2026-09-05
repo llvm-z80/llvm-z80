@@ -582,10 +582,25 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       AtStart ? MBB.end() : std::prev(MI.getIterator());
   MachineBasicBlock::iterator Next = std::next(MI.getIterator());
 
+  // Which bytes of the reads hold nothing has to be settled before the
+  // expansion replaces them with byte accesses. An expansion that rebuilds the
+  // operand list from the description also loses what the pseudo said about
+  // the reads it was given, so carry that too.
+  SmallVector<MCRegister, 4> EmptyBytes;
+  Z80::collectEmptyReadBytes(MBB, MI.getIterator(), STI->getRegisterInfo(),
+                             EmptyBytes);
+  Z80::collectUndefReads(MI, STI->getRegisterInfo(), EmptyBytes);
+
   bool Changed = expandPostRAPseudoImpl(MI);
 
-  if (Changed && !MMOs.empty())
-    for (auto It = AtStart ? MBB.begin() : std::next(Prev); It != Next; ++It)
+  if (!Changed)
+    return false;
+
+  MachineBasicBlock::iterator Begin = AtStart ? MBB.begin() : std::next(Prev);
+  Z80::markEmptyReads(Begin, Next, STI->getRegisterInfo(), EmptyBytes);
+
+  if (!MMOs.empty())
+    for (auto It = Begin; It != Next; ++It)
       if (It->mayLoadOrStore() && It->memoperands_empty() &&
           getSPAdjust(*It) == 0)
         It->setMemRefs(MF, MMOs);

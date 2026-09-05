@@ -90,6 +90,99 @@ inline void markUndefUse(const MachineInstrBuilder &MIB, MCRegister Reg) {
       MO.setIsUndef();
 }
 
+/// Whether \p Reg still carries a value where \p MI sits: the block receives it
+/// live, or an earlier instruction defines it and nothing since has retired it.
+/// This mirrors the bookkeeping the machine verifier does, so a read the scan
+/// rejects is one that carries nothing.
+inline bool hasLiveValue(MachineBasicBlock &MBB,
+                         MachineBasicBlock::iterator MI, MCRegister Reg,
+                         const TargetRegisterInfo *TRI) {
+  for (MachineBasicBlock::iterator I = MI; I != MBB.begin();) {
+    --I;
+    bool LiveDef = false, Def = false, Use = false, Killed = false;
+    for (const MachineOperand &MO : I->operands()) {
+      if (!MO.isReg() || !MO.getReg().isPhysical() ||
+          !TRI->regsOverlap(MO.getReg(), Reg))
+        continue;
+      if (MO.isDef()) {
+        Def = true;
+        LiveDef |= !MO.isDead();
+      } else if (!MO.isUndef()) {
+        Use = true;
+        Killed |= MO.isKill();
+      }
+    }
+    // Definitions take effect after the reads of the same instruction.
+    if (Def)
+      return LiveDef;
+    if (Use)
+      return !Killed;
+  }
+  for (const auto &LI : MBB.liveins())
+    if (TRI->regsOverlap(LI.PhysReg, Reg))
+      return true;
+  return false;
+}
+
+/// Collect the halves among \p MI's pair reads that hold no value. A pair the
+/// register allocator filled in one half only is still read whole, with no
+/// operand recording which half is empty, so an expansion that splits the pair
+/// into byte accesses has to settle the question again here. Only the halves
+/// are in question: a pair with nothing in either half, like any other read of
+/// a register that holds nothing, is already an error on \p MI itself.
+inline void collectEmptyReadBytes(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator MI,
+                                  const TargetRegisterInfo *TRI,
+                                  SmallVectorImpl<MCRegister> &Empty) {
+  for (const MachineOperand &MO : MI->operands()) {
+    if (!MO.isReg() || !MO.isUse() || MO.isUndef() || !MO.getReg().isPhysical())
+      continue;
+    auto Halves = TRI->subregs(MO.getReg().asMCReg());
+    if (Halves.empty())
+      continue;
+    for (MCPhysReg Sub : Halves)
+      if (!hasLiveValue(MBB, MI, Sub, TRI) &&
+          !is_contained(Empty, MCRegister(Sub)))
+        Empty.push_back(Sub);
+  }
+}
+
+/// Mark every read of an empty byte in [\p Begin, \p End) undef, so that the
+/// expansion does not claim to read a value that was never produced. A byte the
+/// range itself writes carries a value from that point on and leaves the set.
+inline void markEmptyReads(MachineBasicBlock::iterator Begin,
+                           MachineBasicBlock::iterator End,
+                           const TargetRegisterInfo *TRI,
+                           SmallVectorImpl<MCRegister> &Empty) {
+  for (auto It = Begin; It != End && !Empty.empty(); ++It) {
+    for (MachineOperand &MO : It->operands())
+      if (MO.isReg() && MO.isUse() && MO.getReg().isPhysical() &&
+          is_contained(Empty, MO.getReg().asMCReg()))
+        MO.setIsUndef();
+    for (const MachineOperand &MO : It->operands())
+      if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
+        llvm::erase_if(Empty, [&](MCRegister R) {
+          return TRI->regsOverlap(MO.getReg(), R);
+        });
+  }
+}
+
+/// Collect the registers \p MI reads without a value, down to their halves. A
+/// rewrite that re-expresses those reads has to say the same about them, since
+/// nothing it emits gives the register a value either.
+inline void collectUndefReads(const MachineInstr &MI,
+                              const TargetRegisterInfo *TRI,
+                              SmallVectorImpl<MCRegister> &Empty) {
+  for (const MachineOperand &MO : MI.operands()) {
+    if (!MO.isReg() || !MO.isUse() || !MO.isUndef() ||
+        !MO.getReg().isPhysical())
+      continue;
+    for (MCPhysReg Sub : TRI->subregs_inclusive(MO.getReg().asMCReg()))
+      if (!is_contained(Empty, MCRegister(Sub)))
+        Empty.push_back(Sub);
+  }
+}
+
 /// Whether \p Reg still matters where \p At sits: something at or below it
 /// reads the value, or a successor expects it. This is the question behind
 /// every save-and-restore decision and every peephole that borrows a register.
