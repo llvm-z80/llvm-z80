@@ -183,6 +183,22 @@ inline void collectUndefReads(const MachineInstr &MI,
   }
 }
 
+/// Whether \p MI reads \p Reg without a value. What such a store leaves in a
+/// frame slot is nothing, so nothing may be taken from the register later on
+/// the grounds that the slot holds what it holds. A register read more than
+/// once counts as carrying a value if any of those reads does.
+inline bool readsUndef(const MachineInstr &MI, Register Reg) {
+  bool Found = false;
+  for (const MachineOperand &MO : MI.operands()) {
+    if (!MO.isReg() || !MO.isUse() || MO.getReg() != Reg)
+      continue;
+    if (!MO.isUndef())
+      return false;
+    Found = true;
+  }
+  return Found;
+}
+
 /// Whether \p Reg still matters where \p At sits: something at or below it
 /// reads the value, or a successor expects it. This is the question behind
 /// every save-and-restore decision and every peephole that borrows a register.

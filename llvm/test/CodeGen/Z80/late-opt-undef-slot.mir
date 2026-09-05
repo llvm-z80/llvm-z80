@@ -1,0 +1,24 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# Storing a register that holds nothing leaves nothing in the slot, so a later
+# load of that slot must not be served from the register.
+
+--- |
+  define void @slot_from_undef() { ret void }
+...
+---
+name:            slot_from_undef
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $ix
+    LD_IXd_C -4, implicit undef $c :: (store (s8) into %stack.0)
+    LD_A_IXd -4, implicit-def $a :: (load (s8) from %stack.0)
+    RET implicit $a
+...
+---
+# CHECK-LABEL: name: slot_from_undef
+# CHECK: LD_A_IXd -4
+# CHECK-NOT: LD_A_C

@@ -2163,6 +2163,15 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           SPSlots.erase(K);
       };
 
+      // A store of a register that holds nothing leaves nothing in the slot,
+      // so the slot must not be described as holding what that register does.
+      auto setSlot = [&](int Off, const SlotVal &S, bool Empty) {
+        if (Empty)
+          SPSlots.erase(Off);
+        else
+          SPSlots[Off] = S;
+      };
+
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE;) {
         MachineInstr &MI = *MII;
@@ -2316,8 +2325,8 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                   SlotVal SLo, SHi;
                   SLo.Reg = StoreSrc1;
                   SHi.Reg = StoreSrc2;
-                  SPSlots[AbsOff] = SLo;
-                  SPSlots[AbsOff + 1] = SHi;
+                  setSlot(AbsOff, SLo, Z80::readsUndef(*It1, StoreSrc1));
+                  setSlot(AbsOff + 1, SHi, Z80::readsUndef(*It3, StoreSrc2));
                   LLVM_DEBUG(dbgs() << "  SM83 reg store SP+" << AbsOff
                                     << " <- " << printReg(StoreSrc1, TRI)
                                     << ", SP+" << (AbsOff + 1) << " <- "
@@ -2330,7 +2339,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
             // 8-bit register store
             SlotVal S;
             S.Reg = StoreSrc1;
-            SPSlots[AbsOff] = S;
+            setSlot(AbsOff, S, Z80::readsUndef(*It1, StoreSrc1));
             MII = std::next(It1);
             continue;
           }
@@ -2353,8 +2362,8 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                     SlotVal SLo, SHi;
                     SLo.Reg = SrcLo;
                     SHi.Reg = StoreSrc2;
-                    SPSlots[AbsOff] = SLo;
-                    SPSlots[AbsOff + 1] = SHi;
+                    setSlot(AbsOff, SLo, Z80::readsUndef(*It1, SrcLo));
+                    setSlot(AbsOff + 1, SHi, Z80::readsUndef(*It3, StoreSrc2));
                     LLVM_DEBUG(dbgs() << "  SM83 HL+ store SP+" << AbsOff
                                       << " <- " << printReg(SrcLo, TRI)
                                       << ", SP+" << (AbsOff + 1) << " <- "
@@ -2596,7 +2605,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       Register StoreSrc = getStoreIXdSrcReg(Opc);
       if (StoreSrc.isValid()) {
         int Offset = MI.getOperand(0).getImm();
-        if (isPlainSlotAccess(MI))
+        if (isPlainSlotAccess(MI) && !Z80::readsUndef(MI, StoreSrc))
           AvailValues[Offset] = StoreSrc;
         else
           AvailValues.erase(Offset);
