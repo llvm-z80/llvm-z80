@@ -14,6 +14,7 @@
 #define LLVM_LIB_TARGET_Z80_Z80INSTRINFO_H
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
@@ -87,6 +88,28 @@ inline void markUndefUse(const MachineInstrBuilder &MIB, MCRegister Reg) {
   for (MachineOperand &MO : MIB.getInstr()->operands())
     if (MO.isReg() && MO.isUse() && MO.getReg() == Reg)
       MO.setIsUndef();
+}
+
+/// Whether \p Reg still matters where \p At sits: something at or below it
+/// reads the value, or a successor expects it. This is the question behind
+/// every save-and-restore decision and every peephole that borrows a register.
+///
+/// Reserved registers are asked about by membership: LivePhysRegs reports them
+/// as unavailable whether or not they carry anything, so only that answer is
+/// meaningful for FLAGS. For everything else availability is the right test,
+/// since a pair matters as soon as either half does.
+inline bool isLiveAt(MachineBasicBlock &MBB, MachineBasicBlock::iterator At,
+                     MCRegister Reg, const TargetRegisterInfo *TRI) {
+  const MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
+  LivePhysRegs Live(*TRI);
+  Live.addLiveOutsNoPristines(MBB);
+  for (MachineBasicBlock::iterator I = MBB.end(); I != At;) {
+    --I;
+    Live.stepBackward(*I);
+  }
+  if (MRI.isReserved(Reg))
+    return Live.contains(Reg);
+  return !Live.available(MRI, Reg);
 }
 
 /// Emit a PUSH HL that saves HL across an inserted sequence. Register

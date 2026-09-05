@@ -216,19 +216,7 @@ bool Z80RegisterInfo::saveScavengerRegister(MachineBasicBlock &MBB,
 // Also checks successor blocks for FLAGS live-in.
 static bool isFlagsLiveAfter(MachineBasicBlock::iterator MI,
                              const TargetRegisterInfo *TRI) {
-  MachineBasicBlock &MBB = *MI->getParent();
-  for (auto I = std::next(MI->getIterator()); I != MBB.end(); ++I) {
-    if (I->readsRegister(Z80::FLAGS, TRI))
-      return true;
-    if (I->modifiesRegister(Z80::FLAGS, TRI))
-      return false;
-  }
-  // Reached end of block — check if FLAGS is live-in to any successor.
-  for (const MachineBasicBlock *Succ : MBB.successors()) {
-    if (Succ->isLiveIn(Z80::FLAGS))
-      return true;
-  }
-  return false;
+  return Z80::isLiveAt(*MI->getParent(), std::next(MI), Z80::FLAGS, TRI);
 }
 
 //===----------------------------------------------------------------------===//
@@ -318,69 +306,12 @@ static void emitLargeOffsetAddr(MachineBasicBlock &MBB,
 // kill the entire register — the other half (L) may still be live.
 // Only a def that fully covers Reg (Reg == DefReg, or Reg is a sub-register
 // of DefReg) counts as a kill.
-// Check whether ADJCALLSTACKUP will actually clobber Reg when expanded.
-//
-// The pseudo's operands carry the instance's scratch clobber since call
-// lowering computes it, but this query predates that and runs during frame
-// index elimination, before eliminateCallFramePseudoInstr expands the
-// pseudo — so derive the answer from the same policy function rather than
-// scanning operands.
-static bool adjCallStackUpClobbersReg(const MachineInstr &MI, Register Reg,
-                                      const TargetRegisterInfo *TRI) {
-  assert(MI.getOpcode() == Z80::ADJCALLSTACKUP);
-  int64_t AdjAmount = MI.getOperand(0).getImm() - MI.getOperand(1).getImm();
-  const auto &STI = MI.getMF()->getSubtarget<Z80Subtarget>();
-  Register Scratch =
-      Z80FrameLowering::callFrameDestroyScratch(STI, AdjAmount);
-  return Scratch.isValid() && TRI->regsOverlap(Reg, Scratch);
-}
-
+// Whether the value in \p Reg is still wanted where \p At sits, which is what
+// decides whether a sequence that borrows the register has to save it first.
 static bool isRegLiveAt(Register Reg, MachineBasicBlock &MBB,
-                        MachineBasicBlock::iterator MI,
+                        MachineBasicBlock::iterator At,
                         const TargetRegisterInfo *TRI) {
-  for (auto I = MI, E = MBB.end(); I != E; ++I) {
-    // ADJCALLSTACKDOWN is always erased without emitting any code.
-    if (I->getOpcode() == Z80::ADJCALLSTACKDOWN)
-      continue;
-
-    // ADJCALLSTACKUP's implicit-defs don't always reflect reality —
-    // the actual register clobbers depend on the expansion path.
-    // Skip this pseudo if its expansion won't touch our register.
-    if (I->getOpcode() == Z80::ADJCALLSTACKUP &&
-        !adjCallStackUpClobbersReg(*I, Reg, TRI))
-      continue;
-
-    bool HasUse = false;
-    bool HasFullDef = false;
-    for (const MachineOperand &MO : I->operands()) {
-      if (!MO.isReg() || !MO.getReg().isValid())
-        continue;
-      if (!TRI->regsOverlap(MO.getReg(), Reg))
-        continue;
-      if (MO.isUse())
-        HasUse = true;
-      if (MO.isDef()) {
-        // Only count as a full kill if the def covers all of Reg.
-        // e.g., def $h does NOT kill $hl (L may still be live).
-        // def $hl DOES kill $hl and $h and $l.
-        if (MO.getReg() == Reg || TRI->isSuperRegister(Reg, MO.getReg()))
-          HasFullDef = true;
-      }
-    }
-    if (HasUse)
-      return true; // Register is used by this instruction — it's live
-    if (HasFullDef)
-      return false; // Register is fully defined without use — it's dead
-  }
-  // No use/def found in remaining instructions — check live-out.
-  // At O1+, values may be live across BB boundaries.
-  for (const MachineBasicBlock *Succ : MBB.successors()) {
-    for (const auto &LI : Succ->liveins()) {
-      if (TRI->regsOverlap(LI.PhysReg, Reg))
-        return true;
-    }
-  }
-  return false;
+  return Z80::isLiveAt(MBB, At, Reg.asMCReg(), TRI);
 }
 
 //===----------------------------------------------------------------------===//

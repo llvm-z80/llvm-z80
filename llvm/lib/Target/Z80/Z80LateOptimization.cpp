@@ -328,75 +328,12 @@ static unsigned getLDrnOpcode(Register R) {
   }
 }
 
-// Check if a physical register is dead at a given point by scanning forward
-// in the basic block. Returns true if the register is not used before being
-// fully redefined or the end of the basic block.
-//
-// Tracks accumulated partial defs across instructions: e.g. for Reg=DE,
-// seeing LD E,A followed by LD D,A (with no intervening use of DE/D/E)
-// counts as a full redefinition.
+// Whether nothing at or below \p After wants the value in \p Reg, which is
+// what lets a transformation clobber it.
 static bool isRegDeadAfter(MachineBasicBlock::iterator After,
                            MachineBasicBlock &MBB,
                            const TargetRegisterInfo *TRI, MCPhysReg Reg) {
-  // Collect sub-registers that must all be defined for Reg to be fully dead.
-  // For leaf registers (e.g. E with no sub-regs), this stays empty and only
-  // direct/super-register defs matter.
-  SmallVector<MCPhysReg, 4> SubRegs;
-  SmallVector<bool, 4> SubRegDefined;
-  for (MCSubRegIterator SR(Reg, TRI); SR.isValid(); ++SR) {
-    SubRegs.push_back(*SR);
-    SubRegDefined.push_back(false);
-  }
-
-  for (auto I = After, E = MBB.end(); I != E; ++I) {
-    bool HasUse = false, HasFullDef = false;
-    for (const MachineOperand &MO : I->operands()) {
-      if (!MO.isReg() || !MO.getReg().isPhysical())
-        continue;
-      if (!TRI->regsOverlap(MO.getReg(), Reg))
-        continue;
-      if (MO.readsReg())
-        HasUse = true;
-      if (MO.isDef()) {
-        // An implicit def the instruction does not declare cannot be
-        // trusted to be where the write happens: lowering a pair copy into
-        // two byte moves leaves both sub-register defs on the second one,
-        // which is not what writes the first byte. Calls and inline asm are
-        // the exception, since their clobbers are attached by the caller.
-        if (MO.isImplicit() && !I->isCall() && !I->isInlineAsm() &&
-            !llvm::is_contained(I->getDesc().implicit_defs(), MO.getReg()))
-          continue;
-        MCPhysReg DefReg = MO.getReg();
-        // Direct or super-register def covers the entire register.
-        if (DefReg == Reg || TRI->isSuperRegister(Reg, DefReg))
-          HasFullDef = true;
-        // Track partial defs: mark which sub-registers are covered.
-        for (unsigned i = 0, e = SubRegs.size(); i != e; ++i) {
-          if (!SubRegDefined[i] && (DefReg == SubRegs[i] ||
-                                    TRI->isSuperRegister(SubRegs[i], DefReg)))
-            SubRegDefined[i] = true;
-        }
-      }
-    }
-    if (HasUse)
-      return false; // Used — register is live
-    if (HasFullDef)
-      return true; // Fully redefined without use — register is dead
-    // Check if accumulated partial defs now cover all sub-registers.
-    if (!SubRegs.empty() &&
-        llvm::all_of(SubRegDefined, [](bool d) { return d; }))
-      return true;
-  }
-  // End of basic block — check if register is live-in to any successor.
-  // Use regsOverlap to catch sub/super-register relationships
-  // (e.g. Reg=E but successor has DE as live-in).
-  for (MachineBasicBlock *Succ : MBB.successors()) {
-    for (const auto &LI : Succ->liveins()) {
-      if (TRI->regsOverlap(LI.PhysReg, Reg))
-        return false;
-    }
-  }
-  return true;
+  return !Z80::isLiveAt(MBB, After, Reg, TRI);
 }
 
 // Get the register an LD r,#imm writes, or Register().
