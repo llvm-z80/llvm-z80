@@ -93,6 +93,17 @@ static unsigned getPUSHOpcode(Register Reg) { return Z80::getPushOpcode(Reg); }
 
 static unsigned getPOPOpcode(Register Reg) { return Z80::getPopOpcode(Reg); }
 
+std::optional<DestSourcePair>
+Z80InstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
+  // A copy carrying anything beyond these two operands is not offered. Half
+  // of a pair copy also defines the pair, and a caller tracks a copy by the
+  // operands named here alone, so it would not see that erasing such a move
+  // drops that definition with it.
+  if (MI.getOpcode() == Z80::LD_r_r && MI.implicit_operands().empty())
+    return DestSourcePair(MI.getOperand(0), MI.getOperand(1));
+  return std::nullopt;
+}
+
 void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                MachineBasicBlock::iterator I,
                                const DebugLoc &DL, Register DestReg,
@@ -100,9 +111,10 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                bool RenamableDest, bool RenamableSrc) const {
   // Handle 8-bit register copies: LD r,r'
   if (Z80::canLD8(DestReg, SrcReg)) {
-    Z80::buildLD8(MBB, I, DL, *this, DestReg, SrcReg)
-        ->getOperand(1)
-        .setIsKill(KillSrc);
+    MachineInstr *Copy = Z80::buildLD8(MBB, I, DL, *this, DestReg, SrcReg);
+    Copy->getOperand(0).setIsRenamable(RenamableDest);
+    Copy->getOperand(1).setIsKill(KillSrc);
+    Copy->getOperand(1).setIsRenamable(RenamableSrc);
     return;
   }
 

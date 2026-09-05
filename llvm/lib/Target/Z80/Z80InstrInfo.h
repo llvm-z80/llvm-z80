@@ -573,6 +573,12 @@ public:
                    bool KillSrc, bool RenamableDest = false,
                    bool RenamableSrc = false) const override;
 
+  /// LD r,r' names both registers as operands, so it is the register copy
+  /// generic code looks for once COPY has been lowered. Only the form that
+  /// carries nothing else is reported; see the definition.
+  std::optional<DestSourcePair>
+  isCopyInstrImpl(const MachineInstr &MI) const override;
+
   void storeRegToStackSlot(
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register SrcReg,
       bool isKill, int FrameIndex, const TargetRegisterClass *RC, Register VReg,

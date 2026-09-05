@@ -625,6 +625,12 @@ void Z80PassConfig::addPreSched2() {
   // Remove redundant OR A / AND A when the Z flag is already valid
   // from a preceding ALU instruction.
   addPass(createZ80PostRACompareMerge());
+
+  // The peepholes above rewrite slot accesses into register copies and leave
+  // copies behind where they fold one instruction into another, so copy
+  // propagation runs after them. It is told to recognise LD r,r' through
+  // isCopyInstrImpl, since COPY is already lowered by this point.
+  addPass(createMachineCopyPropagationPass(/*UseCopyInstr=*/true));
 }
 
 void Z80PassConfig::addPreEmitPass() {
