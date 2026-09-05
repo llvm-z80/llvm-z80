@@ -1442,6 +1442,13 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
 
   for (MachineBasicBlock &MBB : MF) {
+    // The peepholes written inline below move reads past the point where
+    // register allocation recorded a value as dying, which leaves the kill and
+    // dead flags describing a live range that ended too early. The peepholes
+    // kept in their own functions each restate the flags before returning;
+    // these share the one call at the end of the block.
+    bool BlockChanged = false;
+
     // Dropping a no-op is what leaves the constant behind it dead, so this
     // comes before the sweep.
     Changed |= elideZeroOperandLogic(MBB, TII, TRI);
@@ -1482,7 +1489,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         LLVM_DEBUG(dbgs() << "  Removing redundant POP+PUSH: " << *MII);
         NextIt->eraseFromParent();
         MII = MBB.erase(MII);
-        Changed = true;
+        Changed = BlockChanged = true;
         Matched = true;
         break;
       }
@@ -1552,7 +1559,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       MII = MBB.erase(I1);
       BuildMI(MBB, MII, DL, TII->get(DECOpc));
       BuildMI(MBB, MII, DL, TII->get(Z80::JR_NZ_e)).addMBB(TargetMBB);
-      Changed = true;
+      Changed = BlockChanged = true;
     }
 
     // --- Peephole: XOR #0xFF → CPL ---
@@ -1568,7 +1575,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           LLVM_DEBUG(dbgs() << "  XOR #0xFF → CPL: " << MI);
           BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(Z80::CPL));
           MII = MBB.erase(MII);
-          Changed = true;
+          Changed = BlockChanged = true;
           continue;
         }
       }
@@ -1588,7 +1595,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           LLVM_DEBUG(dbgs() << "  LD A,#0 → XOR A: " << MI);
           BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(Z80::XOR_A));
           MII = MBB.erase(MII);
-          Changed = true;
+          Changed = BlockChanged = true;
           continue;
         }
       }
@@ -1608,7 +1615,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           MI.getOperand(0).getImm() == NextIt->getOperand(0).getImm()) {
         LLVM_DEBUG(dbgs() << "  Removing redundant: " << *NextIt);
         NextIt->eraseFromParent();
-        Changed = true;
+        Changed = BlockChanged = true;
         continue;
       }
       ++MII;
@@ -1691,7 +1698,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
 
         // Remove LD rr,#imm
         MII = MBB.erase(MII);
-        Changed = true;
+        Changed = BlockChanged = true;
       }
     }
 
@@ -1770,7 +1777,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                           << (Diff == 1 ? "INC" : "DEC") << " HL\n");
         BuildMI(MBB, *It, It->getDebugLoc(), TII->get(NewOpc));
         It->eraseFromParent();
-        Changed = true;
+        Changed = BlockChanged = true;
       }
     }
 
@@ -1920,7 +1927,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
 
         // Remove LD rr,#imm
         MII = MBB.erase(MII);
-        Changed = true;
+        Changed = BlockChanged = true;
       }
     }
 
@@ -1979,7 +1986,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           Z80::markEmptyReads(newRange(), MII, TRI, Empty);
           NextIt->eraseFromParent();
           MII = MBB.erase(MII);
-          Changed = true;
+          Changed = BlockChanged = true;
           continue;
         }
 
@@ -2036,7 +2043,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
               Z80::markEmptyReads(newRange(), MII, TRI, Empty);
               NextIt->eraseFromParent();
               MII = MBB.erase(MII);
-              Changed = true;
+              Changed = BlockChanged = true;
               continue;
             }
           }
@@ -2127,7 +2134,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         I3->eraseFromParent();
         I2->eraseFromParent();
         MII = MBB.erase(MII);
-        Changed = true;
+        Changed = BlockChanged = true;
       }
     }
 
@@ -2254,7 +2261,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
             Mid->eraseFromParent();
             S1->eraseFromParent();
             MII = MBB.erase(LDHL);
-            Changed = true;
+            Changed = BlockChanged = true;
             return true;
           };
 
@@ -2430,7 +2437,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                           It2->eraseFromParent();
                           It1->eraseFromParent();
                           MII = MBB.erase(MII);
-                          Changed = true;
+                          Changed = BlockChanged = true;
                           invalidateSlotReg(TRI, LoadDst1);
                           invalidateSlotReg(TRI, LoadDst2);
                           SPSlots[AbsOff] = {false, MCPhysReg(LoadDst1), 0};
@@ -2482,7 +2489,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                       It2->eraseFromParent();
                       It1->eraseFromParent();
                       MII = MBB.erase(MII);
-                      Changed = true;
+                      Changed = BlockChanged = true;
                       invalidateSlotReg(TRI, LoadDst1);
                       invalidateSlotReg(TRI, LoadDst2);
                       SPSlots[AbsOff] = {false, MCPhysReg(LoadDst1), 0};
@@ -2523,7 +2530,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                   BuildMI(MBB, MI, DL, TII->get(LdOpc)).addImm(S.Imm);
                   It1->eraseFromParent();
                   MII = MBB.erase(MII);
-                  Changed = true;
+                  Changed = BlockChanged = true;
                   Done = true;
                 }
               } else if (S.Reg != Z80::H && S.Reg != Z80::L) {
@@ -2536,7 +2543,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                     BuildMI(MBB, MI, DL, TII->get(CopyOpc));
                   It1->eraseFromParent();
                   MII = MBB.erase(MII);
-                  Changed = true;
+                  Changed = BlockChanged = true;
                   Done = true;
                 }
               }
@@ -2610,7 +2617,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
               // Don't invalidate anything: R's value doesn't change.
               LLVM_DEBUG(dbgs() << "  Eliminating redundant reload: " << MI);
               MI.eraseFromParent();
-              Changed = true;
+              Changed = BlockChanged = true;
               continue;
             }
             // Replace LD R', (IX+d) with LD R', R_src.
@@ -2623,7 +2630,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
               invalidateReg(AvailValues, TRI, LoadDst);
               BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(NewOpc));
               MI.eraseFromParent();
-              Changed = true;
+              Changed = BlockChanged = true;
               AvailValues[Offset] = LoadDst;
               continue;
             }
@@ -2660,6 +2667,9 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       for (MCPhysReg Def : TII->get(Opc).implicit_defs())
         invalidateReg(AvailValues, TRI, Def);
     }
+
+    if (BlockChanged)
+      recomputeLivenessFlags(MBB);
   }
 
 

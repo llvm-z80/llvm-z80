@@ -1,0 +1,45 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# A reload served from the register that still holds the slot's value reads that
+# register later than allocation expected, so the kill that ended the value at
+# the store no longer describes its live range.
+
+--- |
+  define void @forward_past_kill() { ret void }
+  define void @redundant_reload_past_kill() { ret void }
+...
+---
+name:            forward_past_kill
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $ix
+    LD_C_A implicit-def $c, implicit killed $a
+    LD_IXd_C -4, implicit killed $c :: (store (s16) into %stack.0, align 1)
+    LD_E_IXd -4, implicit-def $e :: (load (s16) from %stack.0, align 1)
+    RET implicit $e
+...
+---
+# CHECK-LABEL: name: forward_past_kill
+# CHECK:      LD_IXd_C -4, implicit $c
+# CHECK-NEXT: LD_E_C
+---
+name:            redundant_reload_past_kill
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $ix
+    LD_C_A implicit-def $c, implicit killed $a
+    LD_IXd_C -4, implicit killed $c :: (store (s16) into %stack.0, align 1)
+    LD_C_IXd -4, implicit-def $c :: (load (s16) from %stack.0, align 1)
+    RET implicit $c
+...
+---
+# Dropping the reload leaves the reads below on the value the store ended.
+# CHECK-LABEL: name: redundant_reload_past_kill
+# CHECK:      LD_IXd_C -4, implicit $c
+# CHECK-NEXT: RET
