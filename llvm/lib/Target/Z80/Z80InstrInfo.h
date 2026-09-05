@@ -14,6 +14,7 @@
 #define LLVM_LIB_TARGET_Z80_Z80INSTRINFO_H
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
+#include "Z80OpcodeUtils.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
@@ -221,37 +222,65 @@ inline bool isLiveAt(MachineBasicBlock &MBB, MachineBasicBlock::iterator At,
   return !Live.available(MRI, Reg);
 }
 
-/// Emit a PUSH HL that saves HL across an inserted sequence. Register
-/// allocation may have marked an earlier use of HL as a kill (or its def as
-/// dead); this late insertion reads HL after that point, so the stale flag
-/// on the nearest HL access must be cleared. If the block never touches HL
-/// and it is not live-in, the read carries no value and is marked undef.
-inline void emitHLSavePush(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator InsertBefore,
-                           const DebugLoc &DL, const TargetInstrInfo &TII) {
-  const TargetRegisterInfo *TRI =
-      MBB.getParent()->getSubtarget().getRegisterInfo();
-  MachineInstrBuilder Push =
-      BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_HL));
-  for (MachineBasicBlock::iterator I = Push->getIterator();
-       I != MBB.begin();) {
+/// Keep \p Reg readable at \p At. Register allocation marked the last read of
+/// a value as a kill (or its only definition as dead); a read placed after
+/// that point leaves the flag describing a live range that is now too short,
+/// so clear the flags back to the definition the new read takes its value
+/// from.
+inline void extendLiveRangeTo(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator At, MCRegister Reg,
+                              const TargetRegisterInfo *TRI) {
+  for (MachineBasicBlock::iterator I = At; I != MBB.begin();) {
     --I;
-    bool Touched = false;
+    bool Def = false;
     for (MachineOperand &MO : I->operands()) {
-      if (!MO.isReg() || !MO.getReg().isValid() ||
-          !TRI->regsOverlap(MO.getReg(), Z80::HL))
+      if (!MO.isReg() || !MO.getReg().isPhysical() ||
+          !TRI->regsOverlap(MO.getReg(), Reg))
         continue;
-      Touched = true;
-      if (MO.isDef())
+      if (MO.isDef()) {
         MO.setIsDead(false);
-      else if (MO.isKill())
+        Def = true;
+      } else {
         MO.setIsKill(false);
+      }
     }
-    if (Touched)
+    if (Def)
       return;
   }
-  if (!MBB.isLiveIn(Z80::HL) && !MBB.isLiveIn(Z80::L) && !MBB.isLiveIn(Z80::H))
-    Z80::markUndefUse(Push, Z80::HL);
+}
+
+/// Emit the PUSH of a pair saved across an inserted sequence. The read is
+/// placed after register allocation settled the pair's liveness, so a value it
+/// still carries has a kill (or a dead definition) that now ends too early,
+/// and a pair carrying nothing must say so rather than name a value that was
+/// never produced.
+inline void emitPairSavePush(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator At, const DebugLoc &DL,
+                             const TargetInstrInfo &TII, MCRegister Pair) {
+  const TargetRegisterInfo *TRI =
+      MBB.getParent()->getSubtarget().getRegisterInfo();
+  // Settle the question before the push exists, or the scan back from the
+  // insertion point reads the push's own operand as the answer. Either half
+  // carrying something is enough, since the save covers the whole pair.
+  bool Carries = false;
+  for (MCPhysReg Half : TRI->subregs(Pair))
+    if (hasLiveValue(MBB, At, Half, TRI)) {
+      Carries = true;
+      break;
+    }
+  MachineInstrBuilder Push =
+      BuildMI(MBB, At, DL, TII.get(Z80::getPushOpcode(Pair)));
+  if (Carries)
+    extendLiveRangeTo(MBB, Push->getIterator(), Pair, TRI);
+  else
+    markUndefUse(Push, Pair);
+}
+
+/// Emit the PUSH HL of a sequence that borrows HL, on the same terms.
+inline void emitHLSavePush(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator At, const DebugLoc &DL,
+                           const TargetInstrInfo &TII) {
+  emitPairSavePush(MBB, At, DL, TII, Z80::HL);
 }
 } // namespace Z80
 

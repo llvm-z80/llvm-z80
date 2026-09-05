@@ -347,7 +347,7 @@ static void expandSpillGR8LargeOffset(MachineBasicBlock &MBB,
   if (NeedSaveHL)
     emitHLSavePush(MBB, MI, DL, TII);
   if (NeedSaveTemp)
-    BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+    Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
 
   emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
 
@@ -389,7 +389,7 @@ static void expandReloadGR8LargeOffset(MachineBasicBlock &MBB,
   if (NeedSaveHL)
     emitHLSavePush(MBB, MI, DL, TII);
   if (NeedSaveTemp)
-    BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+    Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
 
   emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
 
@@ -436,7 +436,7 @@ static void expandSpillGR16LargeOffset(MachineBasicBlock &MBB,
     bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, TRI);
 
     if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
     BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL)); // push data
 
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
@@ -472,7 +472,7 @@ static void expandSpillGR16LargeOffset(MachineBasicBlock &MBB,
     if (NeedSaveHL)
       emitHLSavePush(MBB, MI, DL, TII);
     if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
 
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
 
@@ -512,7 +512,7 @@ static void expandReloadGR16LargeOffset(MachineBasicBlock &MBB,
     bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, TRI);
 
     if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
 
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
 
@@ -705,7 +705,7 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
       SPDelta += 2;
     }
     if (NeedSaveTemp) {
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
       SPDelta += 2;
     }
 
@@ -739,7 +739,7 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
     bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, TRI);
 
     if (NeedSaveTemp) {
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
       SPDelta += 2;
     }
     // Copy HL data to TempReg via LD r,r'
@@ -816,7 +816,7 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
       SPDelta += 2;
     }
     if (NeedSaveTemp) {
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
       SPDelta += 2;
     }
 
@@ -829,7 +829,7 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
     BuildMI(MBB, MI, DL, TII.get(getLoadHLindOpcode(TempHi)));
 
     // Transfer TempReg to IX/IY via PUSH/POP
-    BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+    Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
     unsigned PopOpc = (DstReg == Z80::IX) ? Z80::POP_IX : Z80::POP_IY;
     BuildMI(MBB, MI, DL, TII.get(PopOpc));
 
@@ -849,7 +849,7 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
     bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, TRI);
 
     if (NeedSaveTemp) {
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
       SPDelta += 2;
     }
 
@@ -1086,7 +1086,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
 
       if (NeedSaveTemp)
-        BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+        Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
       emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
       if (NeedSaveTemp)
         BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
@@ -1219,7 +1219,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
                                                                    : Z80::DE;
 
       if (NeedSaveTemp)
-        BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempPair)));
+        Z80::emitPairSavePush(MBB, MI, DL, TII, TempPair);
       expandReloadGR8SPRelative(MBB, MI, DL, TII, TempReg,
                                 Offset + (NeedSaveTemp ? 2 : 0), this);
       BuildMI(MBB, MI, DL, TII.get(Z80::getAluRegOpcode(Op))).addReg(TempReg);
@@ -1238,7 +1238,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
 
       if (NeedSaveTemp)
-        BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+        Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
       emitHLSavePush(MBB, MI, DL, TII);
 
       int SPAdj = 2 + (NeedSaveTemp ? 2 : 0);
@@ -1335,7 +1335,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     if (NeedSaveHL)
       emitHLSavePush(MBB, MI, DL, TII);
     if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
     BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
     if (NeedSaveTemp)
@@ -1358,7 +1358,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     if (NeedSaveHL)
       emitHLSavePush(MBB, MI, DL, TII);
     if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
     BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
     BuildMI(MBB, MI, DL, TII.get(Z80::INC_HL));
@@ -1410,7 +1410,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     if (NeedSaveHL)
       emitHLSavePush(MBB, MI, DL, TII);
     if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
     emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg,
                         /*PreserveFlags=*/false);
     BuildMI(MBB, MI, DL, TII.get(Z80::getAluHLindOpcode(Op)))
@@ -1459,7 +1459,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
 
     if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPushOpcode(TempReg)));
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
 
     // Save HL (the value to add/sub to).
     emitHLSavePush(MBB, MI, DL, TII);

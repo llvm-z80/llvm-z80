@@ -1,0 +1,28 @@
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=prolog-epilog %s -o - | FileCheck %s
+#
+# The scratch pair is saved because a later instruction still names it, but at
+# the point of the save it carries nothing: one half was left dead by the shift
+# and the other never held a value. The save has to say so.
+
+--- |
+  define void @scratch_pair_empty() { ret void }
+...
+---
+name:            scratch_pair_empty
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+  - { id: 1, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $d, $hl, $sp
+    ASHR16_VAR implicit-def $hl, implicit-def dead $b, implicit-def $flags, implicit $hl, implicit undef $b
+    SPILL_GR16 killed renamable $hl, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    LD_A_D implicit-def $a, implicit killed $d
+    LD_C_n 3, implicit-def $c
+    SPILL_ANY16 renamable $bc, %stack.1, 0 :: (store (s16) into %stack.1, align 1)
+    RET implicit $a
+...
+---
+# CHECK-LABEL: name: scratch_pair_empty
+# CHECK: PUSH_BC implicit undef $bc

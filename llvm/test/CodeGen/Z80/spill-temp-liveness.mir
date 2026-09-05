@@ -1,0 +1,26 @@
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=prolog-epilog %s -o - | FileCheck %s
+#
+# Spilling HL on SM83 routes the value through a scratch pair, saved only when
+# the pair is live across the spill. B is redefined before its next read here,
+# so nothing of BC survives the spill and no save is needed.
+
+--- |
+  define void @scratch_pair_dead() { ret void }
+...
+---
+name:            scratch_pair_dead
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $d, $hl, $sp
+    SPILL_GR16 killed renamable $hl, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    LD_A_D implicit-def $a, implicit killed $d
+    $b = COPY killed renamable $a
+    SHL16_VAR implicit-def $hl, implicit-def dead $b, implicit-def $flags, implicit undef $hl, implicit $b
+    RET implicit $hl
+...
+---
+# CHECK-LABEL: name: scratch_pair_dead
+# CHECK-NOT: PUSH_BC
