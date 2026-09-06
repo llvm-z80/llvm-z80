@@ -13,6 +13,7 @@
 #include "Z80.h"
 #include "clang/Basic/MacroBuilder.h"
 #include "clang/Basic/TargetInfo.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace clang::targets;
 
@@ -131,4 +132,17 @@ void Z80TargetInfo::getTargetDefines(const LangOptions &Opts,
 
   // Z80/SM83 uses sdasz80 .rel object format, not ELF.
   // Do not define __ELF__.
+}
+
+bool Z80TargetInfo::isValidFeatureName(StringRef Feature) const {
+  // The subtarget features Z80Features.td declares, which must be listed here
+  // to be spelled in a target attribute: without this the base class accepts
+  // every name, a misspelling reaches the backend as a feature it does not
+  // know, and the attribute quietly does nothing. Keep in step with that file.
+  static constexpr StringRef Known[] = {
+      "z80",          "z180",         "r800",
+      "ez80",         "sm83",         "undocumented",
+      "static-frame", "inline-i16-runtime",
+  };
+  return llvm::is_contained(Known, Feature);
 }
