@@ -56,11 +56,14 @@ __truncf_l_done:
 	ret
 
 __truncf_mid:
-	sub	#8
-	jr	z, __truncf_mid_zero
+	; 8 <= A < 16: C is entirely fractional, and B keeps its top bits.
+	; E already holds seven integer bits, so B keeps A - 7 of them.
+	sub	#7		; A = integer bits in B (1..8)
 	ld	h, a
 	ld	a, #8
-	sub	h
+	sub	h		; A = bits to clear in B (7..0)
+	ld	c, #0
+	jr	z, __truncf_mid_done
 	ld	h, a
 	ld	a, #0xFF
 __truncf_m_lp:
@@ -69,18 +72,16 @@ __truncf_m_lp:
 	jr	nz, __truncf_m_lp
 	and	b
 	ld	b, a
-	ld	c, #0
-	ret
-__truncf_mid_zero:
-	ld	c, #0
+__truncf_mid_done:
 	ret
 
 __truncf_hi:
-	sub	#16
-	jr	z, __truncf_ret
+	; 16 <= A < 23: E and B are entirely integer, and C keeps A - 15 bits.
+	sub	#15		; A = integer bits in C (1..7)
 	ld	h, a
 	ld	a, #8
-	sub	h
+	sub	h		; A = bits to clear in C (7..1)
+	ret	z
 	ld	h, a
 	ld	a, #0xFF
 __truncf_e_lp:
@@ -89,7 +90,6 @@ __truncf_e_lp:
 	jr	nz, __truncf_e_lp
 	and	c
 	ld	c, a
-__truncf_ret:
 	ret
 
 __truncf_zero:

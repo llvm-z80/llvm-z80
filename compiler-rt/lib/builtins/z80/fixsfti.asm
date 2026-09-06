@@ -134,9 +134,12 @@ __fti_sign:
 	pop	af
 	or	a
 	ret	z
-	; Negate the 16-byte result in place
-	push	iy
-	pop	hl
+	; The result pointer, refetched: the shift above moved IY off the base
+	; and the negation has to start there.
+	pop	bc		; BC = return address
+	pop	hl		; HL = sret pointer
+	push	hl
+	push	bc
 	ld	b, #16
 	or	a		; clear carry
 __fti_neg_lp:

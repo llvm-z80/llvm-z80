@@ -77,43 +77,38 @@ __truncf_lmask_done:
 	ret
 
 __truncf_mid:
-	; 8 <= A < 16: E is all fractional, clear part of D
-	; Integer mantissa bits in D: A - 8, bits to clear: 16 - A = 8-(A-8)
-	sub	#8		; A = integer bits in D (0..7)
+	; 8 <= A < 16: E is entirely fractional, and D keeps its top bits.
+	; L already holds seven integer bits, so D keeps A - 7 of them.
+	sub	#7		; A = integer bits in D (1..8)
 	ld	b, a
-	ld	a, #0xFF
-	ld	c, a		; will use if B=0
-	or	a
-	jr	z, __truncf_dmask_done
-	ld	c, #8
-	ld	a, c
-	sub	b		; A = bits to clear in D
+	ld	a, #8
+	sub	b		; A = bits to clear in D (7..0)
+	ld	e, #0
+	jr	z, __truncf_mid_done
 	ld	b, a
 	ld	a, #0xFF
 __truncf_dmask_lp:
 	sla	a
 	djnz	__truncf_dmask_lp
-__truncf_dmask_done:
 	and	d
 	ld	d, a
-	ld	e, #0
+__truncf_mid_done:
 	ret
 
 __truncf_hi:
-	; 16 <= A < 23: D and L are all integer, clear part of E
-	sub	#16		; A = integer bits in E (0..6)
+	; 16 <= A < 23: L and D are entirely integer, and E keeps A - 15 bits.
+	sub	#15		; A = integer bits in E (1..7)
 	ld	b, a
 	ld	a, #8
-	sub	b		; A = bits to clear in E
+	sub	b		; A = bits to clear in E (7..1)
+	ret	z
 	ld	b, a
 	ld	a, #0xFF
-	jr	z, __truncf_ret	; nothing to clear
 __truncf_emask_lp:
 	sla	a
 	djnz	__truncf_emask_lp
 	and	e
 	ld	e, a
-__truncf_ret:
 	ret
 
 __truncf_zero:

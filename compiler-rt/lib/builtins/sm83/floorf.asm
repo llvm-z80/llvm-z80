@@ -57,11 +57,14 @@ __floorf_l_done:
 	jr	__floorf_check
 
 __floorf_mid:
-	sub	#8
-	jr	z, __floorf_mid_zero
+	; 8 <= A < 16: the low byte is entirely fractional, and the middle byte
+	; keeps A - 7 bits, the top mantissa byte holding seven already.
+	sub	#7		; A = integer bits in the middle byte (1..8)
 	ld	h, a
 	ld	a, #8
-	sub	h
+	sub	h		; A = bits to clear (7..0)
+	ld	c, #0
+	jr	z, __floorf_check
 	ld	h, a
 	ld	a, #0xFF
 __floorf_m_lp:
@@ -70,18 +73,16 @@ __floorf_m_lp:
 	jr	nz, __floorf_m_lp
 	and	b
 	ld	b, a
-	ld	c, #0
-	jr	__floorf_check
-__floorf_mid_zero:
-	ld	c, #0
 	jr	__floorf_check
 
 __floorf_hi:
-	sub	#16
-	jr	z, __floorf_check
+	; 16 <= A < 23: only the low byte still has fractional bits, and it
+	; keeps A - 15 of them.
+	sub	#15		; A = integer bits in the low byte (1..7)
 	ld	h, a
 	ld	a, #8
-	sub	h
+	sub	h		; A = bits to clear (7..1)
+	jr	z, __floorf_check
 	ld	h, a
 	ld	a, #0xFF
 __floorf_h_lp:
