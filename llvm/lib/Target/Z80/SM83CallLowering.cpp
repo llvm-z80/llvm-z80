@@ -50,4 +50,6 @@ SM83CallLowering::SM83CallLowering(const TargetLowering *TL)
                                 /*Ret_I32_Lo=*/Z80::DE,
                                 /*IndirectCallReg=*/Z80::HL,
                                 /*IndirectCallOpc=*/Z80::CALL_HL,
-                            }) {}
+                            },
+                            // z88dk-fastcall is not supported for SM83 yet.
+                            CallingConvRegs{}) {}

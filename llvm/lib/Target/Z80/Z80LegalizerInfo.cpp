@@ -20,9 +20,13 @@
 #include "Z80MachineFunctionInfo.h"
 #include "Z80Subtarget.h"
 
+#include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerHelper.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
@@ -410,8 +414,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   getActionDefinitionsBuilder(G_ABS).lower();
 
-  // Memory intrinsics - lower to runtime library calls
-  getActionDefinitionsBuilder({G_MEMCPY, G_MEMMOVE}).libcall();
+  // Memory intrinsics use the custom Z80 LDIR/LDDR and memmove lowering below.
+  getActionDefinitionsBuilder({G_MEMCPY, G_MEMMOVE}).custom();
 
   // G_MEMSET needs custom handling: promote i8 val to i16 (C 'int')
   // before lowering to libcall, so calling convention assigns it correctly
@@ -1269,6 +1273,241 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       }
     }
 
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case TargetOpcode::G_MEMCPY: {
+    // Lower G_MEMCPY to inline LDIR on Z80.
+    // LDIR: HL=source, DE=dest, BC=count. Copies (HL)→(DE), inc both, dec BC.
+    // G_MEMCPY operands: 0=dst, 1=src, 2=size, 3=tailcall
+    Register DstPtr = MI.getOperand(0).getReg();
+    Register SrcPtr = MI.getOperand(1).getReg();
+    Register Size = MI.getOperand(2).getReg();
+
+    const auto &STI = MIRBuilder.getMF().getSubtarget<Z80Subtarget>();
+    if (!STI.hasZ80()) {
+      // SM83 lacks LDIR — fall back to library call.
+      auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
+      if (Result != LegalizerHelper::Legalized)
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // CRITICAL: LDIR with BC=0 runs 65536 iterations, trashing 64 KB of
+    // memory.  A variable size uses the register-CC runtime helper, whose
+    // entry guard handles BC==0.  Keep inline LDIR for non-zero constants.
+    auto SizeC = getIConstantVRegSExtVal(Size, MRI);
+    if (SizeC && *SizeC == 0) {
+      MI.eraseFromParent();
+      return true;
+    }
+    if (!SizeC) {
+      MIRBuilder.setInsertPt(*MI.getParent(), MI.getIterator());
+      auto &Ctx = MIRBuilder.getMF().getFunction().getContext();
+      SmallVector<CallLowering::ArgInfo, 3> Args;
+      Args.push_back(
+          {DstPtr, PointerType::get(Ctx, MRI.getType(DstPtr).getAddressSpace()),
+           0});
+      Args.push_back(
+          {SrcPtr, PointerType::get(Ctx, MRI.getType(SrcPtr).getAddressSpace()),
+           0});
+      Args.push_back(
+          {Size, IntegerType::get(Ctx, MRI.getType(Size).getSizeInBits()), 0});
+
+      CallLowering::CallLoweringInfo Info;
+      Info.CallConv = CallingConv::Z80_AllReg;
+      Info.Callee = MachineOperand::CreateES("__memmove_rt");
+      Info.OrigRet = CallLowering::ArgInfo({0}, Type::getVoidTy(Ctx), 0);
+      llvm::append_range(Info.OrigArgs, Args);
+
+      const auto &CLI = *MIRBuilder.getMF().getSubtarget().getCallLowering();
+      if (!CLI.lowerCall(MIRBuilder, Info))
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    MIRBuilder.setInsertPt(*MI.getParent(), MI.getIterator());
+
+    // LDIR: HL=source, DE=destination, BC=byte count.
+    // Note: LDIR source is HL, dest is DE — opposite of C convention.
+    MIRBuilder.buildCopy(Register(Z80::HL), SrcPtr);
+    MIRBuilder.buildCopy(Register(Z80::DE), DstPtr);
+    MIRBuilder.buildCopy(Register(Z80::BC), Size);
+    MIRBuilder.buildInstr(Z80::LDIR);
+
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case TargetOpcode::G_MEMMOVE: {
+    // memmove: like memcpy, but must handle overlapping regions
+    // correctly.  When the dst-vs-src direction is statically
+    // determinable we can pick LDIR (forward, dst <= src) or LDDR
+    // (backward, dst >= src) inline; otherwise fall back to libcall
+    // _memmove.  Operands: 0=dst, 1=src, 2=size, 3=tailcall.
+    Register DstPtr = MI.getOperand(0).getReg();
+    Register SrcPtr = MI.getOperand(1).getReg();
+    Register Size = MI.getOperand(2).getReg();
+
+    const auto &STI = MIRBuilder.getMF().getSubtarget<Z80Subtarget>();
+    if (!STI.hasZ80()) {
+      // SM83 lacks LDIR/LDDR -- always libcall.
+      auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
+      if (Result != LegalizerHelper::Legalized)
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // CRITICAL: LDIR/LDDR with BC=0 runs 65536 iterations.  size==0 is
+    // erased.  Variable-size moves use __memmove_rt, which guards
+    // BC==0 and handles overlap without unavailable guarded pseudos.
+    auto SizeC = getIConstantVRegSExtVal(Size, MRI);
+    if (SizeC && *SizeC == 0) {
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // Determine the dst-src direction.
+    // - Same register: copy is a no-op.
+    // - DstPtr = G_PTR_ADD(SrcPtr, c): direction = sign(c).
+    // - SrcPtr = G_PTR_ADD(DstPtr, c): direction = sign(-c).
+    // - Both = G_PTR_ADD(commonBase, ci): direction = sign(c_dst - c_src).
+    // - Otherwise: unknown.
+    enum class Direction { LDIR, LDDR, NoOp, Unknown };
+    Direction Dir = Direction::Unknown;
+    if (DstPtr == SrcPtr) {
+      Dir = Direction::NoOp;
+    } else {
+      auto getPtrAddOff = [&](Register Ptr, Register &Base) -> std::optional<int64_t> {
+        MachineInstr *Def = MRI.getVRegDef(Ptr);
+        if (!Def || Def->getOpcode() != TargetOpcode::G_PTR_ADD)
+          return std::nullopt;
+        Base = Def->getOperand(1).getReg();
+        Register OffReg = Def->getOperand(2).getReg();
+        return getIConstantVRegSExtVal(OffReg, MRI);
+      };
+      Register DstBase, SrcBase;
+      auto DstOff = getPtrAddOff(DstPtr, DstBase);
+      auto SrcOff = getPtrAddOff(SrcPtr, SrcBase);
+
+      auto setFromDelta = [&](int64_t Delta) {
+        if (Delta == 0)
+          Dir = Direction::NoOp;
+        else if (Delta < 0)
+          Dir = Direction::LDIR;
+        else
+          Dir = Direction::LDDR;
+      };
+
+      if (DstOff && SrcBase == Register() && SrcPtr == DstBase) {
+        // DstPtr = SrcPtr + DstOff
+        setFromDelta(*DstOff);
+      } else if (SrcOff && DstBase == Register() && DstPtr == SrcBase) {
+        // SrcPtr = DstPtr + SrcOff -> DstPtr = SrcPtr - SrcOff
+        setFromDelta(-*SrcOff);
+      } else if (DstOff && SrcOff && DstBase == SrcBase) {
+        // Both share a common base; direction is sign of DstOff-SrcOff.
+        setFromDelta(*DstOff - *SrcOff);
+      }
+    }
+
+    if (Dir == Direction::NoOp) {
+      MI.eraseFromParent();
+      return true;
+    }
+    if (Dir == Direction::Unknown || !SizeC) {
+      // Runtime-unknown direction: call the register-CC helper __memmove_rt
+      // (z80_allreg: dst=HL, src=DE, size=BC) instead of the heavy stack-ABI
+      // _memmove libcall -- no stack arg / IX frame / callee-cleanup, ~7x
+      // smaller.  The public string.h memmove ABI is
+      // untouched (this is a dedicated internal helper symbol).
+      MIRBuilder.setInsertPt(*MI.getParent(), MI.getIterator());
+      auto &Ctx = MIRBuilder.getMF().getFunction().getContext();
+      SmallVector<CallLowering::ArgInfo, 3> Args;
+      Args.push_back(
+          {DstPtr, PointerType::get(Ctx, MRI.getType(DstPtr).getAddressSpace()),
+           0});
+      Args.push_back(
+          {SrcPtr, PointerType::get(Ctx, MRI.getType(SrcPtr).getAddressSpace()),
+           0});
+      Args.push_back(
+          {Size, IntegerType::get(Ctx, MRI.getType(Size).getSizeInBits()), 0});
+
+      CallLowering::CallLoweringInfo Info;
+      Info.CallConv = CallingConv::Z80_AllReg;
+      Info.Callee = MachineOperand::CreateES("__memmove_rt");
+      Info.OrigRet = CallLowering::ArgInfo({0}, Type::getVoidTy(Ctx), 0);
+      llvm::append_range(Info.OrigArgs, Args);
+
+      const auto &CLI = *MIRBuilder.getMF().getSubtarget().getCallLowering();
+      if (!CLI.lowerCall(MIRBuilder, Info))
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    MIRBuilder.setInsertPt(*MI.getParent(), MI.getIterator());
+
+    if (Dir == Direction::LDIR) {
+      MIRBuilder.buildCopy(Register(Z80::HL), SrcPtr);
+      MIRBuilder.buildCopy(Register(Z80::DE), DstPtr);
+      MIRBuilder.buildCopy(Register(Z80::BC), Size);
+      MIRBuilder.buildInstr(Z80::LDIR);
+    } else { // LDDR
+      // LDDR copies backward: HL = src + size - 1, DE = dst + size - 1,
+      // BC = size, then decrement HL/DE/BC each iteration.
+      //
+      // When Size is a G_CONSTANT, fold Size-1 directly and walk
+      // through any chained G_PTR_ADD constants on SrcPtr/DstPtr so
+      // SrcEnd/DstEnd become a single G_PTR_ADD with the total
+      // offset.  The existing G_PTR_ADD(G_GLOBAL_VALUE, const) ISel
+      // pattern then emits `LD HL, base+const` directly.
+      LLT S16 = LLT::scalar(16);
+      auto SizeC = getIConstantVRegSExtVal(Size, MRI);
+
+      auto buildEndPtr = [&](Register Ptr, int64_t ExtraOff) -> Register {
+        // Walk Ptr back through chained G_PTR_ADD with constant offsets.
+        Register Base = Ptr;
+        int64_t Total = ExtraOff;
+        while (true) {
+          MachineInstr *Def = MRI.getVRegDef(Base);
+          if (!Def || Def->getOpcode() != TargetOpcode::G_PTR_ADD)
+            break;
+          auto OffC =
+              getIConstantVRegSExtVal(Def->getOperand(2).getReg(), MRI);
+          if (!OffC)
+            break;
+          Total += *OffC;
+          Base = Def->getOperand(1).getReg();
+        }
+        if (Total == 0)
+          return Base;
+        auto Off = MIRBuilder.buildConstant(S16, Total);
+        return MIRBuilder.buildPtrAdd(MRI.getType(Ptr), Base, Off).getReg(0);
+      };
+
+      Register SrcEnd, DstEnd;
+      if (SizeC) {
+        int64_t Off = *SizeC - 1;
+        SrcEnd = buildEndPtr(SrcPtr, Off);
+        DstEnd = buildEndPtr(DstPtr, Off);
+      } else {
+        auto One = MIRBuilder.buildConstant(S16, 1);
+        auto SizeM1 = MIRBuilder.buildSub(S16, Size, One);
+        SrcEnd = MIRBuilder.buildPtrAdd(MRI.getType(SrcPtr), SrcPtr, SizeM1)
+                     .getReg(0);
+        DstEnd = MIRBuilder.buildPtrAdd(MRI.getType(DstPtr), DstPtr, SizeM1)
+                     .getReg(0);
+      }
+      MIRBuilder.buildCopy(Register(Z80::HL), SrcEnd);
+      MIRBuilder.buildCopy(Register(Z80::DE), DstEnd);
+      MIRBuilder.buildCopy(Register(Z80::BC), Size);
+      MIRBuilder.buildInstr(Z80::LDDR);
+    }
     MI.eraseFromParent();
     return true;
   }

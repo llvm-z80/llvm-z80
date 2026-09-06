@@ -143,7 +143,11 @@ static void diagnoseBadTypeAttribute(Sema &S, const ParsedAttr &attr,
   case ParsedAttr::AT_PreserveNone:                                            \
   case ParsedAttr::AT_RISCVVectorCC:                                           \
   case ParsedAttr::AT_RISCVVLSCC:                                             \
-  case ParsedAttr::AT_SDCCCall
+  case ParsedAttr::AT_SDCCCall:                                                \
+  case ParsedAttr::AT_Z80AllReg:                                               \
+  case ParsedAttr::AT_Z80FastCall:                                             \
+  case ParsedAttr::AT_Z80Callee:                                               \
+  case ParsedAttr::AT_Z80SmallC
 
 // Function type attributes.
 #define FUNCTION_TYPE_ATTRS_CASELIST                                           \
@@ -7844,6 +7848,14 @@ static Attr *getCCTypeAttr(ASTContext &Ctx, ParsedAttr &Attr) {
     }
     return ::new (Ctx) SDCCCallAttr(Ctx, Attr, ABI);
   }
+  case ParsedAttr::AT_Z80AllReg:
+    return ::new (Ctx) Z80AllRegAttr(Ctx, Attr);
+  case ParsedAttr::AT_Z80FastCall:
+    return ::new (Ctx) Z80FastCallAttr(Ctx, Attr);
+  case ParsedAttr::AT_Z80Callee:
+    return ::new (Ctx) Z80CalleeAttr(Ctx, Attr);
+  case ParsedAttr::AT_Z80SmallC:
+    return ::new (Ctx) Z80SmallCAttr(Ctx, Attr);
   }
   llvm_unreachable("unexpected attribute kind!");
 }
@@ -8055,6 +8067,33 @@ static bool handleArmStateAttribute(Sema &S,
 
     EPI.setArmSMEAttribute(
         (FunctionType::AArch64SMETypeAttributes)((State << Shift)));
+  }
+  return false;
+}
+
+/// Compose two Z80/SDCC calling-convention attributes that live on orthogonal
+/// ABI axes into the single convention that carries both.
+///
+/// z88dk decorates most of the classic clib (e.g. <graphics.h>
+/// plot_callee/draw_callee) `__smallc __z88dk_callee`, which means
+/// left-to-right argument push (the `__smallc` order axis) combined with
+/// callee stack cleanup (the `__z88dk_callee` cleanup axis).  Neither
+/// z80_smallc (L2R + caller-clean) nor z80_callee (R2L + callee-clean) alone
+/// expresses it.  When both attributes are written on one function type we
+/// compose them here instead of rejecting the pair as conflicting.
+///
+/// This is order-independent (either spelling sequence yields the same CC) and
+/// deliberately narrow: only the smallc+callee pair composes today.  Any other
+/// combination is a genuine same-axis conflict and stays a hard error.
+/// Returns true and sets \p Composed on success.
+static bool composeZ80CallingConvs(CallingConv A, CallingConv B,
+                                   CallingConv &Composed) {
+  auto IsPair = [](CallingConv X, CallingConv Y, CallingConv P, CallingConv Q) {
+    return (X == P && Y == Q) || (X == Q && Y == P);
+  };
+  if (IsPair(A, B, CC_Z80SmallC, CC_Z80Callee)) {
+    Composed = CC_Z80SmallCCallee;
+    return true;
   }
   return false;
 }
@@ -8382,15 +8421,30 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
   Attr *CCAttr = getCCTypeAttr(S.Context, attr);
 
   if (CCOld != CC) {
-    // Error out on when there's already an attribute on the type
-    // and the CCs don't match.
+    // There's already a calling-convention attribute on the type and the CCs
+    // don't match.  If the two conventions live on orthogonal ABI axes
+    // (z80_smallc order + z80_callee cleanup), compose them into the combined
+    // convention; otherwise it's a genuine conflict.
     if (S.getCallingConvAttributedType(type)) {
-      S.Diag(attr.getLoc(), diag::err_attributes_are_not_compatible)
-          << FunctionType::getNameForCallConv(CC)
-          << FunctionType::getNameForCallConv(CCOld)
-          << attr.isRegularKeywordAttribute();
+      CallingConv Composed;
+      if (composeZ80CallingConvs(CCOld, CC, Composed)) {
+        CC = Composed;
+      } else {
+        S.Diag(attr.getLoc(), diag::err_attributes_are_not_compatible)
+            << FunctionType::getNameForCallConv(CC)
+            << FunctionType::getNameForCallConv(CCOld)
+            << attr.isRegularKeywordAttribute();
+        attr.setInvalid();
+        return true;
+      }
+    }
+  }
+
+  if (CC == CC_Z80FastCall) {
+    const auto *FnP = dyn_cast<FunctionProtoType>(fn);
+    if (FnP && (FnP->isVariadic() || FnP->getNumParams() != 1)) {
       attr.setInvalid();
-      return true;
+      return S.Diag(attr.getLoc(), diag::err_z80_fastcall_params);
     }
   }
 

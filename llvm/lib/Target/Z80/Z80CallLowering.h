@@ -50,24 +50,42 @@ struct CallingConvRegs {
   // Indirect call
   Register IndirectCallReg; // Z80: IY, SM83: HL
   unsigned IndirectCallOpc; // Z80: CALL_IY, SM83: CALL_HL
+
+  // First-argument register for an i8 argument.  Only consulted by the
+  // z88dk-fastcall path (classifyArgFastCall); the default/sdcccall paths
+  // hardcode the first i8 argument to A.  Appended at the end of the struct so
+  // the existing positional initializers stay valid (they leave this
+  // value-initialized to an invalid Register()).
+  Register First_I8; // z88dk fastcall: L (Z80) / E (SM83); else unused
 };
 
 /// Common call lowering implementation for Z80-family targets.
 /// All logic is parameterized by CallingConvRegs.
 class Z80CallLoweringCommon : public CallLowering {
 protected:
-  CallingConvRegs CCRegs;  // sdcccall(1) registers (default)
-  CallingConvRegs CCRegs0; // sdcccall(0) registers
+  CallingConvRegs CCRegs;     // sdcccall(1) registers (default)
+  CallingConvRegs CCRegs0;    // sdcccall(0) registers
+  CallingConvRegs CCRegsFast; // z88dk-fastcall registers
 
   /// Select the appropriate register config based on calling convention.
   const CallingConvRegs &getRegsForCC(CallingConv::ID CC) const {
-    return CC == CallingConv::Z80_SDCCCall0 ? CCRegs0 : CCRegs;
+    // __z88dk_callee / __smallc / __smallc __z88dk_callee all share sdcccall(0)'s
+    // stack layout and return registers (L/HL/DE:HL); they differ only in the
+    // orthogonal argument-order (isSmallCArgOrder) and cleanup (isCalleeCleanup)
+    // axes.
+    if (CC == CallingConv::Z80_SDCCCall0 ||
+        CC == CallingConv::Z80_Z88dkCallee || CC == CallingConv::Z80_SmallC ||
+        CC == CallingConv::Z80_SmallCCallee)
+      return CCRegs0;
+    if (CC == CallingConv::Z80_Z88dkFastCall)
+      return CCRegsFast;
+    return CCRegs;
   }
 
 public:
   Z80CallLoweringCommon(const TargetLowering *TL, CallingConvRegs Regs,
-                        CallingConvRegs Regs0)
-      : CallLowering(TL), CCRegs(Regs), CCRegs0(Regs0) {}
+                        CallingConvRegs Regs0, CallingConvRegs RegsFast)
+      : CallLowering(TL), CCRegs(Regs), CCRegs0(Regs0), CCRegsFast(RegsFast) {}
 
   bool lowerReturn(MachineIRBuilder &MIRBuilder, const Value *Val,
                    ArrayRef<Register> VRegs,

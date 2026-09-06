@@ -110,6 +110,15 @@ static Register vectorToInt(MachineIRBuilder &MIRBuilder,
       .getReg(0);
 }
 
+/// Argument-order axis: true when the convention pushes
+/// arguments left-to-right (first declared arg deepest, last at IX+4), i.e. the
+/// __smallc order, as opposed to sdcccall(0)/__z88dk_callee right-to-left.  This
+/// axis is orthogonal to the cleanup axis (isCalleeCleanup), so __smallc and
+/// __smallc __z88dk_callee share it.
+static bool isSmallCArgOrder(CallingConv::ID CC) {
+  return CC == CallingConv::Z80_SmallC || CC == CallingConv::Z80_SmallCCallee;
+}
+
 /// Determine if callee cleans up stack arguments.
 /// sdcccall(0): always caller cleanup (returns false).
 /// sdcccall(1):
@@ -121,8 +130,18 @@ static bool isCalleeCleanup(bool IsVarArg, Type *RetTy, Type *FirstArgTy,
                             const DataLayout &DL) {
   if (CC == CallingConv::Z80_SDCCCall0)
     return false;
+  // __smallc: caller cleans up (like sdcccall(0)); differs only in arg order.
+  if (CC == CallingConv::Z80_SmallC)
+    return false;
   if (IsVarArg)
     return false;
+  // z88dk __z88dk_callee (and __smallc __z88dk_callee): callee cleanup is forced
+  // for every non-variadic call, independent of return size (unlike sdcccall(1)
+  // below, which caller-cleans for >16-bit returns).  Args are stack-passed like
+  // sdcccall(0); __smallc __z88dk_callee differs only in the order axis.
+  if (CC == CallingConv::Z80_Z88dkCallee ||
+      CC == CallingConv::Z80_SmallCCallee)
+    return true;
   if (IsSM83)
     return true;
   // Z80: return ≤16 bits → callee cleanup
@@ -143,6 +162,83 @@ struct ArgAssignment {
   FirstArgKind NewFirstKind = FIRST_NONE;
 };
 
+/// All-register convention: assign args from register pools by type.
+/// State is tracked via RegParamCount as a bitmask of used 16-bit pairs.
+/// Bit 0=HL, 1=DE, 2=BC, 3=IX, 4=IY. A is tracked by bit 5.
+static ArgAssignment classifyArgAllReg(unsigned &UsedMask, unsigned BitWidth) {
+  ArgAssignment Result;
+  // Register pools in allocation order
+  static const Register Pairs[] = {Z80::HL, Z80::DE, Z80::BC, Z80::IX, Z80::IY};
+
+  if (BitWidth <= 8) {
+    // First i8 → A, subsequent i8 → low byte of next free pair
+    if (!(UsedMask & (1 << 5))) {
+      Result = {true, Z80::A, Register(), FIRST_I8};
+      UsedMask |= (1 << 5);
+      return Result;
+    }
+    // Find a free pair and use its low byte
+    for (unsigned I = 0; I < 5; ++I) {
+      if (!(UsedMask & (1 << I))) {
+        Register Lo;
+        switch (Pairs[I].id()) {
+        case Z80::HL: Lo = Z80::L; break;
+        case Z80::DE: Lo = Z80::E; break;
+        case Z80::BC: Lo = Z80::C; break;
+        case Z80::IX: Lo = Z80::IXL; break;
+        case Z80::IY: Lo = Z80::IYL; break;
+        default: continue;
+        }
+        Result = {true, Lo, Register(), FIRST_NONE};
+        UsedMask |= (1 << I);
+        return Result;
+      }
+    }
+  } else if (BitWidth <= 16) {
+    for (unsigned I = 0; I < 5; ++I) {
+      if (!(UsedMask & (1 << I))) {
+        Result = {true, Pairs[I], Register(), (I == 0) ? FIRST_I16 : FIRST_NONE};
+        UsedMask |= (1 << I);
+        return Result;
+      }
+    }
+  } else if (BitWidth <= 32) {
+    // Need two consecutive free pairs: Hi then Lo
+    for (unsigned I = 0; I < 4; ++I) {
+      if (!(UsedMask & (1 << I)) && !(UsedMask & (1 << (I + 1)))) {
+        Result = {true, Pairs[I], Pairs[I + 1],
+                  (I == 0) ? FIRST_I32 : FIRST_NONE};
+        UsedMask |= (1 << I) | (1 << (I + 1));
+        return Result;
+      }
+    }
+  }
+  return Result; // InReg = false → would go to stack
+}
+
+/// z88dk __z88dk_fastcall: a single argument in a fixed register.
+///   i8 -> First_I8 (L), i16 -> First_I16 (HL), i32 -> First_I32_Hi:_Lo (DE:HL).
+/// Only the first argument is register-passed.  z88dk fastcall is
+/// single-argument by construction; a 2nd+ argument is rejected by the
+/// frontend, but if one reaches here we leave it InReg=false (stack) rather
+/// than assert, so the backend degrades safely.
+static ArgAssignment classifyArgFastCall(const CallingConvRegs &Regs,
+                                         unsigned &RegParamCount,
+                                         unsigned BitWidth) {
+  ArgAssignment Result;
+  if (RegParamCount != 0)
+    return Result; // only the first argument is register-passed
+  if (BitWidth <= 8)
+    Result = {true, Regs.First_I8, Register(), FIRST_I8};
+  else if (BitWidth <= 16)
+    Result = {true, Regs.First_I16, Register(), FIRST_I16};
+  else if (BitWidth <= 32)
+    Result = {true, Regs.First_I32_Hi, Regs.First_I32_Lo, FIRST_I32};
+  if (Result.InReg)
+    RegParamCount++;
+  return Result;
+}
+
 /// Classify a single argument based on current register state.
 /// Uses CallingConvRegs to look up the correct physical registers.
 /// sdcccall(0): all args go on stack (returns empty result).
@@ -151,8 +247,21 @@ ArgAssignment classifyArg(const CallingConvRegs &Regs, unsigned &RegParamCount,
                           bool IsVarArg, CallingConv::ID CC = CallingConv::C) {
   ArgAssignment Result;
 
-  if (CC == CallingConv::Z80_SDCCCall0 || IsVarArg)
+  // sdcccall(0) and z88dk __z88dk_callee: all args go on the stack (returns
+  // empty result).  They share the stack layout; they differ only in who
+  // cleans it up (see isCalleeCleanup), which is handled elsewhere.
+  if (CC == CallingConv::Z80_SDCCCall0 || CC == CallingConv::Z80_Z88dkCallee ||
+      CC == CallingConv::Z80_SmallC || CC == CallingConv::Z80_SmallCCallee ||
+      IsVarArg)
     return Result;
+
+  // All-register convention: use all available registers, no stack args.
+  if (CC == CallingConv::Z80_AllReg)
+    return classifyArgAllReg(RegParamCount, BitWidth);
+
+  // z88dk-fastcall: single argument in a fixed register (L/HL/DE:HL).
+  if (CC == CallingConv::Z80_Z88dkFastCall)
+    return classifyArgFastCall(Regs, RegParamCount, BitWidth);
 
   if (RegParamCount == 0) {
     if (BitWidth <= 8) {
@@ -224,6 +333,25 @@ Z80CallLowering::Z80CallLowering(const TargetLowering *TL)
                                 /*Ret_I32_Lo=*/Z80::HL,
                                 /*IndirectCallReg=*/Z80::IY,
                                 /*IndirectCallOpc=*/Z80::CALL_IY,
+                            },
+                            // z88dk-fastcall registers.  Single argument in
+                            // L/HL/DE:HL; return in the same registers (same as
+                            // sdcccall(0) returns).  First_I8 (last field) = L.
+                            CallingConvRegs{
+                                /*First_I16=*/Z80::HL,
+                                /*First_I32_Hi=*/Z80::DE,
+                                /*First_I32_Lo=*/Z80::HL,
+                                /*Second_AfterI8_I8=*/Register(),
+                                /*Second_AfterI8_I16=*/Register(),
+                                /*Second_AfterI16_I8=*/Register(),
+                                /*Second_AfterI16_I16=*/Register(),
+                                /*Ret_I8=*/Z80::L,
+                                /*Ret_I16=*/Z80::HL,
+                                /*Ret_I32_Hi=*/Z80::DE,
+                                /*Ret_I32_Lo=*/Z80::HL,
+                                /*IndirectCallReg=*/Z80::IY,
+                                /*IndirectCallOpc=*/Z80::CALL_IY,
+                                /*First_I8=*/Z80::L,
                             }) {}
 
 //===----------------------------------------------------------------------===//
@@ -541,6 +669,43 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   unsigned RegParamCount = 0;
   FirstArgKind FirstKind = FIRST_NONE;
 
+  // __smallc pushes arguments left-to-right, so the callee finds the LAST
+  // argument at the lowest stack address (IX+4) -- the reverse of sdcccall(0).
+  // Pre-compute the total stack bytes so each argument's frame offset can be
+  // mirrored: an arg of slot size `sz` whose sdcccall(0) offset would be
+  // `StackArgOffset` instead lands at `Total - StackArgOffset - sz`.
+  const bool IsSmallC = isSmallCArgOrder(CC);
+  unsigned TotalStackBytes = 0;
+  if (IsSmallC) {
+    if (!FLI.CanLowerReturn)
+      TotalStackBytes += 2;
+    unsigned PreIdx = 0;
+    for (const Argument &A : F.args()) {
+      if (!VRegs[PreIdx].empty()) {
+        if (A.hasAttribute(Attribute::StructRet)) {
+          TotalStackBytes += 2;
+        } else if (A.hasAttribute(Attribute::ByVal)) {
+          TotalStackBytes +=
+              MF.getDataLayout().getTypeAllocSize(A.getParamByValType());
+        } else {
+          unsigned BW = A.getType()->getPrimitiveSizeInBits();
+          if (BW == 0)
+            BW = 16;
+          TotalStackBytes += (BW <= 16) ? ((BW + 7) / 8) : ((BW + 15) / 16) * 2;
+        }
+      }
+      ++PreIdx;
+    }
+  }
+  // Frame offset (from incoming SP, +2 for the return address) for the
+  // argument currently at `StackArgOffset` with slot size `sz`.
+  // sdcccall(0)/__z88dk_callee grow forward; __smallc mirrors around Total.
+  auto frameOff = [&](unsigned sz) -> int {
+    return IsSmallC
+               ? (2 + (int)TotalStackBytes - (int)StackArgOffset - (int)sz)
+               : (2 + (int)StackArgOffset);
+  };
+
   // Handle sret demotion: when the return value can't fit in registers,
   // a hidden sret pointer is passed on the stack (SDCC convention).
   // The sret pointer is the first stack argument, before any regular stack
@@ -548,7 +713,7 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   // a register slot).
   if (!FLI.CanLowerReturn) {
     Register SRetReg = MRI.createGenericVirtualRegister(LLT::pointer(0, 16));
-    int SRetFI = MFI.CreateFixedObject(2, 2 + StackArgOffset, true);
+    int SRetFI = MFI.CreateFixedObject(2, frameOff(2), true);
     auto SRetAddr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), SRetFI);
     auto *SRetMMO = MF.getMachineMemOperand(
         MachinePointerInfo::getFixedStack(MF, SRetFI),
@@ -585,7 +750,7 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
     // SDCC convention: sret pointer is always on the stack, never in a
     // register, and does NOT consume a register parameter slot.
     if (Arg.hasAttribute(Attribute::StructRet)) {
-      int SRetFI = MFI.CreateFixedObject(2, 2 + StackArgOffset, true);
+      int SRetFI = MFI.CreateFixedObject(2, frameOff(2), true);
       auto SRetAddr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), SRetFI);
       auto *SRetMMO = MF.getMachineMemOperand(
           MachinePointerInfo::getFixedStack(MF, SRetFI),
@@ -601,13 +766,15 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
     // to those bytes. Consumes a register parameter position (SDCC counts
     // struct args), so subsequent scalar args can't use that register slot.
     if (Arg.hasAttribute(Attribute::ByVal)) {
+      if (CC == CallingConv::Z80_AllReg)
+        return false;
       classifyArg(Regs, RegParamCount, FirstKind, 64, IsVarArg, CC);
       Type *ByValTy = Arg.getParamByValType();
       unsigned ByValSize = MF.getDataLayout().getTypeAllocSize(ByValTy);
       // An empty aggregate still needs an address, but occupies no stack;
       // give it a one-byte object overlapping the next slot.
       int FI = MFI.CreateFixedObject(std::max(ByValSize, 1u),
-                                     2 + StackArgOffset, true);
+                                     frameOff(ByValSize), true);
       MIRBuilder.buildFrameIndex(VReg, FI);
       StackArgOffset += ByValSize;
       HasStackArgs = true;
@@ -625,6 +792,8 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
 
     ArgAssignment Assign =
         classifyArg(Regs, RegParamCount, FirstKind, BitWidth, IsVarArg, CC);
+    if (!Assign.InReg && CC == CallingConv::Z80_AllReg)
+      return false;
     if (Assign.InReg) {
       if (BitWidth <= 32 && Assign.PhysReg2.isValid()) {
         // i32: Hi:Lo pair
@@ -649,7 +818,7 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
       HasStackArgs = true;
 
       if (BitWidth <= 16) {
-        int FI = MFI.CreateFixedObject(ByteWidth, 2 + StackArgOffset, true);
+        int FI = MFI.CreateFixedObject(ByteWidth, frameOff(ByteWidth), true);
         auto Addr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
         auto *MMO = MF.getMachineMemOperand(
             MachinePointerInfo::getFixedStack(MF, FI),
@@ -659,7 +828,7 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
       } else if (BitWidth <= 32) {
         // Load low 16 bits
         Register LoReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
-        int LoFI = MFI.CreateFixedObject(2, 2 + StackArgOffset, true);
+        int LoFI = MFI.CreateFixedObject(2, frameOff(4), true);
         auto LoAddr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), LoFI);
         auto *LoMMO = MF.getMachineMemOperand(
             MachinePointerInfo::getFixedStack(MF, LoFI),
@@ -668,7 +837,7 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
 
         // Load high 16 bits
         Register HiReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
-        int HiFI = MFI.CreateFixedObject(2, 2 + StackArgOffset + 2, true);
+        int HiFI = MFI.CreateFixedObject(2, frameOff(4) + 2, true);
         auto HiAddr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), HiFI);
         auto *HiMMO = MF.getMachineMemOperand(
             MachinePointerInfo::getFixedStack(MF, HiFI),
@@ -682,7 +851,7 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
         SmallVector<Register, 8> WordRegs;
         for (unsigned i = 0; i < NumWords; i++) {
           Register WordReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
-          int FI = MFI.CreateFixedObject(2, 2 + StackArgOffset + i * 2, true);
+          int FI = MFI.CreateFixedObject(2, frameOff(NumWords * 2) + i * 2, true);
           auto Addr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
           auto *MMO = MF.getMachineMemOperand(
               MachinePointerInfo::getFixedStack(MF, FI),
@@ -818,6 +987,8 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
     // NOTE: variadic + byval combination is untested.
     if (Arg.Flags[0].isByVal()) {
       unsigned ByValSize = Arg.Flags[0].getByValSize();
+      if (CC == CallingConv::Z80_AllReg)
+        return false;
       classifyArg(Regs, RegParamCount, FirstKind, 64, Info.IsVarArg, CC);
       StackArgIndices.push_back(ArgIdx);
       StackArgBytes += ByValSize;
@@ -833,6 +1004,10 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                        Info.IsVarArg, CC);
 
     if (!Assign.InReg) {
+      // z80_allreg has no stack fallback: silently spilling here would
+      // produce a call that disagrees with every conforming callee.
+      if (CC == CallingConv::Z80_AllReg)
+        return false;
       if (BitWidth % 16 != 0 && BitWidth > 16) {
         return false; // Non-16-bit-aligned wide types not supported
       }
@@ -853,11 +1028,15 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   // Emit ADJCALLSTACKDOWN
   MIRBuilder.buildInstr(Z80::ADJCALLSTACKDOWN).addImm(StackArgBytes).addImm(0);
 
-  // Push stack arguments in right-to-left order (last arg pushed first,
-  // so first stack arg ends up at lowest address = IX+4 in callee)
-  for (auto I = StackArgIndices.rbegin(), E = StackArgIndices.rend(); I != E;
-       ++I) {
-    const ArgInfo &Arg = Info.OrigArgs[*I];
+  // Push stack arguments so the callee sees the expected layout.
+  // sdcccall(0)/__z88dk_callee: right-to-left (last arg pushed first, so the
+  // first stack arg ends up at the lowest address = IX+4).  __smallc: pushes
+  // left-to-right (first arg pushed first/deepest, last arg ends at IX+4).
+  const bool PushForward = isSmallCArgOrder(CC);
+  for (unsigned K = 0, N = StackArgIndices.size(); K < N; ++K) {
+    unsigned StackIdx =
+        PushForward ? StackArgIndices[K] : StackArgIndices[N - 1 - K];
+    const ArgInfo &Arg = Info.OrigArgs[StackIdx];
     Register VReg = vectorToInt(MIRBuilder, MRI, Arg.Regs[0]);
 
     // Byval: copy struct bytes from source pointer to stack.

@@ -5655,6 +5655,18 @@ static void handleCallConvAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     D->addAttr(::new (S.Context) SDCCCallAttr(S.Context, AL, ABI));
     return;
   }
+  case ParsedAttr::AT_Z80AllReg:
+    D->addAttr(::new (S.Context) Z80AllRegAttr(S.Context, AL));
+    return;
+  case ParsedAttr::AT_Z80FastCall:
+    D->addAttr(::new (S.Context) Z80FastCallAttr(S.Context, AL));
+    return;
+  case ParsedAttr::AT_Z80Callee:
+    D->addAttr(::new (S.Context) Z80CalleeAttr(S.Context, AL));
+    return;
+  case ParsedAttr::AT_Z80SmallC:
+    D->addAttr(::new (S.Context) Z80SmallCAttr(S.Context, AL));
+    return;
   default:
     llvm_unreachable("unexpected attribute kind");
   }
@@ -5947,6 +5959,18 @@ bool Sema::CheckCallingConvAttr(const ParsedAttr &Attrs, CallingConv &CC,
     CC = (ABI == 0) ? CC_Z80SDCCCall0 : CC_C;
     break;
   }
+  case ParsedAttr::AT_Z80AllReg:
+    CC = CC_Z80AllReg;
+    break;
+  case ParsedAttr::AT_Z80FastCall:
+    CC = CC_Z80FastCall;
+    break;
+  case ParsedAttr::AT_Z80Callee:
+    CC = CC_Z80Callee;
+    break;
+  case ParsedAttr::AT_Z80SmallC:
+    CC = CC_Z80SmallC;
+    break;
   case ParsedAttr::AT_DeviceKernel: {
     // Validation was handled in handleDeviceKernelAttr.
     CC = CC_DeviceKernel;
@@ -8199,6 +8223,10 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
   case ParsedAttr::AT_RISCVVectorCC:
   case ParsedAttr::AT_RISCVVLSCC:
   case ParsedAttr::AT_SDCCCall:
+  case ParsedAttr::AT_Z80AllReg:
+  case ParsedAttr::AT_Z80FastCall:
+  case ParsedAttr::AT_Z80Callee:
+  case ParsedAttr::AT_Z80SmallC:
     handleCallConvAttr(S, D, AL);
     break;
   case ParsedAttr::AT_DeviceKernel:

@@ -64,3 +64,7 @@ def Z80_CSR : CalleeSavedRegs<(add IX)>;
 
 // Interrupt handler saves all register pairs (push/pop only works on pairs)
 def Z80_Interrupt_CSR : CalleeSavedRegs<(add AF, BC, DE, HL, IX, IY)>;
+
+// All-register calling convention: all registers used for parameters.
+// Nothing is callee-saved (caller saves everything it needs).
+def Z80_AllReg_CSR : CalleeSavedRegs<(add)>;

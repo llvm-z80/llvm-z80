@@ -313,6 +313,13 @@ namespace clang {
     CC_RISCVVLSCall_32768, // __attribute__((riscv_vls_cc(32768)))
     CC_RISCVVLSCall_65536, // __attribute__((riscv_vls_cc(65536)))
     CC_Z80SDCCCall0,       // __attribute__((sdcccall(0)))
+    CC_Z80AllReg,          // __attribute__((z80_allreg))
+    CC_Z80FastCall,        // __attribute__((z80_fastcall))
+    CC_Z80Callee,          // __attribute__((z80_callee))
+    CC_Z80SmallC,          // __attribute__((z80_smallc))
+    CC_Z80SmallCCallee,    // __attribute__((z80_smallc)) __attribute__((z80_callee))
+                           // -- the composition of the L2R-order and callee-cleanup
+                           // axes; not spelled by any single attribute
   };
 
   /// Checks whether the given calling convention supports variadic
