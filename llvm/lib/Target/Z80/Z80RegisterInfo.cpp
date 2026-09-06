@@ -577,8 +577,25 @@ static void emitSPRelativeAddr(MachineBasicBlock &MBB,
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::POP_AF));
 }
 
+// Materialize a frame slot address into HL. A static slot is a plain
+// constant load: no SP arithmetic, no flag impact, no dependence on pushes
+// the caller of this helper may have emitted (so SPDelta is ignored).
+static void emitSlotAddr(MachineBasicBlock &MBB,
+                         MachineBasicBlock::iterator InsertBefore,
+                         const DebugLoc &DL, const TargetInstrInfo &TII,
+                         bool IsStatic, int64_t Offset, int SPDelta,
+                         bool PreserveFlags) {
+  if (IsStatic) {
+    BuildMI(MBB, InsertBefore, DL, TII.get(Z80::LD_rr_nn), Z80::HL)
+        .addTargetIndex(0, Offset);
+    return;
+  }
+  emitSPRelativeAddr(MBB, InsertBefore, DL, TII, Offset, SPDelta,
+                     PreserveFlags);
+}
+
 // Expand SPILL_GR8 with SP-relative addressing.
-static void expandSpillGR8SPRelative(MachineBasicBlock &MBB,
+static void expandSpillGR8SPRelative(bool IsStatic, MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator MI,
                                      const DebugLoc &DL,
                                      const TargetInstrInfo &TII,
@@ -604,7 +621,7 @@ static void expandSpillGR8SPRelative(MachineBasicBlock &MBB,
     SPDelta += 2;
   }
 
-  emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+  emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
 
   if (SrcIsHL)
     Z80::buildStoreHL(MBB, MI, DL, TII, Z80::A);
@@ -618,7 +635,7 @@ static void expandSpillGR8SPRelative(MachineBasicBlock &MBB,
 }
 
 // Expand RELOAD_GR8 with SP-relative addressing.
-static void expandReloadGR8SPRelative(MachineBasicBlock &MBB,
+static void expandReloadGR8SPRelative(bool IsStatic, MachineBasicBlock &MBB,
                                       MachineBasicBlock::iterator MI,
                                       const DebugLoc &DL,
                                       const TargetInstrInfo &TII,
@@ -641,7 +658,7 @@ static void expandReloadGR8SPRelative(MachineBasicBlock &MBB,
     SPDelta += 2;
   }
 
-  emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+  emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
 
   if (DstIsHL) {
     Z80::buildLoadHL(MBB, MI, DL, TII, Z80::A);
@@ -659,7 +676,7 @@ static void expandReloadGR8SPRelative(MachineBasicBlock &MBB,
 
 // Expand SPILL_GR16 with SP-relative addressing.
 // Handles BC, DE, HL, and IX (which has no sub-registers).
-static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
+static void expandSpillGR16SPRelative(bool IsStatic, MachineBasicBlock &MBB,
                                       MachineBasicBlock::iterator MI,
                                       const DebugLoc &DL,
                                       const TargetInstrInfo &TII,
@@ -699,7 +716,7 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
 
-    emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+    emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
 
     Z80::buildStoreHL(MBB, MI, DL, TII, TempLo);
     Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
@@ -728,7 +745,7 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
     Z80::buildLD8(MBB, MI, DL, TII, TempLo, Z80::L);
     Z80::buildLD8(MBB, MI, DL, TII, TempHi, Z80::H);
 
-    emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+    emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
 
     Z80::buildStoreHL(MBB, MI, DL, TII, TempLo);
     Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
@@ -753,7 +770,7 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
       SPDelta += 2;
     }
 
-    emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+    emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
 
     Z80::buildStoreHL(MBB, MI, DL, TII, SrcLo);
     Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
@@ -765,7 +782,7 @@ static void expandSpillGR16SPRelative(MachineBasicBlock &MBB,
 }
 
 // Expand RELOAD_GR16 with SP-relative addressing.
-static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
+static void expandReloadGR16SPRelative(bool IsStatic, MachineBasicBlock &MBB,
                                        MachineBasicBlock::iterator MI,
                                        const DebugLoc &DL,
                                        const TargetInstrInfo &TII,
@@ -796,7 +813,7 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
       SPDelta += 2;
     }
 
-    emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+    emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
 
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
@@ -829,7 +846,7 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
       SPDelta += 2;
     }
 
-    emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+    emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
 
     Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
     Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
@@ -852,7 +869,7 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
       SPDelta += 2;
     }
 
-    emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+    emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
 
     Register DstLo = TRI->getSubReg(DstReg, Z80::sub_lo);
     Register DstHi = TRI->getSubReg(DstReg, Z80::sub_hi);
@@ -863,6 +880,181 @@ static void expandReloadGR16SPRelative(MachineBasicBlock &MBB,
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
   }
+}
+
+//===----------------------------------------------------------------------===//
+// Static frame slots
+//===----------------------------------------------------------------------===//
+//
+// A slot of a provably non-reentrant function lives at a fixed address. The
+// final symbol is only known once every function's frame size is, so the
+// accesses are written against target index 0 with the slot's offset; the
+// module-wide layout pass substitutes each function's frame symbol.
+//
+// Unlike the SP-relative forms, the address is a plain constant: loading it
+// clobbers no flags and no push shifts it, and the accumulator and the
+// 16-bit pairs have single-instruction direct forms on Z80.
+
+static bool rewriteStaticSlotAccess(MachineBasicBlock::iterator MI,
+                                    int64_t Offset,
+                                    const Z80RegisterInfo *TRI) {
+  MachineBasicBlock &MBB = *MI->getParent();
+  MachineFunction &MF = *MI->getMF();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  const bool IsSM83 = MF.getSubtarget<Z80Subtarget>().hasSM83();
+  DebugLoc DL = MI->getDebugLoc();
+  unsigned Opc = MI->getOpcode();
+  auto NextIt = std::next(MI);
+
+  const auto AddSlot = [&](const MachineInstrBuilder &MIB) {
+    MIB.addTargetIndex(0, Offset);
+  };
+  const auto LoadSlotAddr = [&]() {
+    AddSlot(BuildMI(MBB, MI, DL, TII.get(Z80::LD_rr_nn), Z80::HL));
+  };
+
+  switch (Opc) {
+  default:
+    llvm_unreachable("Unexpected frame index instruction for a static slot");
+
+  case Z80::LEA_IX_FI: {
+    Register Dst = MI->getOperand(0).getReg();
+    AddSlot(BuildMI(MBB, MI, DL, TII.get(Z80::LD_rr_nn), Dst));
+    break;
+  }
+
+  case Z80::SPILL_GR8: {
+    // The 0x32/0x3A direct forms are Z80 encodings; SM83 reuses those
+    // opcodes for its post-decrement loads and has its own pair.
+    unsigned StoreA = IsSM83 ? Z80::SM83_LD_nnind_A : Z80::LD_nnind_A;
+    Register Src = MI->getOperand(0).getReg();
+    if (Src == Z80::A) {
+      AddSlot(BuildMI(MBB, MI, DL, TII.get(StoreA)));
+    } else if (!isRegLiveAt(Z80::A, MBB, NextIt, TRI)) {
+      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Src);
+      AddSlot(BuildMI(MBB, MI, DL, TII.get(StoreA)));
+    } else {
+      expandSpillGR8SPRelative(true, MBB, MI, DL, TII, Src, Offset, TRI);
+    }
+    break;
+  }
+
+  case Z80::RELOAD_GR8: {
+    unsigned LoadA = IsSM83 ? Z80::SM83_LD_A_nnind : Z80::LD_A_nnind;
+    Register Dst = MI->getOperand(0).getReg();
+    if (Dst == Z80::A) {
+      AddSlot(BuildMI(MBB, MI, DL, TII.get(LoadA)));
+    } else if (!isRegLiveAt(Z80::A, MBB, NextIt, TRI)) {
+      AddSlot(BuildMI(MBB, MI, DL, TII.get(LoadA)));
+      Z80::buildLD8(MBB, MI, DL, TII, Dst, Z80::A);
+    } else {
+      expandReloadGR8SPRelative(true, MBB, MI, DL, TII, Dst, Offset, TRI);
+    }
+    break;
+  }
+
+  case Z80::SPILL_GR16:
+  case Z80::SPILL_ANY16: {
+    Register Src = MI->getOperand(0).getReg();
+    unsigned Direct = !IsSM83 ? (Src == Z80::HL   ? Z80::LD_nnind_HL
+                                 : Src == Z80::BC ? Z80::LD_nnind_BC
+                                 : Src == Z80::DE ? Z80::LD_nnind_DE
+                                                  : 0)
+                              : 0;
+    if (Direct)
+      AddSlot(BuildMI(MBB, MI, DL, TII.get(Direct)));
+    else
+      expandSpillGR16SPRelative(true, MBB, MI, DL, TII, Src, Offset, TRI);
+    break;
+  }
+
+  case Z80::RELOAD_GR16:
+  case Z80::RELOAD_ANY16: {
+    Register Dst = MI->getOperand(0).getReg();
+    unsigned Direct = !IsSM83 ? (Dst == Z80::HL   ? Z80::LD_HL_nnind
+                                 : Dst == Z80::BC ? Z80::LD_BC_nnind
+                                 : Dst == Z80::DE ? Z80::LD_DE_nnind
+                                                  : 0)
+                              : 0;
+    if (Direct)
+      AddSlot(BuildMI(MBB, MI, DL, TII.get(Direct)));
+    else
+      expandReloadGR16SPRelative(true, MBB, MI, DL, TII, Dst, Offset, TRI);
+    break;
+  }
+
+  case Z80::SPILL_IMM8:
+  case Z80::SPILL_IMM16: {
+    int64_t Val = MI->getOperand(0).getImm();
+    bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
+    if (NeedSaveHL)
+      emitHLSavePush(MBB, MI, DL, TII);
+    LoadSlotAddr();
+    BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
+    if (Opc == Z80::SPILL_IMM16) {
+      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+      BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm((Val >> 8) & 0xFF);
+    }
+    if (NeedSaveHL)
+      BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
+    break;
+  }
+
+  case Z80::ALU_A_FI: {
+    // The address load leaves the flags alone, so the memory-operand form
+    // of the operation applies directly.
+    unsigned Op = MI->getOperand(0).getImm();
+    bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
+    if (NeedSaveHL)
+      emitHLSavePush(MBB, MI, DL, TII);
+    LoadSlotAddr();
+    BuildMI(MBB, MI, DL, TII.get(Z80::getAluHLindOpcode(Op)));
+    if (NeedSaveHL)
+      BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
+    break;
+  }
+
+  case Z80::ADD_HL_FI:
+  case Z80::SUB_HL_FI: {
+    Register TempReg = !isRegLiveAt(Z80::BC, MBB, NextIt, TRI)   ? Z80::BC
+                       : !isRegLiveAt(Z80::DE, MBB, NextIt, TRI) ? Z80::DE
+                                                                 : Z80::BC;
+    bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, TRI);
+    if (NeedSaveTemp)
+      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
+
+    if (!IsSM83) {
+      AddSlot(BuildMI(MBB, MI, DL,
+                      TII.get(TempReg == Z80::BC ? Z80::LD_BC_nnind
+                                                 : Z80::LD_DE_nnind)));
+    } else {
+      // The slot is read through a pointer, and HL holds the accumulated
+      // value, so park it on the stack around the reload.
+      emitHLSavePush(MBB, MI, DL, TII);
+      LoadSlotAddr();
+      Register TempLo = TempReg == Z80::BC ? Z80::C : Z80::E;
+      Register TempHi = TempReg == Z80::BC ? Z80::B : Z80::D;
+      Z80::buildLoadHL(MBB, MI, DL, TII, TempLo);
+      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+      Z80::buildLoadHL(MBB, MI, DL, TII, TempHi);
+      BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
+    }
+
+    if (Opc == Z80::ADD_HL_FI) {
+      Z80::buildAddHL(MBB, MI, DL, TII, TempReg);
+    } else {
+      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, TII, Z80::AND_r, Z80::A),
+                        Z80::A);
+      Z80::buildAdcSbcHL(MBB, MI, DL, TII, Z80::SBC_HL_rr, TempReg);
+    }
+    if (NeedSaveTemp)
+      BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
+    break;
+  }
+  }
+
+  MI->eraseFromParent();
+  return false;
 }
 
 //===----------------------------------------------------------------------===//
@@ -917,6 +1109,15 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
 
   int Idx = MI->getOperand(FIOperandNum).getIndex();
   int64_t Offset = MFI.getObjectOffset(Idx);
+
+  // A slot moved to static memory resolves to symbol+offset, independent of
+  // SP and the frame pointer.
+  if (Idx >= 0 && MFI.getStackID(Idx) == TargetStackID::NoAlloc) {
+    if (FIOperandNum + 1 < MI->getNumOperands() &&
+        MI->getOperand(FIOperandNum + 1).isImm())
+      Offset += MI->getOperand(FIOperandNum + 1).getImm();
+    return rewriteStaticSlotAccess(MI, Offset, this);
+  }
 
   bool UseFP = TFI->hasFP(MF);
 
@@ -1011,7 +1212,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
           emitHLSavePush(MBB, MI, DL, TII);
           SPDelta += 2;
         }
-        emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+        emitSlotAddr(MBB, MI, DL, TII, false, Offset, SPDelta, PreserveFlags);
         if (DstReg == Z80::DE) {
           const auto &STI = MF.getSubtarget<Z80Subtarget>();
           if (STI.hasSM83()) {
@@ -1105,7 +1306,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
         emitHLSavePush(MBB, MI, DL, TII);
         SPDelta += 2;
       }
-      emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+      emitSlotAddr(MBB, MI, DL, TII, false, Offset, SPDelta, PreserveFlags);
       BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
       if (NeedSaveHL)
         BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
@@ -1123,7 +1324,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
         emitHLSavePush(MBB, MI, DL, TII);
         SPDelta += 2;
       }
-      emitSPRelativeAddr(MBB, MI, DL, TII, Offset, SPDelta, PreserveFlags);
+      emitSlotAddr(MBB, MI, DL, TII, false, Offset, SPDelta, PreserveFlags);
       BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n)).addImm(Val & 0xFF);
       Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
       BuildMI(MBB, MI, DL, TII.get(Z80::LD_HLind_n))
@@ -1136,28 +1337,28 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
 
     if (Opc == Z80::SPILL_GR8) {
       Register SrcReg = MI->getOperand(0).getReg();
-      expandSpillGR8SPRelative(MBB, MI, DL, TII, SrcReg, Offset, this);
+      expandSpillGR8SPRelative(false, MBB, MI, DL, TII, SrcReg, Offset, this);
       MI->eraseFromParent();
       return false;
     }
 
     if (Opc == Z80::RELOAD_GR8) {
       Register DstReg = MI->getOperand(0).getReg();
-      expandReloadGR8SPRelative(MBB, MI, DL, TII, DstReg, Offset, this);
+      expandReloadGR8SPRelative(false, MBB, MI, DL, TII, DstReg, Offset, this);
       MI->eraseFromParent();
       return false;
     }
 
     if (Opc == Z80::SPILL_GR16 || Opc == Z80::SPILL_ANY16) {
       Register SrcReg = MI->getOperand(0).getReg();
-      expandSpillGR16SPRelative(MBB, MI, DL, TII, SrcReg, Offset, this);
+      expandSpillGR16SPRelative(false, MBB, MI, DL, TII, SrcReg, Offset, this);
       MI->eraseFromParent();
       return false;
     }
 
     if (Opc == Z80::RELOAD_GR16 || Opc == Z80::RELOAD_ANY16) {
       Register DstReg = MI->getOperand(0).getReg();
-      expandReloadGR16SPRelative(MBB, MI, DL, TII, DstReg, Offset, this);
+      expandReloadGR16SPRelative(false, MBB, MI, DL, TII, DstReg, Offset, this);
       MI->eraseFromParent();
       return false;
     }
@@ -1194,7 +1395,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
 
       if (NeedSaveTemp)
         Z80::emitPairSavePush(MBB, MI, DL, TII, TempPair);
-      expandReloadGR8SPRelative(MBB, MI, DL, TII, TempReg,
+      expandReloadGR8SPRelative(false, MBB, MI, DL, TII, TempReg,
                                 Offset + (NeedSaveTemp ? 2 : 0), this);
       BuildMI(MBB, MI, DL, TII.get(Z80::getAluRegOpcode(Op))).addReg(TempReg);
       if (NeedSaveTemp)
@@ -1216,7 +1417,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       emitHLSavePush(MBB, MI, DL, TII);
 
       int SPAdj = 2 + (NeedSaveTemp ? 2 : 0);
-      expandReloadGR16SPRelative(MBB, MI, DL, TII, TempReg, Offset + SPAdj,
+      expandReloadGR16SPRelative(false, MBB, MI, DL, TII, TempReg, Offset + SPAdj,
                                  this);
 
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));

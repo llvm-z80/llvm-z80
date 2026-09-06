@@ -67,6 +67,13 @@ public:
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
 
+  /// True when this function's locals live in static memory instead of on
+  /// the stack.
+  bool usesStaticFrame(const MachineFunction &MF) const;
+
+  /// Total size of the frame objects moved to static memory.
+  uint64_t staticFrameSize(const MachineFrameInfo &MFI) const;
+
 private:
   bool hasFPImpl(const MachineFunction &MF) const override;
 };

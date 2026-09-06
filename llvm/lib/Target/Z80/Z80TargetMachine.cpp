@@ -30,6 +30,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar/IndVarSimplify.h"
 #include "llvm/Transforms/Utils.h"
@@ -44,9 +45,11 @@
 #include "Z80LateOptimization.h"
 #include "Z80LowerSelect.h"
 #include "Z80MachineFunctionInfo.h"
+#include "Z80NonReentrant.h"
 #include "Z80PostRACompareMerge.h"
 #include "Z80PostRAScavenging.h"
 #include "Z80ShiftRotateChain.h"
+#include "Z80StaticFrameAlloc.h"
 #include "Z80TargetObjectFile.h"
 #include "Z80TargetTransformInfo.h"
 
@@ -68,6 +71,8 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80PostRAScavengingPass(PR);
   initializeZ80ShiftRotateChainPass(PR);
   initializeZ80PostRACompareMergePass(PR);
+  initializeZ80NonReentrantPass(PR);
+  initializeZ80StaticFrameAllocPass(PR);
 }
 
 // Z80 data layout:
@@ -86,6 +91,27 @@ static StringRef getCPU(StringRef CPU, const Triple &TT) {
   if (CPU.empty() || CPU == "generic")
     return TT.getArch() == Triple::sm83 ? "sm83" : "z80";
   return CPU;
+}
+
+// Default is on for Z80 and off for SM83, whose lack of a direct absolute
+// load makes the trade unprofitable until the frames can go in the high
+// page. Explicit true/false overrides the per-target default.
+static cl::opt<cl::boolOrDefault> EnableStaticFramesOpt(
+    "z80-static-frames",
+    cl::desc("Allocate the frames of provably non-reentrant functions in "
+             "static memory (default: on for z80, off for sm83)"),
+    cl::init(cl::boolOrDefault::BOU_UNSET), cl::Hidden);
+
+static bool useStaticFrames(const Z80TargetMachine &TM) {
+  switch (EnableStaticFramesOpt) {
+  case cl::boolOrDefault::BOU_TRUE:
+    return true;
+  case cl::boolOrDefault::BOU_FALSE:
+    return false;
+  case cl::boolOrDefault::BOU_UNSET:
+    return TM.getTargetTriple().getArch() != Triple::sm83;
+  }
+  llvm_unreachable("unhandled boolOrDefault");
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
@@ -537,6 +563,12 @@ void Z80PassConfig::addIRPasses() {
   addPass(new Z80CheckUnsupported());
   addPass(createAtomicExpandLegacyPass());
 
+  // Whole-module analysis behind the static frame allocation; runs after
+  // LTO merging so the call graph covers the whole program.
+  if (useStaticFrames(getZ80TargetMachine()) &&
+      getOptLevel() != CodeGenOptLevel::None)
+    addPass(createZ80NonReentrantPass());
+
   TargetPassConfig::addIRPasses();
   // Clean up after LSR in particular.
   if (getOptLevel() != CodeGenOptLevel::None)
@@ -618,6 +650,13 @@ void Z80PassConfig::addPreSched2() {
   // of the two byte moves. See Z80FixupImplicitDefs.cpp.
   addPass(createZ80FixupImplicitDefsPass());
   addPass(createZ80PostRAScavengingPass());
+
+  // Every function's frame is final past PEI, so the static frames can be
+  // laid out module-wide and the placeholder operands resolved. Must run
+  // before the late peepholes so they see the final operands.
+  if (useStaticFrames(getZ80TargetMachine()) &&
+      getOptLevel() != CodeGenOptLevel::None)
+    addPass(createZ80StaticFrameAllocPass());
 
   // This is currently mandatory, since it lowers CMPTermZ.
   addPass(createZ80LateOptimizationPass());

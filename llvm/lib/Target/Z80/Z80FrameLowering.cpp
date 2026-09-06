@@ -16,6 +16,8 @@
 
 #include "Z80FrameLowering.h"
 
+#include "llvm/ADT/SmallSet.h"
+
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80.h"
 #include "Z80MachineFunctionInfo.h"
@@ -60,6 +62,12 @@ bool Z80FrameLowering::hasFPImpl(const MachineFunction &MF) const {
   if (STI.hasSM83())
     return false;
 
+  // A static frame leaves nothing for a frame pointer to point at; this
+  // outranks the frame-pointer-elimination default, which exists for the
+  // sake of the stack frames this function does not have.
+  if (usesStaticFrame(MF))
+    return false;
+
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   // Use IX as frame pointer when:
   // - Frame pointer elimination is disabled (-O0 or -fno-omit-frame-pointer)
@@ -71,8 +79,52 @@ bool Z80FrameLowering::hasFPImpl(const MachineFunction &MF) const {
          MFI.hasVarSizedObjects() || MFI.isFrameAddressTaken();
 }
 
+bool Z80FrameLowering::usesStaticFrame(const MachineFunction &MF) const {
+  // The attribute exists only when the whole-module analysis ran and proved
+  // at most one live activation. A variable-sized object needs SP movement
+  // regardless, and a taken frame address is defined in terms of the stack.
+  return MF.getFunction().hasFnAttribute("nonreentrant") &&
+         !MF.getFunction().hasOptNone() &&
+         !MF.getFrameInfo().hasVarSizedObjects() &&
+         !MF.getFrameInfo().isFrameAddressTaken();
+}
+
+uint64_t Z80FrameLowering::staticFrameSize(const MachineFrameInfo &MFI) const {
+  uint64_t Size = 0;
+  for (int I = 0, E = MFI.getObjectIndexEnd(); I != E; ++I)
+    if (MFI.getStackID(I) == TargetStackID::NoAlloc &&
+        !MFI.isDeadObjectIndex(I))
+      Size += MFI.getObjectSize(I);
+  return Size;
+}
+
 void Z80FrameLowering::processFunctionBeforeFrameFinalized(
     MachineFunction &MF, RegScavenger *RS) const {
+  // Move every local of a provably non-reentrant function out of the stack:
+  // the objects get function-local offsets here, and the module-wide layout
+  // pass later turns them into absolute addresses. Fixed objects (incoming
+  // stack arguments) stay where the caller pushed them.
+  if (usesStaticFrame(MF)) {
+    MachineFrameInfo &StaticMFI = MF.getFrameInfo();
+    // Callee-saved registers are saved by pushes; their slots have to stay
+    // where the pushes put them.
+    SmallSet<int, 8> CSRSlots;
+    for (const CalleeSavedInfo &CS : StaticMFI.getCalleeSavedInfo())
+      if (!CS.isSpilledToReg())
+        CSRSlots.insert(CS.getFrameIdx());
+    int64_t Offset = 0;
+    for (int I = 0, E = StaticMFI.getObjectIndexEnd(); I != E; ++I) {
+      if (StaticMFI.isDeadObjectIndex(I) ||
+          StaticMFI.isVariableSizedObjectIndex(I) ||
+          StaticMFI.getStackID(I) != TargetStackID::Default ||
+          CSRSlots.count(I))
+        continue;
+      StaticMFI.setStackID(I, TargetStackID::NoAlloc);
+      StaticMFI.setObjectOffset(I, Offset);
+      Offset += StaticMFI.getObjectSize(I);
+    }
+  }
+
   // SP is at an arbitrary address when a function is entered and SM83's
   // SP-relative addressing rules out realigning it, so an alignment above
   // the byte-aligned stack cannot be honored. Anything that genuinely needs
@@ -217,7 +269,10 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
     // Callee-saved registers are already pushed by spillCalleeSavedRegisters.
     // We only need to allocate space for locals (StackSize - CSSize).
     const Z80FunctionInfo *FI = MF.getInfo<Z80FunctionInfo>();
-    uint64_t LocalSize = StackSize - FI->getCalleeSavedFrameSize();
+    uint64_t CSSize = FI->getCalleeSavedFrameSize();
+    // Static frames can leave the tracked stack smaller than the pushed
+    // callee saves; an unsigned wrap here would emit allocation forever.
+    uint64_t LocalSize = StackSize > CSSize ? StackSize - CSSize : 0;
 
     if (LocalSize == 0)
       return;
@@ -286,7 +341,8 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
     // We must insert local deallocation BEFORE those callee-save restores,
     // since the stack layout is: [locals | callee-saves | ret-addr].
     const Z80FunctionInfo *FI = MF.getInfo<Z80FunctionInfo>();
-    uint64_t LocalSize = StackSize - FI->getCalleeSavedFrameSize();
+    uint64_t CSSize = FI->getCalleeSavedFrameSize();
+    uint64_t LocalSize = StackSize > CSSize ? StackSize - CSSize : 0;
 
     if (LocalSize == 0)
       return;

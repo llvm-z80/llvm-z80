@@ -660,6 +660,9 @@ public:
   ArrayRef<std::pair<unsigned, const char *>>
   getSerializableDirectMachineOperandTargetFlags() const override;
 
+  ArrayRef<std::pair<int, const char *>>
+  getSerializableTargetIndices() const override;
+
 private:
   /// The expansion itself. The public entry point wraps it to carry the
   /// pseudo's memory operands onto whatever performs the access.

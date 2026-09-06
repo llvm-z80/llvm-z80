@@ -42,11 +42,13 @@ add_llvm_target(Z80CodeGen
   Z80LegalizerInfo.cpp
   Z80LowerSelect.cpp
   Z80MCInstLower.cpp
+  Z80NonReentrant.cpp
   Z80PostRACompareMerge.cpp
   Z80PostRAScavenging.cpp
   Z80RegisterBankInfo.cpp
   Z80RegisterInfo.cpp
   Z80ShiftRotateChain.cpp
+  Z80StaticFrameAlloc.cpp
   Z80Subtarget.cpp
   Z80TargetMachine.cpp
   Z80TargetObjectFile.cpp

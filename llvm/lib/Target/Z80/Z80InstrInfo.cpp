@@ -1748,6 +1748,15 @@ void Z80InstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
   BuildMI(&MBB, DL, get(Z80::JP_nn)).addMBB(&NewDestBB);
 }
 
+ArrayRef<std::pair<int, const char *>>
+Z80InstrInfo::getSerializableTargetIndices() const {
+  // Index 0 is the function's static frame; the module-wide layout pass
+  // resolves it to the frame symbol.
+  static const std::pair<int, const char *> Indices[] = {
+      {0, "z80-static-frame"}};
+  return Indices;
+}
+
 ArrayRef<std::pair<unsigned, const char *>>
 Z80InstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
   static const std::pair<unsigned, const char *> Flags[] = {
