@@ -24,6 +24,7 @@
 #include "Z80OpcodeUtils.h"
 #include "Z80RegisterInfo.h"
 #include "Z80Subtarget.h"
+#include "Z80TargetMachine.h"
 
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -80,10 +81,15 @@ bool Z80FrameLowering::hasFPImpl(const MachineFunction &MF) const {
 }
 
 bool Z80FrameLowering::usesStaticFrame(const MachineFunction &MF) const {
-  // The attribute exists only when the whole-module analysis ran and proved
-  // at most one live activation. A variable-sized object needs SP movement
-  // regardless, and a taken frame address is defined in terms of the stack.
-  return MF.getFunction().hasFnAttribute("nonreentrant") &&
+  // The attribute records that the whole-module analysis proved at most one
+  // live activation, but the machinery that resolves the placeholder operands
+  // only runs behind the target machine's gate, so an attribute arriving in
+  // the input IR while the gate is off must lower as an ordinary stack frame.
+  // A variable-sized object needs SP movement regardless, and a taken frame
+  // address is defined in terms of the stack.
+  return static_cast<const Z80TargetMachine &>(MF.getTarget())
+             .useStaticFrames() &&
+         MF.getFunction().hasFnAttribute("nonreentrant") &&
          !MF.getFunction().hasOptNone() &&
          !MF.getFrameInfo().hasVarSizedObjects() &&
          !MF.getFrameInfo().isFrameAddressTaken();

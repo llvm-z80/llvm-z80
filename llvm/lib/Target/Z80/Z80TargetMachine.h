@@ -50,6 +50,13 @@ public:
   // scheduling by claiming to emit it ourselves, then never doing so.
   bool targetSchedulesPostRAScheduling() const override { return true; };
 
+  // Whether the static frame machinery is active in this compilation. Both
+  // the pass pipeline and frame lowering consult this one gate, so a
+  // "nonreentrant" attribute arriving in the input IR while the feature is
+  // off (or at -O0) is inert rather than producing placeholder operands no
+  // pass will resolve.
+  bool useStaticFrames() const;
+
   MachineFunctionInfo *
   createMachineFunctionInfo(BumpPtrAllocator &Allocator, const Function &F,
                             const TargetSubtargetInfo *STI) const override;

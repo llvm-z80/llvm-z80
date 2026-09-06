@@ -34,9 +34,11 @@
 
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/LTO/LTO.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -106,6 +108,16 @@ void Z80NonReentrantImpl::visitContext(const CallGraphNode &CGN) {
 }
 
 bool Z80NonReentrantImpl::run(Module &M) {
+  // This pass is the attribute's only legitimate writer; drop any that
+  // arrived with the input IR so everything downstream is backed by this
+  // run's analysis.
+  bool Changed = false;
+  for (Function &F : M.functions())
+    if (F.hasFnAttribute("nonreentrant")) {
+      F.removeFnAttr("nonreentrant");
+      Changed = true;
+    }
+
   // Any external call may end up calling any externally-callable function,
   // which lets the SCC walk see recursion that passes through code outside
   // the module or through a function pointer.
@@ -113,10 +125,28 @@ bool Z80NonReentrantImpl::run(Module &M) {
   CG.getCallsExternalNode()->addCalledFunction(nullptr,
                                                CG.getExternalCallingNode());
 
+  // Operations like block copies and wide arithmetic only become calls
+  // during instruction selection, so their callees have no edge in the IR
+  // call graph; the layout pass reads such calls off the machine code, but
+  // this analysis runs before any exists. When one of those runtime
+  // functions is defined in this module, treat it as callable from every
+  // context, so that with a second context around it and everything it
+  // calls stay on the stack.
+  SmallVector<CallGraphNode *, 8> ImplicitCallees;
+  for (const char *Name :
+       lto::LTO::getRuntimeLibcallSymbols(M.getTargetTriple())) {
+    Function *F = M.getFunction(Name);
+    if (F && !F->isDeclaration())
+      ImplicitCallees.push_back(CG[F]);
+  }
+
   // Bottom-up recursion analysis: a single-node SCC that does not call
-  // itself can never have two activations from calls alone.
-  bool Changed = false;
+  // itself can never have two activations from calls alone. The walk covers
+  // the nodes reachable from outside; everything else is remembered so the
+  // final marking can leave it alone.
+  SmallPtrSet<const CallGraphNode *, 32> Analyzed;
   for (auto I = scc_begin(&CG), E = scc_end(&CG); I != E; ++I) {
+    Analyzed.insert(I->begin(), I->end());
     if (I->size() > 1)
       continue;
     const CallGraphNode &N = **I->begin();
@@ -136,6 +166,8 @@ bool Z80NonReentrantImpl::run(Module &M) {
   // indirect call inside one context conservatively reaches every
   // address-taken function.
   auto FinishContext = [&]() {
+    for (CallGraphNode *N : ImplicitCallees)
+      visitContext(*N);
     ReachableFromOther.insert(ReachableFromCurrent.begin(),
                               ReachableFromCurrent.end());
     ReachableFromCurrent.clear();
@@ -152,10 +184,15 @@ bool Z80NonReentrantImpl::run(Module &M) {
 
   CG.getCallsExternalNode()->removeAllCalledFunctions();
 
+  // A function the recursion walk never reached (internal, no callers, its
+  // address never taken) keeps its stack frame even when the input IR calls
+  // it norecurse: the layout pass walks the same reachable graph, so a
+  // frame it cannot see must not exist.
   for (Function &F : M.functions()) {
     if (F.isDeclaration())
       continue;
-    if (F.doesNotRecurse() && !Reentrant.contains(CG[&F])) {
+    if (Analyzed.contains(CG[&F]) && F.doesNotRecurse() &&
+        !Reentrant.contains(CG[&F])) {
       F.addFnAttr("nonreentrant");
       Changed = true;
     }

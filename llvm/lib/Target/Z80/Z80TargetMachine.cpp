@@ -103,7 +103,9 @@ static cl::opt<cl::boolOrDefault> EnableStaticFramesOpt(
              "static memory (default: on)"),
     cl::init(cl::boolOrDefault::BOU_UNSET), cl::Hidden);
 
-static bool useStaticFrames(const Z80TargetMachine &TM) {
+bool Z80TargetMachine::useStaticFrames() const {
+  if (getOptLevel() == CodeGenOptLevel::None)
+    return false;
   switch (EnableStaticFramesOpt) {
   case cl::boolOrDefault::BOU_TRUE:
     return true;
@@ -566,8 +568,7 @@ void Z80PassConfig::addIRPasses() {
 
   // Whole-module analysis behind the static frame allocation; runs after
   // LTO merging so the call graph covers the whole program.
-  if (useStaticFrames(getZ80TargetMachine()) &&
-      getOptLevel() != CodeGenOptLevel::None)
+  if (getZ80TargetMachine().useStaticFrames())
     addPass(createZ80NonReentrantPass());
 
   TargetPassConfig::addIRPasses();
@@ -655,8 +656,7 @@ void Z80PassConfig::addPreSched2() {
   // Every function's frame is final past PEI, so the static frames can be
   // laid out module-wide and the placeholder operands resolved. Must run
   // before the late peepholes so they see the final operands.
-  if (useStaticFrames(getZ80TargetMachine()) &&
-      getOptLevel() != CodeGenOptLevel::None)
+  if (getZ80TargetMachine().useStaticFrames())
     addPass(createZ80StaticFrameAllocPass());
 
   // This is currently mandatory, since it lowers CMPTermZ.
