@@ -319,7 +319,7 @@ namespace clang {
     CC_Z80SmallC,          // __attribute__((z80_smallc))
     CC_Z80SmallCCallee,    // __attribute__((z80_smallc)) __attribute__((z80_callee))
                            // -- the composition of the L2R-order and callee-cleanup
-                           // axes; not spelled by any single attribute (ravn/llvm-z80#282)
+                           // axes; not spelled by any single attribute
   };
 
   /// Checks whether the given calling convention supports variadic

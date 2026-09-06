@@ -8,7 +8,7 @@
 ; ABI: CallingConv::Z80_AllReg.  Arguments arrive entirely in registers:
 ;   HL = dest, DE = src, BC = size (i16).  No stack argument, no IX frame,
 ;   no callee-cleanup -- this is what makes it far smaller than the public
-;   stack-ABI _memmove (ravn/llvm-z80#126).  Called only by the G_MEMMOVE
+;   stack-ABI _memmove.  Called only by the G_MEMMOVE
 ;   lowering (Z80LegalizerInfo) for the runtime-unknown-direction case; the
 ;   public string.h memmove (_memmove) keeps the standard C ABI.
 ;

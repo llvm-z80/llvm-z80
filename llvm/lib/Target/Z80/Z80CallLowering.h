@@ -72,7 +72,7 @@ protected:
     // __z88dk_callee / __smallc / __smallc __z88dk_callee all share sdcccall(0)'s
     // stack layout and return registers (L/HL/DE:HL); they differ only in the
     // orthogonal argument-order (isSmallCArgOrder) and cleanup (isCalleeCleanup)
-    // axes -- see ravn/llvm-z80#282.
+    // axes.
     if (CC == CallingConv::Z80_SDCCCall0 ||
         CC == CallingConv::Z80_Z88dkCallee || CC == CallingConv::Z80_SmallC ||
         CC == CallingConv::Z80_SmallCCallee)

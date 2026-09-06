@@ -1362,8 +1362,8 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       return true;
     }
 
-    // CRITICAL: LDIR/LDDR with BC=0 runs 65536 iterations.  size==0 →
-    // erase (#63).  Variable-size moves use __memmove_rt, which guards
+    // CRITICAL: LDIR/LDDR with BC=0 runs 65536 iterations.  size==0 is
+    // erased.  Variable-size moves use __memmove_rt, which guards
     // BC==0 and handles overlap without unavailable guarded pseudos.
     auto SizeC = getIConstantVRegSExtVal(Size, MRI);
     if (SizeC && *SizeC == 0) {
@@ -1423,7 +1423,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       // Runtime-unknown direction: call the register-CC helper __memmove_rt
       // (z80_allreg: dst=HL, src=DE, size=BC) instead of the heavy stack-ABI
       // _memmove libcall -- no stack arg / IX frame / callee-cleanup, ~7x
-      // smaller (ravn/llvm-z80#126).  The public string.h memmove ABI is
+      // smaller.  The public string.h memmove ABI is
       // untouched (this is a dedicated internal helper symbol).
       MIRBuilder.setInsertPt(*MI.getParent(), MI.getIterator());
       auto &Ctx = MIRBuilder.getMF().getFunction().getContext();
@@ -1459,7 +1459,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       MIRBuilder.buildInstr(Z80::LDIR);
     } else { // LDDR
       // LDDR copies backward: HL = src + size - 1, DE = dst + size - 1,
-      // BC = size, then decrement HL/DE/BC each iteration (#91).
+      // BC = size, then decrement HL/DE/BC each iteration.
       //
       // When Size is a G_CONSTANT, fold Size-1 directly and walk
       // through any chained G_PTR_ADD constants on SrcPtr/DstPtr so

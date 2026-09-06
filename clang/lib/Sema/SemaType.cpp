@@ -8072,7 +8072,7 @@ static bool handleArmStateAttribute(Sema &S,
 }
 
 /// Compose two Z80/SDCC calling-convention attributes that live on orthogonal
-/// ABI axes into the single convention that carries both (ravn/llvm-z80#282).
+/// ABI axes into the single convention that carries both.
 ///
 /// z88dk decorates most of the classic clib (e.g. <graphics.h>
 /// plot_callee/draw_callee) `__smallc __z88dk_callee`, which means
@@ -8080,7 +8080,7 @@ static bool handleArmStateAttribute(Sema &S,
 /// callee stack cleanup (the `__z88dk_callee` cleanup axis).  Neither
 /// z80_smallc (L2R + caller-clean) nor z80_callee (R2L + callee-clean) alone
 /// expresses it.  When both attributes are written on one function type we
-/// compose them here instead of rejecting the pair as conflicting (#281).
+/// compose them here instead of rejecting the pair as conflicting.
 ///
 /// This is order-independent (either spelling sequence yields the same CC) and
 /// deliberately narrow: only the smallc+callee pair composes today.  Any other
@@ -8424,7 +8424,7 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
     // There's already a calling-convention attribute on the type and the CCs
     // don't match.  If the two conventions live on orthogonal ABI axes
     // (z80_smallc order + z80_callee cleanup), compose them into the combined
-    // convention (ravn/llvm-z80#282); otherwise it's a genuine conflict.
+    // convention; otherwise it's a genuine conflict.
     if (S.getCallingConvAttributedType(type)) {
       CallingConv Composed;
       if (composeZ80CallingConvs(CCOld, CC, Composed)) {

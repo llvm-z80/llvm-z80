@@ -10,11 +10,12 @@ define cc 129 void @one_i16(i16 %a) {
   ret void
 }
 
-; 2 x i16 args → HL, DE
-define cc 129 i16 @add_two_i16(i16 %a, i16 %b) {
-; CHECK-LABEL: _add_two_i16:
-; CHECK:       add hl,de
-  %r = add i16 %a, %b
+; 2 x i16 args → HL, DE; subtraction makes the assignment order observable.
+; CHECK-LABEL: _sub_two_i16:
+; CHECK:       and a
+; CHECK:       sbc hl,de
+define cc 129 i16 @sub_two_i16(i16 %a, i16 %b) {
+  %r = sub i16 %a, %b
   ret i16 %r
 }
 
@@ -23,8 +24,8 @@ define cc 129 i16 @three_i16(i16 %a, i16 %b, i16 %c) {
 ; CHECK-LABEL: _three_i16:
 ; CHECK-NOT:   ld{{.*}}(ix
 ; CHECK:       ret
-  %ab = add i16 %a, %b
-  %r = add i16 %ab, %c
+  %ab = sub i16 %a, %b
+  %r = sub i16 %ab, %c
   ret i16 %r
 }
 
@@ -47,9 +48,9 @@ define cc 129 i16 @five_i16(i16 %a, i16 %b, i16 %c, i16 %d, i16 %e) {
 ; CHECK-LABEL: _five_i16:
 ; CHECK-NOT:   ld{{.*}}(ix+
 ; CHECK:       ret
-  %ab = add i16 %a, %b
-  %abc = add i16 %ab, %c
-  %abcd = add i16 %abc, %d
-  %r = add i16 %abcd, %e
+  %ab = sub i16 %a, %b
+  %abc = sub i16 %ab, %c
+  %abcd = sub i16 %abc, %d
+  %r = sub i16 %abcd, %e
   ret i16 %r
 }

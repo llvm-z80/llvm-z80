@@ -1,7 +1,7 @@
 ; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
 ;
 ; cc133 = CallingConv::Z80_SmallCCallee = the z88dk `__smallc __z88dk_callee`
-; convention: the COMPOSITION of two orthogonal axes (ravn/llvm-z80#282) --
+; convention: the COMPOSITION of two orthogonal axes --
 ;   * argument order from __smallc  (cc132): left-to-right push, last arg at IX+4
 ;   * stack cleanup   from __z88dk_callee (cc131): the CALLEE pops the args
 ; Neither cc131 (right-to-left + callee) nor cc132 (left-to-right + caller) alone
@@ -36,6 +36,20 @@ define void @call_smallc_callee() {
 ; Callee side: void return -> callee cleans the four argument bytes while
 ; preserving the return address in BC.
 ; CHECK-LABEL: _callee_void:
+; The first load is a+4 (the first, deepest argument), and the second is
+; b+2 (the last argument nearest the return address).  The non-commutative
+; result 10*a+b makes an accidental swap observable.
+; CHECK:       ld hl,#4
+; CHECK-NEXT:  add hl,sp
+; CHECK-NEXT:  ld e,(hl)
+; CHECK-NEXT:  inc hl
+; CHECK-NEXT:  ld d,(hl)
+; CHECK:       ld hl,#2
+; CHECK-NEXT:  add hl,sp
+; CHECK-NEXT:  ld c,(hl)
+; CHECK-NEXT:  inc hl
+; CHECK-NEXT:  ld b,(hl)
+; CHECK:       add hl,bc
 ; CHECK:       pop bc
 ; CHECK:       inc sp
 ; CHECK:       inc sp
@@ -44,7 +58,8 @@ define void @call_smallc_callee() {
 ; CHECK:       push bc
 ; CHECK-NEXT:  ret
 define cc133 void @callee_void(i16 %a, i16 %b) {
-  %s = add i16 %a, %b
+  %scaled_a = mul i16 %a, 10
+  %s = add i16 %scaled_a, %b
   store i16 %s, ptr inttoptr(i16 16384 to ptr)
   ret void
 }

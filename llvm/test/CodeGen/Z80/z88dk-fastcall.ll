@@ -1,6 +1,6 @@
 ; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 ;
-; ravn/llvm-z80: __z88dk_fastcall calling convention (cc 130 =
+; __z88dk_fastcall calling convention (cc 130 =
 ; CallingConv::Z80_Z88dkFastCall).  z88dk's classic clib passes a SINGLE
 ; argument in a fixed register by width and returns in that same register:
 ;

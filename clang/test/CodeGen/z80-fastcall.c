@@ -1,6 +1,6 @@
 // RUN: %clang_cc1 -triple z80 -emit-llvm -o - %s | FileCheck %s
 //
-// ravn/llvm-z80: __attribute__((z80_fastcall)) selects the z88dk
+// __attribute__((z80_fastcall)) selects the z88dk
 // __z88dk_fastcall calling convention (CallingConv::Z80_Z88dkFastCall = 130).
 // A single argument is passed in a fixed register by width -- i8 in L, i16 in
 // HL, i32 in DE:HL (DE high, HL low) -- and the return value uses the same

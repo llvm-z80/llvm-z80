@@ -1,7 +1,7 @@
 ; RUN: llc -mtriple=z80 < %s | FileCheck %s
 ;
-; ravn/llvm-z80#126: a memmove whose dst-vs-src direction is not statically
-; known lowers to the register-CC helper __memmove_rt (CallingConv::Z80_AllReg:
+; A memmove whose dst-vs-src direction is not statically known lowers to the
+; register-CC helper __memmove_rt (CallingConv::Z80_AllReg:
 ; dst=HL, src=DE, size=BC) instead of the heavy stack-ABI _memmove libcall
 ; (IX frame + 4(ix) stack-arg read + triplicated callee-cleanup).  With all
 ; three args already in HL/DE/BC the call site is just `ld bc,N; jp/call

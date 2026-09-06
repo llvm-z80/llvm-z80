@@ -4,8 +4,8 @@
 ;   __sdcccall(0) (cc128): right-to-left push -> first arg nearest return addr.
 ;   __smallc      (cc132): left-to-right push -> last  arg nearest return addr.
 ; They are identical for a single argument.  z88dk's classic C library is
-; compiled __smallc, so clang needs cc132 to call it correctly (ravn/llvm-z80#279,
-; ravn/z88dk#41).  Constants: 0x1111=4369, 0x2222=8738, 0x3333=13107.
+; compiled __smallc, so clang needs cc132 to call it correctly.  Constants:
+; 0x1111=4369, 0x2222=8738, 0x3333=13107.
 
 declare cc128 i16 @f0(i16, i16, i16)
 declare cc132 i16 @fs(i16, i16, i16)

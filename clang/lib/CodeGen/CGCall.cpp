@@ -368,7 +368,7 @@ static CallingConv getCallingConventionForDecl(const ObjCMethodDecl *D,
 
   // z80_smallc (arg-order axis) and z80_callee (stack-cleanup axis) are
   // orthogonal and compose: both present => the combined convention (cc133).
-  // See composeZ80CallingConvs in SemaType.cpp / ravn/llvm-z80#282.
+  // See composeZ80CallingConvs in SemaType.cpp.
   {
     bool SmallC = D->hasAttr<Z80SmallCAttr>();
     bool Callee = D->hasAttr<Z80CalleeAttr>();

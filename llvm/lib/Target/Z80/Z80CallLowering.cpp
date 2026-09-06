@@ -110,7 +110,7 @@ static Register vectorToInt(MachineIRBuilder &MIRBuilder,
       .getReg(0);
 }
 
-/// Argument-order axis (ravn/llvm-z80#282): true when the convention pushes
+/// Argument-order axis: true when the convention pushes
 /// arguments left-to-right (first declared arg deepest, last at IX+4), i.e. the
 /// __smallc order, as opposed to sdcccall(0)/__z88dk_callee right-to-left.  This
 /// axis is orthogonal to the cleanup axis (isCalleeCleanup), so __smallc and

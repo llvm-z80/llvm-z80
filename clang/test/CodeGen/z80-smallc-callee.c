@@ -1,10 +1,10 @@
 // RUN: %clang_cc1 -triple z80 -emit-llvm -o - %s | FileCheck %s
 //
-// ravn/llvm-z80#282: __attribute__((z80_smallc)) and
-// __attribute__((z80_callee)) live on ORTHOGONAL ABI axes -- argument order
+// __attribute__((z80_smallc)) and __attribute__((z80_callee)) live on
+// ORTHOGONAL ABI axes -- argument order
 // (left-to-right, from smallc) and stack cleanup (callee, from callee) -- so
 // writing both on one function COMPOSES them into the z88dk
-// `__smallc __z88dk_callee` convention instead of conflicting (#281).  clang
+// `__smallc __z88dk_callee` convention instead of conflicting.  clang
 // lowers the composition to CallingConv::Z80_SmallCCallee = 133 (`cc133`) on
 // both the definition and the call site.  The actual dual-axis stack discipline
 // (left-to-right push + callee cleanup) is pinned by the backend lit test
@@ -20,10 +20,10 @@ void sink2(unsigned short a, unsigned short b) {
 }
 
 // The composition is order-independent: callee-then-smallc yields the same CC.
-// CHECK: define{{.*}}cc133 {{.*}}i16 @add2(i16
+// CHECK: define{{.*}}cc133 {{.*}}i16 @ordered2(i16
 __attribute__((z80_callee)) __attribute__((z80_smallc))
-unsigned short add2(unsigned short a, unsigned short b) {
-  return a + b;
+unsigned short ordered2(unsigned short a, unsigned short b) {
+  return 10 * a + b;
 }
 
 // The call site carries the same composed convention.

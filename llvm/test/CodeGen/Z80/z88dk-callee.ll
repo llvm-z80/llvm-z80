@@ -45,8 +45,14 @@ define void @call_callee() {
 ; CHECK-LABEL: _callee_void:
 ; CHECK:      ld hl,#2
 ; CHECK:      add hl,sp
-; CHECK:      ld hl,#6
+; CHECK:      ld e,(hl)
+; CHECK:      inc hl
+; CHECK:      ld d,(hl)
+; CHECK:      ld hl,#4
 ; CHECK:      add hl,sp
+; CHECK:      ld c,(hl)
+; CHECK:      inc hl
+; CHECK:      ld b,(hl)
 ; CHECK:      pop bc
 ; CHECK:      inc sp
 ; CHECK:      inc sp
@@ -55,7 +61,8 @@ define void @call_callee() {
 ; CHECK:      push bc
 ; CHECK-NEXT: ret
 define cc 131 void @callee_void(i16 %a, i16 %b) {
-  %s = add i16 %a, %b
+  %scaled_a = mul i16 %a, 10
+  %s = add i16 %scaled_a, %b
   store i16 %s, ptr inttoptr(i16 16384 to ptr)
   ret void
 }
@@ -66,6 +73,15 @@ define cc 131 void @callee_void(i16 %a, i16 %b) {
 ; CHECK-LABEL: _callee_reti16:
 ; CHECK:      ld hl,#2
 ; CHECK:      add hl,sp
+; CHECK:      ld c,(hl)
+; CHECK:      inc hl
+; CHECK:      ld b,(hl)
+; CHECK:      push hl
+; CHECK:      ld hl,#6
+; CHECK:      add hl,sp
+; CHECK:      ld c,(hl)
+; CHECK:      inc hl
+; CHECK:      ld b,(hl)
 ; CHECK-NOT:  ex de,hl
 ; CHECK:      pop bc
 ; CHECK:      inc sp
@@ -75,7 +91,7 @@ define cc 131 void @callee_void(i16 %a, i16 %b) {
 ; CHECK:      push bc
 ; CHECK-NEXT: ret
 define cc 131 i16 @callee_reti16(i16 %a, i16 %b) {
-  %s = add i16 %a, %b
+  %s = sub i16 %a, %b
   ret i16 %s
 }
 
