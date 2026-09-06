@@ -89,6 +89,7 @@ bool Z80FrameLowering::usesStaticFrame(const MachineFunction &MF) const {
   // address is defined in terms of the stack.
   return static_cast<const Z80TargetMachine &>(MF.getTarget())
              .useStaticFrames() &&
+         MF.getSubtarget<Z80Subtarget>().hasStaticFrame() &&
          MF.getFunction().hasFnAttribute("nonreentrant") &&
          !MF.getFunction().hasOptNone() &&
          !MF.getFrameInfo().hasVarSizedObjects() &&

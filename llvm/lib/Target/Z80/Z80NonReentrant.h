@@ -19,8 +19,9 @@ namespace llvm {
 
 class ModulePass;
 class PassRegistry;
+class Z80TargetMachine;
 
-ModulePass *createZ80NonReentrantPass();
+ModulePass *createZ80NonReentrantPass(const Z80TargetMachine &TM);
 void initializeZ80NonReentrantPass(PassRegistry &);
 
 } // namespace llvm

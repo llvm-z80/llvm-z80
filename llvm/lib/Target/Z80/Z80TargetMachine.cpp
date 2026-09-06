@@ -569,7 +569,7 @@ void Z80PassConfig::addIRPasses() {
   // Whole-module analysis behind the static frame allocation; runs after
   // LTO merging so the call graph covers the whole program.
   if (getZ80TargetMachine().useStaticFrames())
-    addPass(createZ80NonReentrantPass());
+    addPass(createZ80NonReentrantPass(getZ80TargetMachine()));
 
   TargetPassConfig::addIRPasses();
   // Clean up after LSR in particular.

@@ -82,7 +82,7 @@ public:
 
   bool useAA() const override { return true; }
 
-  bool staticStack() const { return StaticStack; }
+  bool hasStaticFrame() const { return StaticFrame; }
   bool inlineI16Runtime() const { return InlineI16Runtime; }
 
   // Feature queries
@@ -109,7 +109,7 @@ private:
   // SM83 (Game Boy CPU)
   bool HasSM83 = false;
 
-  bool StaticStack = false;
+  bool StaticFrame = false;
   bool InlineI16Runtime = false;
 
   Z80InstrInfo InstrInfo;

@@ -44,10 +44,14 @@ def FeatureUndocumented
     : SubtargetFeature<"undocumented", "HasUndocumented", "true",
                        "Enable undocumented Z80 instructions (IXH, IXL, IYH, IYL, etc.)">;
 
-// Static stack allocation
-def FeatureStaticStack
-    : SubtargetFeature<"static-stack", "StaticStack", "true",
-                       "Use statically-allocated stack frames if possible">;
+// Every processor enables this; a function that clears it (spelled
+// __attribute__((target("no-static-frame"))) in C) declares that it is
+// entered from an execution context the whole-module analysis cannot see,
+// such as an interrupt handler in foreign code. The function and
+// everything reachable from it then keep ordinary stack frames.
+def FeatureStaticFrame
+    : SubtargetFeature<"static-frame", "StaticFrame", "true",
+                       "Allow this function's frame in static memory">;
 
 // Inline-expand 16-bit runtime library calls (__mulhi3, __udivhi3, __divhi3,
 // __umodhi3, __modhi3) as shift-and-add / restoring-division loops instead of

@@ -24,13 +24,18 @@
 // touching the frame machinery.
 //
 // Enabling static frames asserts that every interrupt entry point is a
-// function in this module carrying the interrupt attribute; a handler
-// living in foreign code must be declared through -z80-static-frames
-// isr-roots so its context is modeled.
+// function in this module carrying the interrupt attribute. A function
+// entered from a context the analysis cannot see, such as a handler living
+// in foreign code, must carry the no-static-frame target feature (spelled
+// __attribute__((target("no-static-frame"))) in C); it and everything it
+// reaches then keep their stack frames.
 //
 //===----------------------------------------------------------------------===//
 
 #include "Z80NonReentrant.h"
+
+#include "Z80Subtarget.h"
+#include "Z80TargetMachine.h"
 
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -40,41 +45,32 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "z80-nonreentrant"
 
 using namespace llvm;
 
-static cl::list<std::string> ISRRoots(
-    "z80-static-frames-isr-roots", cl::CommaSeparated,
-    cl::desc("Functions called from interrupt context outside this module; "
-             "each roots its own execution context for the static frame "
-             "analysis"));
-
 namespace {
 
 class Z80NonReentrantImpl {
+  const Z80TargetMachine &TM;
   CallGraph &CG;
   SmallPtrSet<const CallGraphNode *, 8> Reentrant;
   SmallPtrSet<const CallGraphNode *, 16> ReachableFromCurrent;
   SmallPtrSet<const CallGraphNode *, 16> ReachableFromOther;
 
 public:
-  Z80NonReentrantImpl(CallGraph &CG) : CG(CG) {}
+  Z80NonReentrantImpl(const Z80TargetMachine &TM, CallGraph &CG)
+      : TM(TM), CG(CG) {}
   bool run(Module &M);
 
 private:
   bool isContextRoot(const Function &F) const {
-    if (F.hasFnAttribute("interrupt"))
-      return true;
-    for (const std::string &Name : ISRRoots)
-      if (F.getName() == Name)
-        return true;
-    return false;
+    return F.hasFnAttribute("interrupt");
   }
 
+  void markReentrantReachable(const CallGraphNode &CGN);
   void visitContext(const CallGraphNode &CGN);
 };
 
@@ -85,6 +81,22 @@ static bool callsSelf(const CallGraphNode &N) {
     if (CR.second == &N)
       return true;
   return false;
+}
+
+// A function entered from a context the module analysis cannot see keeps
+// its stack frame, and so must everything it can reach: any of it may run
+// concurrently with any other context. The walk happens with the
+// artificial external edge in place, so an indirect or external call in
+// the tree conservatively spreads to every externally-callable function.
+void Z80NonReentrantImpl::markReentrantReachable(const CallGraphNode &CGN) {
+  if (!Reentrant.insert(&CGN).second)
+    return;
+  LLVM_DEBUG({
+    if (const Function *F = CGN.getFunction())
+      dbgs() << "Reachable from a foreign context: " << F->getName() << "\n";
+  });
+  for (const CallGraphNode::CallRecord &CR : CGN)
+    markReentrantReachable(*CR.second);
 }
 
 void Z80NonReentrantImpl::visitContext(const CallGraphNode &CGN) {
@@ -140,6 +152,24 @@ bool Z80NonReentrantImpl::run(Module &M) {
       ImplicitCallees.push_back(CG[F]);
   }
 
+  // A function that cleared the static-frame feature (the no-static-frame
+  // spelling of the target attribute) is entered from a context this module
+  // cannot see; it and its whole call tree stay on the stack. The IR walk
+  // does not see the calls instruction selection will introduce, so the
+  // runtime functions above count as part of any such tree.
+  bool HasForeignContext = false;
+  for (Function &F : M.functions()) {
+    if (F.isDeclaration())
+      continue;
+    if (!TM.getSubtargetImpl(F)->hasStaticFrame()) {
+      HasForeignContext = true;
+      markReentrantReachable(*CG[&F]);
+    }
+  }
+  if (HasForeignContext)
+    for (CallGraphNode *N : ImplicitCallees)
+      markReentrantReachable(*N);
+
   // Bottom-up recursion analysis: a single-node SCC that does not call
   // itself can never have two activations from calls alone. The walk covers
   // the nodes reachable from outside; everything else is remembered so the
@@ -158,9 +188,8 @@ bool Z80NonReentrantImpl::run(Module &M) {
   }
 
   // Context analysis. The external world (main and any other entry called
-  // from outside) is one context; each interrupt handler and each declared
-  // foreign-called root is another. A function reachable from more than one
-  // of them can be active twice.
+  // from outside) is one context; each interrupt handler is another. A
+  // function reachable from more than one of them can be active twice.
   //
   // The walks run with the artificial external edge still in place, so an
   // indirect call inside one context conservatively reaches every
@@ -203,17 +232,22 @@ bool Z80NonReentrantImpl::run(Module &M) {
 namespace {
 
 class Z80NonReentrant : public ModulePass {
+  const Z80TargetMachine *TM = nullptr;
+
 public:
   static char ID;
   Z80NonReentrant() : ModulePass(ID) {}
+  Z80NonReentrant(const Z80TargetMachine &TM) : ModulePass(ID), TM(&TM) {}
 
   StringRef getPassName() const override {
     return "Z80 non-reentrant function analysis";
   }
 
   bool runOnModule(Module &M) override {
+    if (!TM)
+      return false;
     CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
-    return Z80NonReentrantImpl(CG).run(M);
+    return Z80NonReentrantImpl(*TM, CG).run(M);
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -231,4 +265,6 @@ INITIALIZE_PASS_DEPENDENCY(CallGraphWrapperPass)
 INITIALIZE_PASS_END(Z80NonReentrant, DEBUG_TYPE,
                     "Z80 non-reentrant function analysis", false, false)
 
-ModulePass *llvm::createZ80NonReentrantPass() { return new Z80NonReentrant(); }
+ModulePass *llvm::createZ80NonReentrantPass(const Z80TargetMachine &TM) {
+  return new Z80NonReentrant(TM);
+}
