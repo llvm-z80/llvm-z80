@@ -3977,14 +3977,12 @@ private:
                                      unsigned &NumIntermediates,
                                      MVT &RegisterVT);
 
-protected:
   /// Return the type of registers that this ValueType will eventually require.
-  virtual MVT getCachedRegisterType(MVT VT) const {
+  MVT getCachedRegisterType(MVT VT) const {
     assert((unsigned)VT.SimpleTy < std::size(RegisterTypeForVT));
     return RegisterTypeForVT[VT.SimpleTy];
   }
 
-private:
   MVT getRegisterTypeImpl(LLVMContext &Context, EVT VT,
                           bool ForCallingConv) const {
     if (VT.isSimple() &&
