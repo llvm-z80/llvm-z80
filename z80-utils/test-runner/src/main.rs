@@ -117,7 +117,6 @@ Usage: z80-test-runner clang [options] [name-filter]
   -opt <O0|O1|...|all> Optimization level (default: all)
   -fast-math           Enable -ffast-math
   -omit-frame-pointer  Enable -fomit-frame-pointer
-  -static-stack        Enable +static-stack (BSS locals)
   -freestanding        Add -ffreestanding (GCC does not; it also hides alloca)
   -verify              Add -mllvm -verify-machineinstrs (fail on invalid MIR;
                        catches the peephole-liveness family, e.g. ravn/llvm-z80#199).
@@ -327,7 +326,6 @@ fn cmd_clang(args: &[String]) -> ExitCode {
     let mut opt_filter = "all".to_string();
     let mut fast_math = false;
     let mut omit_fp = false;
-    let mut static_stack = false;
     let mut verify = false;
     let mut diff_opt = false;
     let mut native_oracle = false;
@@ -345,7 +343,6 @@ fn cmd_clang(args: &[String]) -> ExitCode {
             }
             "-fast-math" => fast_math = true,
             "-omit-frame-pointer" => omit_fp = true,
-            "-static-stack" => static_stack = true,
             "-verify" => verify = true,
             "-diff-opt" => diff_opt = true,
             "-native-oracle" => native_oracle = true,
@@ -364,7 +361,6 @@ fn cmd_clang(args: &[String]) -> ExitCode {
         fast_math,
         omit_fp,
         inline_runtime: false,
-        static_stack,
         verify,
         diff_opt,
         native_oracle,

@@ -308,7 +308,7 @@ fn add_clang_filtered(
     pattern: Option<String>,
 ) {
     let label = label.to_string();
-    let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, static_stack: false, verify: false, diff_opt: false, native_oracle: false, pattern };
+    let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, verify: false, diff_opt: false, native_oracle: false, pattern };
     let for_count = config.clone();
     suites.push(SuiteDef {
         label: label.clone(),
@@ -331,7 +331,7 @@ fn add_clang_inline_rt(
     let label = label.to_string();
     let config = ClangConfig {
                 target, opt_levels: opts, fast_math: false, omit_fp: false,
-                inline_runtime: true, static_stack: false, verify: false, diff_opt: false, native_oracle: false, pattern: None,
+                inline_runtime: true, verify: false, diff_opt: false, native_oracle: false, pattern: None,
             };
     let for_count = config.clone();
     suites.push(SuiteDef {

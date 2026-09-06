@@ -239,7 +239,7 @@ pub fn check_skip_c(
                     }
                     continue;
                 }
-                // `-flag` and `+feature` (e.g. +static-stack) both name a
+                // `-flag` and `+feature` (e.g. +inline-i16-runtime) both name a
                 // compiler flag matched against active_flags; anything else is
                 // a target triple filter.
                 if token.starts_with('-') || token.starts_with('+') {

@@ -15,7 +15,6 @@ pub struct ClangConfig {
     pub fast_math: bool,
     pub omit_fp: bool,
     pub inline_runtime: bool,
-    pub static_stack: bool,
     /// Append `-mllvm -verify-machineinstrs`: run the MachineVerifier after
     /// every pass and fail the compile on invalid MIR (undefined physreg,
     /// stale liveins, bad reg classes). Catches the peephole-liveness bug
@@ -28,7 +27,7 @@ pub struct ClangConfig {
     /// the same test is a miscompile -- independent of the hardcoded `expect`
     /// directive (which may itself be wrong/stale). Emits a `<name>_DIFFOPT`
     /// failure naming the disagreeing levels. Would have caught ravn/llvm-z80#202 (its test_54:
-    /// O0_ss=0x0080 vs O1+_ss=0x00FF) with no hand-written test. Strongest with
+    /// O0=0x0080 vs O1+=0x00FF) with no hand-written test. Strongest with
     /// `-full` (all opt levels).
     pub diff_opt: bool,
     /// Native-reference differential oracle: compile + run each test with the
@@ -59,12 +58,6 @@ impl ClangConfig {
             flags.push("-Xclang");
             flags.push("+inline-i16-runtime");
         }
-        if self.static_stack {
-            flags.push("-Xclang");
-            flags.push("-target-feature");
-            flags.push("-Xclang");
-            flags.push("+static-stack");
-        }
         if self.verify {
             flags.push("-mllvm");
             flags.push("-verify-machineinstrs");
@@ -86,9 +79,6 @@ impl ClangConfig {
         }
         if self.inline_runtime {
             s.push_str("_inlrt");
-        }
-        if self.static_stack {
-            s.push_str("_ss");
         }
         s
     }
