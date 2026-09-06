@@ -108,6 +108,11 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
   // sdasz80 uses .ds for zero-fill (not .zero)
   ZeroDirective = "\t.ds\t";
 
+  // Without this the generic alias emission forces .globl onto every
+  // alias, local ones included (AsmPrinter falls back to MCSA_Global when
+  // no weak-reference directive exists).
+  WeakRefDirective = "\t.weak\t";
+
   // sdasz80 escape handling differs from GNU as; emit strings as .db bytes
   AsciiDirective = nullptr;
   AscizDirective = nullptr;
