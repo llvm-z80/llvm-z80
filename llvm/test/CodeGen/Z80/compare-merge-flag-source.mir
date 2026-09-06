@@ -1,0 +1,152 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 \
+# RUN:     -run-pass=z80-post-ra-compare-merge %s -o - | FileCheck %s
+#
+# OR A reports Z for the value in A and clears the carry. It is redundant only
+# where something has already said both, so the instruction it follows decides.
+
+--- |
+  define void @after_logic() { ret void }
+  define void @after_dec_a() { ret void }
+  define void @after_cpl() { ret void }
+  define void @after_compare() { ret void }
+  define void @after_pop_af() { ret void }
+  define void @carry_still_wanted() { ret void }
+...
+---
+# XOR reports Z for A and clears the carry, which is all OR A would do.
+# CHECK-LABEL: name: after_logic
+# CHECK-NOT: {{^ +OR_r}}
+name:            after_logic
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a, $b
+
+    XOR_r killed $b, implicit-def $a, implicit-def $flags, implicit $a
+    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
+    JR_NZ_e %bb.1, implicit $flags
+    JR_e %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# DEC A reports Z for A but leaves the carry alone. Only Z is read here, so
+# the carry OR A would have cleared goes unmissed.
+# CHECK-LABEL: name: after_dec_a
+# CHECK-NOT: {{^ +OR_r}}
+name:            after_dec_a
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a
+
+    $a = DEC_r $a, implicit-def $flags
+    $b = LD_r_r $a
+    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
+    JR_NZ_e %bb.1, implicit $flags
+    JR_e %bb.2
+
+  bb.1:
+    liveins: $b
+    RET implicit $b
+
+  bb.2:
+    liveins: $b
+    RET implicit $b
+...
+---
+# CPL writes A and the flags but leaves Z describing whatever ran before it.
+# CHECK-LABEL: name: after_cpl
+# CHECK: {{^ +OR_r}}
+name:            after_cpl
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a
+
+    CPL implicit-def $a, implicit-def $flags, implicit $a
+    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
+    JR_NZ_e %bb.1, implicit $flags
+    JR_e %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# CP reports Z for A minus its operand. Dropping the OR A would turn a test
+# for zero into a test against 156.
+# CHECK-LABEL: name: after_compare
+# CHECK: {{^ +OR_r}}
+name:            after_compare
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a
+
+    CP_n 156, implicit-def $flags, implicit $a
+    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
+    JR_Z_e %bb.1, implicit $flags
+    JR_e %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# POP AF writes A and the flags together, but its Z came off the stack rather
+# than from the A it just loaded.
+# CHECK-LABEL: name: after_pop_af
+# CHECK: {{^ +OR_r}}
+name:            after_pop_af
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+
+    POP_AF implicit-def $a, implicit-def $flags
+    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
+    JR_Z_e %bb.1, implicit $flags
+    JR_e %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# SUB reports Z for A, but the branch asks about the carry, and that is the
+# flag OR A would have cleared.
+# CHECK-LABEL: name: carry_still_wanted
+# CHECK: {{^ +OR_r}}
+name:            carry_still_wanted
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a
+
+    SUB_n 9, implicit-def $a, implicit-def $flags, implicit $a
+    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
+    JR_C_e %bb.1, implicit $flags
+    JR_e %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
