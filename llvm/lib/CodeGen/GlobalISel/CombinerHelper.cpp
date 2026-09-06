@@ -5,8 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-
-
 #include "llvm/CodeGen/GlobalISel/CombinerHelper.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"

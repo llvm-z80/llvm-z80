@@ -2663,7 +2663,6 @@ MCRegister RAGreedy::selectOrSplitImpl(const LiveInterval &VirtReg,
                                        SmallVirtRegSet &FixedRegisters,
                                        RecoloringStack &RecolorStack,
                                        unsigned Depth) {
-
   uint8_t CostPerUseLimit = uint8_t(~0u);
   // First try assigning a free register.
   auto Order =

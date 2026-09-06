@@ -4793,7 +4793,6 @@ void LSRInstance::GenerateCrossUseConstantOffsets() {
     // TODO: Use a more targeted data structure.
     for (size_t L = 0, LE = LU.Formulae.size(); L != LE; ++L) {
       Formula F = LU.Formulae[L];
-
       // FIXME: The code for the scaled and unscaled registers looks
       // very similar but slightly different. Investigate if they
       // could be merged. That way, we would not have to unscale the
@@ -5149,7 +5148,7 @@ void LSRInstance::NarrowSearchSpaceByCollapsingUnrolledCode() {
       if (!LUThatHas)
         continue;
 
-      if (!reconcileNewOffset(*LUThatHas, F.BaseOffset, /*HasBaseReg=*/false,
+      if (!reconcileNewOffset(*LUThatHas, F.BaseOffset, /*HasBaseReg=*/ false,
                               LU.Kind, LU.AccessTy))
         continue;
 

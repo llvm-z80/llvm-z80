@@ -1488,8 +1488,7 @@ void InlineSpiller::spill(LiveRangeEdit &edit, AllocationOrder *order) {
 }
 
 /// Optimizations after all the reg selections and spills are done.
-void InlineSpiller::postOptimization() { HSpiller.hoistAllSpills();
-}
+void InlineSpiller::postOptimization() { HSpiller.hoistAllSpills(); }
 
 /// When a spill is inserted, add the spill to MergeableSpills map.
 void HoistSpillHelper::addToMergeableSpills(MachineInstr &Spill, int StackSlot,

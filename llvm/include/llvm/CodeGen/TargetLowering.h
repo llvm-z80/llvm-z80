@@ -19,7 +19,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-
 #ifndef LLVM_CODEGEN_TARGETLOWERING_H
 #define LLVM_CODEGEN_TARGETLOWERING_H
 
@@ -2993,9 +2992,9 @@ public:
   /// If ScalableOffset is zero, there is no scalable offset.
   struct AddrMode {
     GlobalValue *BaseGV = nullptr;
-    int64_t BaseOffs = 0;
-    bool HasBaseReg = false;
-    int64_t Scale = 0;
+    int64_t      BaseOffs = 0;
+    bool         HasBaseReg = false;
+    int64_t      Scale = 0;
     int64_t ScalableOffset = 0;
     AddrMode() = default;
   };

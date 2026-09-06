@@ -11,7 +11,6 @@
 // at the end of the legalization.
 //===----------------------------------------------------------------------===//
 
-
 #ifndef LLVM_CODEGEN_GLOBALISEL_LEGALIZATIONARTIFACTCOMBINER_H
 #define LLVM_CODEGEN_GLOBALISEL_LEGALIZATIONARTIFACTCOMBINER_H
 
@@ -1238,8 +1237,8 @@ public:
       MergeI = getDefIgnoringCopies(SrcDef->getOperand(1).getReg(), MRI);
     }
 
-    if (!MergeI ||
-        !canFoldMergeOpcode(MergeI->getOpcode(), ConvertOp, OpTy, DestTy)) {
+    if (!MergeI || !canFoldMergeOpcode(MergeI->getOpcode(),
+                                       ConvertOp, OpTy, DestTy)) {
       // We might have a chance to combine later by trying to combine
       // unmerge(cast) first
       return tryFoldUnmergeCast(MI, *SrcDef, DeadInsts, UpdatedDefs);

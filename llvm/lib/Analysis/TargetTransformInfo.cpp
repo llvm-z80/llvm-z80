@@ -246,7 +246,6 @@ int TargetTransformInfo::getInlinerVectorBonusPercent() const {
   return TTIImpl->getInlinerVectorBonusPercent();
 }
 
-
 InstructionCost TargetTransformInfo::getGEPCost(
     Type *PointeeType, const Value *Ptr, ArrayRef<const Value *> Operands,
     TTI::TargetCostKind CostKind, Type *AccessType) const {
@@ -1511,8 +1510,6 @@ TargetTransformInfo::VPLegalization
 TargetTransformInfo::getVPLegalizationStrategy(const VPIntrinsic &VPI) const {
   return TTIImpl->getVPLegalizationStrategy(VPI);
 }
-
-
 
 bool TargetTransformInfo::hasArmWideBranch(bool Thumb) const {
   return TTIImpl->hasArmWideBranch(Thumb);
