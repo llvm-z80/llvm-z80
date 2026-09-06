@@ -88,6 +88,12 @@ Common options:
   -target <z80|sm83>   Target architecture (default: z80)
   -opt <O0|O1|...|all> Optimization level
 
+bench and stdcbench options:
+  -sdcc-allocs <N>     SDCC's --max-allocs-per-node, how hard its register
+                       allocator tries. Left at SDCC's own default otherwise,
+                       which is low so that compiles stay quick; raising it
+                       buys both speed and size at build time.
+
 test options:
   -full      Run every opt level. The `full` command does this and then runs
              the torture suite on both targets.
@@ -560,6 +566,7 @@ fn cmd_utils(args: &[String]) -> ExitCode {
 }
 
 fn cmd_bench(args: &[String]) -> ExitCode {
+    let mut sdcc_allocs = None;
     let mut target = Target::Z80;
     let mut opt = config::OptLevel::Os;
     let mut pattern = None;
@@ -568,6 +575,16 @@ fn cmd_bench(args: &[String]) -> ExitCode {
     while i < args.len() {
         match args[i].as_str() {
             "-target" => target = parse_target(args, &mut i),
+            "-sdcc-allocs" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<u32>().ok()) {
+                    Some(n) if n > 0 => sdcc_allocs = Some(n),
+                    _ => {
+                        eprintln!("-sdcc-allocs expects a positive number");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             "-opt" => {
                 i += 1;
                 if i < args.len() {
@@ -586,12 +603,13 @@ fn cmd_bench(args: &[String]) -> ExitCode {
     }
 
     let paths = Paths::resolve();
-    let config = bench::BenchConfig { target, opt, pattern };
+    let config = bench::BenchConfig { target, opt, pattern, sdcc_allocs };
     bench::run(&paths, &config);
     ExitCode::SUCCESS
 }
 
 fn cmd_stdcbench(args: &[String]) -> ExitCode {
+    let mut sdcc_allocs = None;
     let mut target = Target::Z80;
     let mut opt = config::OptLevel::Os;
     let mut iterations = 1u32;
@@ -612,6 +630,16 @@ fn cmd_stdcbench(args: &[String]) -> ExitCode {
                     }
                 }
             }
+            "-sdcc-allocs" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<u32>().ok()) {
+                    Some(n) if n > 0 => sdcc_allocs = Some(n),
+                    _ => {
+                        eprintln!("-sdcc-allocs expects a positive number");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             "-iterations" => {
                 i += 1;
                 match args.get(i).and_then(|s| s.parse::<u32>().ok()) {
@@ -628,7 +656,7 @@ fn cmd_stdcbench(args: &[String]) -> ExitCode {
     }
 
     let paths = Paths::resolve();
-    let config = stdcbench::StdcbenchConfig { target, opt, iterations };
+    let config = stdcbench::StdcbenchConfig { target, opt, iterations, sdcc_allocs };
     if stdcbench::run(&paths, &config) {
         ExitCode::SUCCESS
     } else {

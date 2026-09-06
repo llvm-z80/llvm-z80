@@ -33,6 +33,10 @@ const EMU_CYCLES: u64 = 40_000_000_000;
 pub struct StdcbenchConfig {
     pub target: Target,
     pub opt: OptLevel,
+    /// `--max-allocs-per-node`, how hard SDCC tries at register allocation.
+    /// `None` leaves SDCC's own default, which is deliberately low so that
+    /// compiles stay quick; raising it buys real speed at real build time.
+    pub sdcc_allocs: Option<u32>,
     /// How many times c90base repeats its work loop. Emulation is exact, so
     /// one iteration already measures the whole benchmark without noise;
     /// more only costs time.
@@ -85,6 +89,11 @@ pub fn run(paths: &Paths, config: &StdcbenchConfig) -> bool {
         config.iterations,
         if config.iterations == 1 { "" } else { "s" }
     ));
+    report::fields(&[
+        ("clang", clang_flags(config).join(" ")),
+        ("sdcc", sdcc_flags(config).join(" ")),
+    ]);
+    report::rule();
 
     let work_root = std::env::temp_dir().join("z80-stdcbench");
     suite::cleanup_old_tmp_dirs(&work_root);
@@ -119,6 +128,41 @@ fn collect_sources(src_dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(sources)
 }
 
+/// The flags each toolchain is given, as one list used both to invoke it and
+/// to print it, so the header cannot claim options the run did not use. The
+/// include paths and per-file arguments are left out: they are the same for
+/// both and say nothing about how the code was compiled.
+fn clang_flags(config: &StdcbenchConfig) -> Vec<String> {
+    vec![
+        format!("--target={}", config.target.triple()),
+        format!("-{}", config.opt.clang_flag()),
+        "-c".into(),
+        "-nostdlib".into(),
+        "-ffreestanding".into(),
+        "-std=c99".into(),
+        format!("-DSTDCBENCH_ITERATIONS={}", config.iterations),
+    ]
+}
+
+fn sdcc_flags(config: &StdcbenchConfig) -> Vec<String> {
+    let mut flags = vec![
+        config.target.sdcc_flag().to_string(),
+        "--std-c11".into(),
+        "-S".into(),
+    ];
+    match config.opt {
+        OptLevel::Os | OptLevel::Oz => flags.push("--opt-code-size".into()),
+        OptLevel::O2 | OptLevel::O3 => flags.push("--opt-code-speed".into()),
+        _ => {}
+    }
+    if let Some(n) = config.sdcc_allocs {
+        flags.push("--max-allocs-per-node".into());
+        flags.push(n.to_string());
+    }
+    flags.push(format!("-DSTDCBENCH_ITERATIONS={}", config.iterations));
+    flags
+}
+
 fn build_clang(
     clang: &Path,
     sources: &[PathBuf],
@@ -132,10 +176,8 @@ fn build_clang(
     for src in sources {
         let obj = tmp.join(format!("clang_{}.o", stem(src)));
         let mut cmd = Command::new(clang);
-        cmd.arg(format!("--target={}", config.target.triple()));
-        cmd.arg(format!("-{}", config.opt.clang_flag()));
-        cmd.args(["-c", "-nostdlib", "-ffreestanding", "-w", "-std=c99"]);
-        cmd.arg(format!("-DSTDCBENCH_ITERATIONS={}", config.iterations));
+        cmd.args(clang_flags(config));
+        cmd.arg("-w");
         cmd.arg("-I").arg(harness_dir);
         cmd.arg("-I").arg(src_dir);
         cmd.arg(src).arg("-o").arg(&obj);
@@ -212,12 +254,6 @@ fn build_sdcc(
         }
     };
 
-    let sdcc_opt = match config.opt {
-        OptLevel::Os | OptLevel::Oz => "--opt-code-size",
-        OptLevel::O2 | OptLevel::O3 => "--opt-code-speed",
-        _ => "",
-    };
-
     let mut rels = Vec::new();
     for src in sources {
         let stem = stem(src);
@@ -225,12 +261,7 @@ fn build_sdcc(
         let rel = tmp.join(format!("sdcc_{stem}.rel"));
 
         let mut cmd = Command::new("sdcc");
-        cmd.arg(config.target.sdcc_flag());
-        cmd.args(["--std-c11", "-S"]);
-        if !sdcc_opt.is_empty() {
-            cmd.arg(sdcc_opt);
-        }
-        cmd.arg(format!("-DSTDCBENCH_ITERATIONS={}", config.iterations));
+        cmd.args(sdcc_flags(config));
         cmd.arg("-I").arg(harness_dir);
         cmd.arg("-I").arg(src_dir);
         cmd.arg(src).arg("-o").arg(&asm);

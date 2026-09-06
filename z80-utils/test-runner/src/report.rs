@@ -65,10 +65,22 @@ macro_rules! say {
     ($($arg:tt)*) => { $crate::report::print_line(&format!($($arg)*)) };
 }
 
+/// Width of the last heading, so a later `rule` matches it without the caller
+/// having to carry the title around.
+static RULE_WIDTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// A suite's title line, followed by a rule the same width.
 pub fn heading(title: &str) {
+    let width = title.chars().count();
+    RULE_WIDTH.store(width, std::sync::atomic::Ordering::Relaxed);
     crate::say!("{}", title.style(display::heading()));
-    crate::say!("{}", "=".repeat(title.chars().count()));
+    rule();
+}
+
+/// The same rule again, to close a block that follows the heading.
+pub fn rule() {
+    let width = RULE_WIDTH.load(std::sync::atomic::Ordering::Relaxed);
+    crate::say!("{}", "=".repeat(width));
 }
 
 /// The `Target: z80` / `Build: ...` block some suites print before their

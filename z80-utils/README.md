@@ -182,7 +182,15 @@ Measures compiled code size across benchmarks.
 ```bash
 cargo run bench                           # Z80, Os
 cargo run bench -target sm83 -opt O2      # SM83, O2
+cargo run bench -sdcc-allocs 100000       # let SDCC's allocator try harder
 ```
+
+Both benchmarks print the flags each toolchain was given, so a result can be
+read without guessing how it was produced. `-sdcc-allocs` sets SDCC's
+`--max-allocs-per-node`: its default is low so that compiles stay quick, and
+raising it wins several percent on both size and speed at several times the
+build time. It is off by default, since that is the code an SDCC user actually
+gets.
 
 #### stdcbench — Clang vs SDCC on an Outside Benchmark
 
@@ -196,6 +204,7 @@ git submodule update --init vendor/stdcbench
 cargo run stdcbench                        # Z80, Os, one iteration
 cargo run stdcbench -target sm83 -opt O2
 cargo run stdcbench -iterations 4
+cargo run stdcbench -sdcc-allocs 100000    # see the bench section
 ```
 
 Only c90base is built: it calls nothing from the C library, while c90lib needs

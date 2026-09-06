@@ -17,6 +17,10 @@ const COMPILE_TIMEOUT: u64 = 30;
 pub struct BenchConfig {
     pub target: Target,
     pub opt: OptLevel,
+    /// `--max-allocs-per-node`, how hard SDCC tries at register allocation.
+    /// `None` leaves SDCC's own default, which is deliberately low so that
+    /// compiles stay quick; raising it buys real speed at real build time.
+    pub sdcc_allocs: Option<u32>,
     pub pattern: Option<String>,
 }
 
@@ -78,23 +82,18 @@ pub fn run(paths: &Paths, config: &BenchConfig) {
 
     // Print header
     let target_upper = config.target.triple().to_uppercase();
-    crate::say!("{target_upper} Compiler Benchmark: Clang vs SDCC");
-    crate::say!("======================================");
-    crate::say!("Target:   {}", config.target);
-    crate::say!("Build:    {}", paths.build_dir.display());
-    print!("SDCC:     ");
-    if let Ok(output) = Command::new("sdcc").arg("--version").output() {
-        let ver = String::from_utf8_lossy(&output.stdout);
-        let first = ver.lines().next().unwrap_or("unknown");
-        crate::say!("{}", first.strip_prefix("SDCC : ").unwrap_or(first));
-    } else {
-        crate::say!("not found");
-    }
-    crate::say!("Opt:      {}", config.opt);
+    report::heading(&format!("{target_upper} Compiler Benchmark: Clang vs SDCC"));
+    report::fields(&[
+        ("Build", paths.build_dir.display().to_string()),
+        ("clang", clang_flags(config.target, config.opt).join(" ")),
+        ("sdcc", sdcc_flags(config.target, config.opt, config.sdcc_allocs).join(" ")),
+    ]);
+    report::rule();
     crate::say!();
 
     // Run all benchmarks in parallel
     let total = bench_files.len();
+    let sdcc_allocs = config.sdcc_allocs;
     let results: Vec<BenchResult> = {
         let results = Arc::new(Mutex::new(Vec::new()));
         let progress = Arc::new(report::Line::new(total as u64, "benchmarks"));
@@ -110,11 +109,12 @@ pub fn run(paths: &Paths, config: &BenchConfig) {
                 let results = Arc::clone(&results);
                 let progress = Arc::clone(&progress);
                 let elf_rt = Arc::clone(&elf_rt);
+                let sdcc_allocs = sdcc_allocs;
 
                 thread::spawn(move || {
                     let r = run_single_bench(
                         &bench_file, &clang, &paths, target, opt, sdcc_lib.as_ref(),
-                        &elf_rt,
+                        &elf_rt, sdcc_allocs,
                     );
                     results.lock().unwrap().push(r);
                     progress.inc();
@@ -145,6 +145,7 @@ fn run_single_bench(
     opt: OptLevel,
     sdcc_lib: Option<&PathBuf>,
     elf_rt: &Arc<ElfRuntime>,
+    sdcc_allocs: Option<u32>,
 ) -> BenchResult {
     let name = bench_file
         .file_stem()
@@ -188,12 +189,13 @@ fn run_single_bench(
             Err(_) => None,
         };
         let sdcc_lib = sdcc_lib.cloned();
+        let allocs = sdcc_allocs;
         let bench_file = bench_file.to_path_buf();
 
         thread::spawn(move || {
             compile_and_measure_sdcc(
                 &bench_file, &tmp, &name, target, opt, &expected, crt0.as_ref()?,
-                sdcc_lib.as_ref(),
+                sdcc_lib.as_ref(), allocs,
             )
         })
     };
@@ -215,6 +217,33 @@ fn run_single_bench(
     BenchResult { name, opt, clang: clang_r, sdcc: sdcc_r, error }
 }
 
+/// The flags each toolchain is given, as one list used both to invoke it and
+/// to print it. Kept together so the header cannot claim options the run did
+/// not actually use.
+fn clang_flags(target: Target, opt: OptLevel) -> Vec<String> {
+    vec![
+        format!("--target={}", target.triple()),
+        format!("-{}", opt.clang_flag()),
+        "-c".into(),
+        "-nostdlib".into(),
+        "-ffreestanding".into(),
+    ]
+}
+
+fn sdcc_flags(target: Target, opt: OptLevel, allocs: Option<u32>) -> Vec<String> {
+    let mut flags = vec![target.sdcc_flag().to_string(), "--std-c11".into(), "-S".into()];
+    if let Some(n) = allocs {
+        flags.push("--max-allocs-per-node".into());
+        flags.push(n.to_string());
+    }
+    match opt {
+        OptLevel::Os | OptLevel::Oz => flags.push("--opt-code-size".into()),
+        OptLevel::O2 | OptLevel::O3 => flags.push("--opt-code-speed".into()),
+        _ => {}
+    }
+    flags
+}
+
 fn compile_and_measure_clang(
     clang: &Path,
     src: &Path,
@@ -234,11 +263,7 @@ fn compile_and_measure_clang(
     // linker script explicitly so _halt resolves and ___mulhi3 / etc.
     // are linked in (ravn/llvm-z80#106).
     let mut cmd = Command::new(clang);
-    cmd.arg(format!("--target={}", target.triple()));
-    cmd.arg(format!("-{}", opt.clang_flag()));
-    cmd.arg("-c");
-    cmd.arg("-nostdlib");
-    cmd.arg("-ffreestanding");
+    cmd.args(clang_flags(target, opt));
     cmd.arg(src);
     cmd.arg("-o");
     cmd.arg(&test_obj);
@@ -304,6 +329,7 @@ fn compile_and_measure_sdcc(
     expected: &str,
     crt0: &Path,
     sdcc_lib: Option<&PathBuf>,
+    allocs: Option<u32>,
 ) -> Option<CompilerResult> {
     let tag = format!("{name}_sdcc_{opt}");
     let asm_file = tmp_dir.join(format!("{tag}.asm"));
@@ -313,19 +339,10 @@ fn compile_and_measure_sdcc(
     let bin = tmp_dir.join(format!("{tag}.bin"));
 
     // SDCC optimization flags
-    let sdcc_opt = match opt {
-        OptLevel::Os | OptLevel::Oz => "--opt-code-size",
-        OptLevel::O2 | OptLevel::O3 => "--opt-code-speed",
-        _ => "",
-    };
 
     // Compile to asm
     let mut cmd = Command::new("sdcc");
-    cmd.arg(target.sdcc_flag());
-    cmd.args(["--std-c11", "-S"]);
-    if !sdcc_opt.is_empty() {
-        cmd.arg(sdcc_opt);
-    }
+    cmd.args(sdcc_flags(target, opt, allocs));
     cmd.arg(src);
     cmd.arg("-o");
     cmd.arg(&asm_file);
