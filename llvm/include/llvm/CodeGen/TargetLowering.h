@@ -1459,6 +1459,11 @@ public:
   bool isSuitableForBitTests(
       const DenseMap<const BasicBlock *, unsigned int> &DestCmps,
       const APInt &Low, const APInt &High, const DataLayout &DL) const {
+    // If target does not have legal shift left, do not emit bit tests at all.
+    EVT PTy = getPointerTy(DL);
+    if (!isOperationLegal(ISD::SHL, PTy))
+      return false;
+
     // FIXME: I don't think NumCmps is the correct metric: a single case and a
     // range of cases both require only one branch to lower. Just looking at the
     // number of clusters and destinations should be enough to decide whether to
@@ -3276,6 +3281,11 @@ public:
   /// Return true if sign-extension from FromTy to ToTy is cheaper than
   /// zero-extension.
   virtual bool isSExtCheaperThanZExt(EVT FromTy, EVT ToTy) const {
+    return false;
+  }
+
+  /// Return true if narrow types are generally cheaper than wide types.
+  virtual bool preferNarrowTypes() const {
     return false;
   }
 

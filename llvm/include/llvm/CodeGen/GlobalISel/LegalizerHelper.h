@@ -231,6 +231,9 @@ public:
   createMemLibcall(MachineRegisterInfo &MRI, MachineInstr &MI,
                    LostDebugLocObserver &LocObserver) const;
 
+  /// Return the libcall corresponding to a given opcode and size.
+  RTLIB::Libcall getRTLibDesc(unsigned Opcode, unsigned Size) const;
+
 private:
   LegalizeResult
   widenScalarMergeValues(MachineInstr &MI, unsigned TypeIdx, LLT WideTy);

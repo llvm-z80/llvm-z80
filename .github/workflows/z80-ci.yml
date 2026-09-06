@@ -1,0 +1,141 @@
+name: Z80 backend CI
+
+# Two-tier CI for the Z80 backend, contributed from ravn/llvm-z80:
+#   * build-and-lit   — builds clang/llc/lld and runs the Z80 lit suites.
+#   * runtime-tests   — builds the z88dk-ticks emulator + the runtime and runs
+#                       the test-runner clang suite as a value oracle.
+# The advanced gates from the originating fork (a generic-fix regression gate
+# and a production `-verify-machineinstrs` sweep) are intentionally NOT wired
+# here yet: they assume fixes that may not be present on this tree.  The
+# `verify-production.sh` helper ships in z80-utils/test-runner/scripts/ so it
+# can be enabled once those fixes land.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: z80-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-lit:
+    name: Build clang/llc + Z80 lit suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # Force JS actions onto Node 24 -- Node 20 is deprecated on GHA runners.
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Verify build tools (preinstalled on ubuntu-24.04 runner)
+        run: |
+          cmake --version | head -1
+          ninja --version
+          clang --version | head -1
+          python3 --version
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
+        with:
+          key: z80-ci-${{ runner.os }}
+          max-size: "2G"
+
+      - name: Configure
+        run: |
+          cmake -C clang/cmake/caches/Z80.cmake -G Ninja -S llvm -B build \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLLVM_OPTIMIZED_TABLEGEN=ON
+
+      - name: Build deps + run Z80 lit suite
+        run: |
+          # `check-llvm-codegen-z80` builds llc, FileCheck and the ~70 other
+          # binaries the lit harness expects, then runs the Z80 codegen suite.
+          ninja -C build check-llvm-codegen-z80
+
+      - name: Run MC/Z80 lit suite (if present)
+        run: |
+          if [ -d llvm/test/MC/Z80 ]; then
+            build/bin/llvm-lit -v llvm/test/MC/Z80/
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Build dir size:"; du -sh build || true
+          echo "ccache stats:"; ccache -s || true
+
+  runtime-tests:
+    name: test-runner clang suite (z88dk-ticks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      # z88dk supplies the z88dk-ticks Z80 emulator that the test-runner shells
+      # out to.  Only the emulator is needed; pinned to a known-good SHA so
+      # upstream drift can't redden this job independently.
+      - name: Checkout z88dk (z88dk-ticks emulator source)
+        uses: actions/checkout@v5
+        with:
+          repository: ravn/z88dk
+          ref: baae15ffc8bb7b56cf58f8ea2947e12478a818e0
+          path: z88dk
+          fetch-depth: 1
+          submodules: true   # ext/uthash is a submodule ticks.h needs
+
+      - name: Build z88dk-ticks
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flex bison
+          make -C z88dk/src/ticks -j"$(nproc)"
+          echo "$GITHUB_WORKSPACE/z88dk/src/ticks" >> "$GITHUB_PATH"
+
+      - name: Verify build tools
+        run: |
+          cmake --version | head -1
+          ninja --version
+          clang --version | head -1
+          cargo --version
+          command -v z88dk-ticks
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
+        with:
+          key: z80-ci-${{ runner.os }}   # shared with build-and-lit
+          max-size: "2G"
+
+      - name: Configure
+        run: |
+          cmake -C clang/cmake/caches/Z80.cmake -G Ninja -S llvm -B build \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLLVM_OPTIMIZED_TABLEGEN=ON
+
+      - name: Build clang + lld + LLVM binutils the test-runner shells out to
+        run: ninja -C build clang lld llvm-objcopy llvm-nm llvm-size
+
+      - name: Run test-runner clang suite (runtime/value oracle)
+        run: |
+          cd z80-utils/test-runner
+          BUILD_DIR=../../build cargo run --release -- clang
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "ccache stats:"; ccache -s || true

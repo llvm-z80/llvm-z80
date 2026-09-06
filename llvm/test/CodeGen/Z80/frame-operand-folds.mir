@@ -1,0 +1,106 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+
+--- |
+  define void @alu_from_slot() { ret void }
+  define void @across_a_gap() { ret void }
+  define void @slot_overwritten() { ret void }
+  define void @unknown_store() { ret void }
+  define void @zero_accumulator() { ret void }
+  define void @pair_copy_halves() { ret void }
+...
+---
+name:            alu_from_slot
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $ix
+    $c = LD_r_IXd -4
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $a
+
+# The Z80 can take an ALU operand straight from the slot, so the register
+# that only carried it there is one instruction and one byte wasted.
+
+# CHECK-LABEL: name: alu_from_slot
+# CHECK:      XOR_IXd -4
+# CHECK-NEXT: RET
+
+...
+---
+name:            across_a_gap
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $ix, $d
+    $c = LD_r_IXd -4
+    LD_IXd_r -9, $d
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $a
+
+# The use does not have to come next. A store to another slot is provably a
+# different byte, so the read can still move down to it.
+
+# CHECK-LABEL: name: across_a_gap
+# CHECK:      LD_IXd_r -9, killed $d
+# CHECK-NEXT: XOR_IXd -4
+
+...
+---
+name:            slot_overwritten
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $ix, $d
+    $c = LD_r_IXd -4
+    LD_IXd_r -4, $d
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $a
+
+# Same slot, so moving the read past the store would read the new value.
+
+# CHECK-LABEL: name: slot_overwritten
+# CHECK:      $c = LD_r_IXd -4
+# CHECK-NEXT: LD_IXd_r -4, $d
+# CHECK-NEXT: XOR_r killed $c
+
+...
+---
+name:            unknown_store
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $ix, $hl, $d
+    $c = LD_r_IXd -4
+    LD_HLind_r $d, implicit $hl
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $a
+
+# A store through a pointer could be pointing at this very local.
+
+# CHECK-LABEL: name: unknown_store
+# CHECK:      $c = LD_r_IXd -4
+# CHECK-NEXT: LD_HLind_r $d
+# CHECK-NEXT: XOR_r killed $c
+
+...
+---
+name:            zero_accumulator
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $e, $h
+    $l = LD_r_n 0
+    $a = LD_r_r killed $l
+    XOR_r $e, implicit-def $a, implicit-def $flags, implicit $a
+    $e = LD_r_r killed $a
+    RET implicit $e, implicit $h
+
+# A zero accumulator makes XOR a plain move, and written as one the copy in
+# and the copy back out cancel.
+
+# CHECK-LABEL: name: zero_accumulator
+# CHECK-NOT:  XOR_r $e
+# CHECK:      $a = LD_r_r killed $e
+# CHECK-NEXT: $e = LD_r_r killed $a
+
+...

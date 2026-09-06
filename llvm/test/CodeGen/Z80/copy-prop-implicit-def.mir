@@ -1,0 +1,39 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=machine-cp \
+# RUN:     -mcp-use-is-copy-instr %s -o - | FileCheck %s
+#
+# A byte move that also defines the pair it belongs to is not offered to copy
+# propagation: the destination named on it can be dead while the pair is not,
+# and erasing the move would take the pair's definition with it.
+
+--- |
+  define void @plain_copy() { ret void }
+  define void @pair_def_on_copy() { ret void }
+...
+---
+name:            plain_copy
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a
+
+    $b = LD_r_r $a
+    RET implicit $a
+...
+---
+name:            pair_def_on_copy
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a
+
+    $l = LD_r_r $a, implicit-def $h
+    RET implicit $h
+...
+---
+# CHECK-LABEL: name: plain_copy
+# CHECK-NOT:  LD_r_r
+# CHECK:      RET
+
+# CHECK-LABEL: name: pair_def_on_copy
+# CHECK:      $l = LD_r_r $a, implicit-def $h
+# CHECK-NEXT: RET

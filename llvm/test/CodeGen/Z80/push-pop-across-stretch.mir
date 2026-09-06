@@ -1,0 +1,49 @@
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# A pair saved across a stretch that never writes it is saved for nothing.
+# What the stack accesses in between were addressed with is the two bytes the
+# save took, so taking two off each displacement puts them back.
+
+--- |
+  define void @rebase() { ret void }
+  define void @hl_needs_the_pop() { ret void }
+...
+---
+name:            rebase
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $bc, $sp
+    PUSH_BC implicit $bc, implicit-def $sp, implicit $sp
+    LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
+    $a = LD_r_HLind implicit $hl
+    POP_BC implicit-def $bc, implicit-def $sp, implicit $sp
+    RET implicit $bc, implicit $a
+
+# CHECK-LABEL: name: rebase
+# CHECK-NOT:  PUSH_BC
+# CHECK:      LDHL_SP_e 4
+# CHECK-NEXT: $a = LD_r_HLind
+# CHECK-NEXT: RET
+
+...
+---
+name:            hl_needs_the_pop
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $hl, $sp
+    PUSH_HL implicit $hl, implicit-def $sp, implicit $sp
+    LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
+    $a = LD_r_HLind implicit $hl
+    POP_HL implicit-def $hl, implicit-def $sp, implicit $sp
+    RET implicit $hl, implicit $a
+
+# The stack access writes HL, so when HL is what was saved the pop is the
+# only thing putting it back.
+
+# CHECK-LABEL: name: hl_needs_the_pop
+# CHECK:      PUSH_HL
+# CHECK:      POP_HL
+
+...

@@ -1,0 +1,297 @@
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Z80,
+    SM83,
+}
+
+impl Target {
+    pub fn triple(&self) -> &'static str {
+        match self {
+            Target::Z80 => "z80",
+            Target::SM83 => "sm83",
+        }
+    }
+
+    pub fn sdcc_triple(&self) -> &'static str {
+        match self {
+            Target::Z80 => "z80-unknown-none-sdcc",
+            Target::SM83 => "sm83-nintendo-none-sdcc",
+        }
+    }
+
+    pub fn reg_name(&self) -> &'static str {
+        match self {
+            Target::Z80 => "DE",
+            Target::SM83 => "BC",
+        }
+    }
+
+    pub fn emu_flags(&self) -> &'static [&'static str] {
+        match self {
+            Target::Z80 => &[],
+            Target::SM83 => &["-mgbz80"],
+        }
+    }
+
+    /// Cycles a test may spend under emulation. Generous: the suites' own
+    /// tests are small, and a program that overruns this is looping, not slow.
+    pub fn emu_cycles(&self) -> u64 {
+        match self {
+            Target::Z80 | Target::SM83 => 10_000_000_000,
+        }
+    }
+
+    pub fn assembler(&self) -> &'static str {
+        match self {
+            Target::Z80 => "sdasz80",
+            Target::SM83 => "sdasgb",
+        }
+    }
+
+    pub fn linker(&self) -> &'static str {
+        match self {
+            Target::Z80 => "sdldz80",
+            Target::SM83 => "sdldgb",
+        }
+    }
+
+    pub fn sdcc_flag(&self) -> &'static str {
+        match self {
+            Target::Z80 => "-mz80",
+            Target::SM83 => "-msm83",
+        }
+    }
+}
+
+impl fmt::Display for Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.triple())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OptLevel {
+    O0,
+    O1,
+    O2,
+    O3,
+    Os,
+    Oz,
+}
+
+impl OptLevel {
+    pub fn flag(&self) -> &'static str {
+        match self {
+            OptLevel::O0 => "-O0",
+            OptLevel::O1 => "-O1",
+            OptLevel::O2 => "-O2",
+            OptLevel::O3 => "-O3",
+            OptLevel::Os => "-Os",
+            OptLevel::Oz => "-Oz",
+        }
+    }
+
+    pub fn clang_flag(&self) -> &'static str {
+        match self {
+            OptLevel::O0 => "O0",
+            OptLevel::O1 => "O1",
+            OptLevel::O2 => "O2",
+            OptLevel::O3 => "O3",
+            OptLevel::Os => "Os",
+            OptLevel::Oz => "Oz",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<OptLevel> {
+        match s {
+            "O0" => Some(OptLevel::O0),
+            "O1" => Some(OptLevel::O1),
+            "O2" => Some(OptLevel::O2),
+            "O3" => Some(OptLevel::O3),
+            "Os" => Some(OptLevel::Os),
+            "Oz" => Some(OptLevel::Oz),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for OptLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.clang_flag())
+    }
+}
+
+#[derive(Clone)]
+pub struct Paths {
+    pub project_dir: PathBuf,
+    pub build_dir: PathBuf,
+}
+
+impl Paths {
+    pub fn resolve() -> Paths {
+        // Project dir: directory containing Cargo.toml (or CWD)
+        let project_dir = find_project_dir().unwrap_or_else(|| {
+            std::env::current_dir().expect("cannot determine current directory")
+        });
+
+        let build_dir = std::env::var("BUILD_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| project_dir.join("../../build"));
+
+        let build_dir = build_dir.canonicalize().unwrap_or(build_dir);
+
+        Paths {
+            project_dir,
+            build_dir,
+        }
+    }
+
+    pub fn clang(&self) -> PathBuf {
+        self.build_dir.join("bin/clang")
+    }
+
+    pub fn llc(&self) -> PathBuf {
+        self.build_dir.join("bin/llc")
+    }
+
+    pub fn clang_test_dir(&self) -> PathBuf {
+        self.project_dir.join("testcases/clang")
+    }
+
+    pub fn sdcc_test_dir(&self) -> PathBuf {
+        self.project_dir.join("testcases/sdcc")
+    }
+
+
+    pub fn llc_test_dir(&self) -> PathBuf {
+        self.project_dir.join("testcases/llc")
+    }
+
+    pub fn rt_lib(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.build_dir.join(format!("lib/{t}/{t}_rt.lib"))
+    }
+
+    /// Source directory for ELF compiler-rt builtins (e.g. compiler-rt/lib/builtins/z80/).
+    pub fn elf_builtins_src(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.project_dir
+            .join("..")
+            .join("..")
+            .join("compiler-rt/lib/builtins")
+            .join(t)
+    }
+
+    /// Linker script bundled alongside the ELF builtins.
+    pub fn elf_linker_script(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.elf_builtins_src(target).join(format!("{t}.ld"))
+    }
+
+    /// Startup code owned by the test harness. Separate from the shipped crt0
+    /// because it records main's return value for the runner to read back.
+    pub fn harness_crt0(&self, target: Target) -> PathBuf {
+        self.project_dir.join("harness").join(target.triple()).join("crt0.asm")
+    }
+
+    /// Harness startup for the SDCC toolchain path.
+    pub fn harness_crt0_sdcc(&self, target: Target) -> PathBuf {
+        self.project_dir.join("harness").join(target.triple()).join("crt0_sdcc.asm")
+    }
+
+    /// Assets for the torture suite (shim, headers, manifest).
+    pub fn torture_dir(&self) -> PathBuf {
+        self.project_dir.join("torture")
+    }
+
+    /// The gcc-c-torture submodule checkout.
+    pub fn torture_src_dir(&self) -> PathBuf {
+        self.project_dir.join("../vendor/gcc-torture")
+    }
+
+    pub fn torture_manifest(&self) -> PathBuf {
+        self.torture_dir().join("manifest.txt")
+    }
+
+    pub fn torture_include(&self) -> PathBuf {
+        self.torture_dir().join("include")
+    }
+
+    pub fn torture_shim(&self, target: Target) -> PathBuf {
+        self.torture_dir().join("shim").join(target.triple()).join("shim.asm")
+    }
+
+    /// The stdcbench submodule checkout.
+    pub fn stdcbench_src_dir(&self) -> PathBuf {
+        self.project_dir.join("../vendor/stdcbench")
+    }
+
+    /// portme.c / portme.h, which the harness owns rather than the mirror.
+    pub fn stdcbench_harness_dir(&self) -> PathBuf {
+        self.project_dir.join("stdcbench")
+    }
+
+    /// Staging directory for assembled crt0.o + builtin .o files.
+    pub fn elf_runtime_stage(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.build_dir.join(format!("lib/{t}/elf-runtime"))
+    }
+}
+
+fn find_project_dir() -> Option<PathBuf> {
+    // Try exe path first (works for installed binary)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            // Workspace layout: exe is in <workspace>/target/debug/
+            // test-runner dir is <workspace>/test-runner/
+            if let Some(workspace) = dir.join("../..").canonicalize().ok() {
+                let test_runner = workspace.join("test-runner");
+                if test_runner.join("testcases").exists() {
+                    return Some(test_runner);
+                }
+                // Old layout: testcases directly under project root
+                if workspace.join("testcases").exists() {
+                    return Some(workspace);
+                }
+            }
+        }
+    }
+    // Fall back to CWD
+    let cwd = std::env::current_dir().ok()?;
+    // Workspace root: check test-runner subdir
+    if cwd.join("test-runner/testcases").exists() {
+        return Some(cwd.join("test-runner"));
+    }
+    if cwd.join("testcases").exists() {
+        return Some(cwd);
+    }
+    None
+}
+
+/// Discover SDCC runtime library path.
+pub fn find_sdcc_lib(target: Target) -> Option<PathBuf> {
+    let output = Command::new("sdcc")
+        .args([target.sdcc_flag(), "--print-search-dirs"])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut found_libdir = false;
+    for line in stdout.lines() {
+        if found_libdir {
+            let dir = Path::new(line.trim());
+            let lib = dir.join(format!("{}.lib", target.triple()));
+            if lib.exists() {
+                return Some(lib);
+            }
+            break;
+        }
+        if line.starts_with("libdir:") {
+            found_libdir = true;
+        }
+    }
+    None
+}

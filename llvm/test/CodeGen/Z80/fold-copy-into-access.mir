@@ -1,0 +1,75 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# A register that only carries a value between memory and somewhere it did
+# not need to stop costs a byte and occupies a register the allocator had no
+# reason to spend.
+
+--- |
+  define void @reload_then_copy() { ret void }
+  define void @const_then_store() { ret void }
+  define void @via_hl() { ret void }
+  define void @hl_is_the_address() { ret void }
+...
+---
+name:            reload_then_copy
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $ix
+    $c = LD_r_IXd -4
+    $a = LD_r_r killed $c
+    RET implicit $a
+
+# CHECK-LABEL: name: reload_then_copy
+# CHECK:      $a = LD_r_IXd -4
+# CHECK-NEXT: RET
+
+...
+---
+name:            const_then_store
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $ix
+    $c = LD_r_n 7
+    LD_IXd_r -4, killed $c
+    RET
+
+# CHECK-LABEL: name: const_then_store
+# CHECK:      LD_IXd_n -4, 7
+# CHECK-NEXT: RET
+
+...
+---
+name:            via_hl
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $hl
+    $c = LD_r_HLind implicit $hl
+    $a = LD_r_r killed $c
+    RET implicit $a
+
+# CHECK-LABEL: name: via_hl
+# CHECK:      $a = LD_r_HLind
+# CHECK-NEXT: RET
+
+...
+---
+name:            hl_is_the_address
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $hl
+    $c = LD_r_HLind implicit $hl
+    $l = LD_r_r killed $c
+    RET implicit $hl
+
+# Redirecting a load through HL into H or L would destroy the address
+# before anything else could use it.
+
+# CHECK-LABEL: name: hl_is_the_address
+# CHECK:      $c = LD_r_HLind
+# CHECK-NEXT: $l = LD_r_r killed $c
+
+...

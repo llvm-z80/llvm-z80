@@ -1561,7 +1561,16 @@ void MCAsmStreamer::emitFill(const MCExpr &NumBytes, uint64_t FillValue,
     return;
 
   if (const char *ZeroDirective = MAI->getZeroDirective()) {
-    if (!MAI->isAIX() || FillValue == 0) {
+    // The sdas .ds directive only moves the location counter along. In a
+    // section whose bytes are written out that leaves a hole where the zeros
+    // belong, so only a section that contributes no bytes can use it.
+    bool SDCCSectionHoldsBytes = false;
+    if (MAI->isSDCC()) {
+      MCSection *Sec = getCurrentSectionOnly();
+      SDCCSectionHoldsBytes = !Sec || !Sec->isBssSection();
+    }
+    if ((!MAI->isAIX() && !MAI->isSDCC()) ||
+        (FillValue == 0 && !SDCCSectionHoldsBytes)) {
       // FIXME: Emit location directives
       OS << ZeroDirective;
       MAI->printExpr(OS, NumBytes);

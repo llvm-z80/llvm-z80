@@ -2216,6 +2216,12 @@ void InitListChecker::CheckArrayType(const InitializedEntity &Entity,
     return;
   }
 
+  // Count at a width that cannot wrap: the index arrives at the width of
+  // size_t, and on targets where that is 16 bits a large initializer list
+  // would overflow it and silently truncate the deduced array size.
+  if (elementIndex.getBitWidth() < 64)
+    elementIndex = elementIndex.extend(64);
+
   // We might know the maximum number of elements in advance.
   llvm::APSInt maxElements(elementIndex.getBitWidth(),
                            elementIndex.isUnsigned());
@@ -2299,6 +2305,21 @@ void InitListChecker::CheckArrayType(const InitializedEntity &Entity,
       // Sizing an array implicitly to zero is not allowed by ISO C,
       // but is supported by GNU.
       SemaRef.Diag(IList->getBeginLoc(), diag::ext_typecheck_zero_array_size);
+    }
+
+    // An array completed from its initializer list must obey the same size
+    // limit as one with an explicit bound (an oversized one would overflow
+    // address arithmetic in CodeGen on small targets).
+    if (!elementType->isDependentType() && !elementType->isIncompleteType() &&
+        ConstantArrayType::getNumAddressingBits(SemaRef.Context, elementType,
+                                                maxElements) >
+            ConstantArrayType::getMaxSizeBits(SemaRef.Context)) {
+      SemaRef.Diag(IList->getBeginLoc(), diag::err_array_too_large)
+          << toString(maxElements, 10, maxElements.isSigned(),
+                      /*formatAsCLiteral=*/false, /*UpperCase=*/false,
+                      /*InsertSeparators=*/true);
+      hadError = true;
+      return;
     }
 
     DeclType = SemaRef.Context.getConstantArrayType(

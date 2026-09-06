@@ -1,0 +1,47 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# OR or XOR against a register holding zero leaves A exactly as it was, so
+# all such an instruction really does is set flags. Where those are dead too
+# it does nothing, and dropping it leaves the constant that fed it dead.
+
+--- |
+  define void @zero_operand() { ret void }
+  define void @flags_live() { ret void }
+...
+---
+name:            zero_operand
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a
+    $l = LD_r_n 0
+    OR_r $l, implicit-def $a, implicit-def $flags, implicit $a
+    LD_IXd_r -2, $a, implicit $ix
+    RET
+
+# CHECK-LABEL: name: zero_operand
+# CHECK-NOT:  LD_r_n
+# CHECK-NOT:  OR_r
+# CHECK:      LD_IXd_r -2, killed $a
+
+...
+---
+name:            flags_live
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a
+    $l = LD_r_n 0
+    OR_r $l, implicit-def $a, implicit-def $flags, implicit $a
+    JP_Z_nn %bb.1, implicit $flags
+  bb.1:
+    RET
+
+# The flags are the whole point here, so the instruction stays.
+
+# CHECK-LABEL: name: flags_live
+# CHECK:      $l = LD_r_n 0
+# CHECK-NEXT: OR_r $l
+# CHECK-NEXT: JP_Z_nn
+
+...

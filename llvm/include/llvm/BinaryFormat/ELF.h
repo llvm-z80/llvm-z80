@@ -325,6 +325,7 @@ enum {
   EM_VE = 251,            // NEC SX-Aurora VE
   EM_CSKY = 252,          // C-SKY 32-bit processor
   EM_LOONGARCH = 258,     // LoongArch
+  EM_Z80 = 8080,          // Zilog Z80 and variants
 };
 
 // Object file classes.
@@ -511,6 +512,24 @@ enum : unsigned {
 
   EF_AVR_LINKRELAX_PREPARED = 0x80, // The file is prepared for linker
                                     // relaxation to be applied
+};
+
+// ELF relocation types for Z80
+enum {
+#include "ELFRelocs/Z80.def"
+};
+
+// Special values for the st_other field for Z80.
+enum {
+  STO_Z80_STRONG_REF = 0x40  // Strongly referenced symbol
+};
+
+// Z80 ELF flags
+enum : unsigned {
+  EF_Z80_ARCH_Z80 = 0x00000001,     // Standard Z80 instruction set
+  EF_Z80_ARCH_Z180 = 0x00000002,    // Z180 extensions
+  EF_Z80_ARCH_EZ80 = 0x00000004,    // eZ80 24-bit extensions
+  EF_Z80_ARCH_R800 = 0x00000008,    // R800 (MSX TurboR) extensions
 };
 
 // ELF Relocation types for AVR

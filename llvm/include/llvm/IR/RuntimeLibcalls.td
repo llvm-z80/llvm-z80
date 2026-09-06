@@ -81,10 +81,12 @@ def ExceptionModelIsSjLj : RuntimeLibcallPredicate<
 //--------------------------------------------------------------------
 
 // Integer
-foreach IntTy = ["I16", "I32", "I64", "I128"] in {
+foreach IntTy = ["I8", "I16", "I32", "I64", "I128"] in {
   def SHL_#IntTy : RuntimeLibcall;
   def SRL_#IntTy : RuntimeLibcall;
   def SRA_#IntTy : RuntimeLibcall;
+  def ROTL_#IntTy : RuntimeLibcall;
+  def ROTR_#IntTy : RuntimeLibcall;
 }
 
 foreach IntTy = ["I8", "I16", "I32", "I64", "I128"] in {
@@ -108,9 +110,10 @@ foreach IntTy = ["I32", "I64" ] in {
   def NEG_#IntTy : RuntimeLibcall;
 }
 
-foreach IntTy = ["I32", "I64", "I128"] in {
+foreach IntTy = ["I8", "I16", "I32", "I64", "I128"] in {
   def CTLZ_#IntTy : RuntimeLibcall;
   def CTPOP_#IntTy : RuntimeLibcall;
+  def BSWAP_#IntTy : RuntimeLibcall;
 }
 
 foreach FPTy = ["F32", "F64", "F80", "F128", "PPCF128"] in {
@@ -3414,7 +3417,8 @@ def WasmSystemLibrary
 def isDefaultLibcallArch : RuntimeLibcallPredicate<[{
   TT.isMIPS() || TT.isLoongArch() || TT.isVE() || TT.isBPF() ||
   TT.getArch() == Triple::csky || TT.getArch() == Triple::arc ||
-  TT.getArch() == Triple::m68k ||  TT.getArch() == Triple::xtensa ||
+  TT.getArch() == Triple::m68k || TT.getArch() == Triple::xtensa ||
+  TT.getArch() == Triple::z80 || TT.getArch() == Triple::sm83 ||
   (TT.isSystemZ() && !TT.isOSzOS())
 }]>;
 

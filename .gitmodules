@@ -1,0 +1,6 @@
+[submodule "z80-utils/vendor/gcc-torture"]
+	path = z80-utils/vendor/gcc-torture
+	url = https://github.com/llvm-z80/gcc-c-torture
+[submodule "z80-utils/vendor/stdcbench"]
+	path = z80-utils/vendor/stdcbench
+	url = https://github.com/llvm-z80/stdcbench

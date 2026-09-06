@@ -3253,6 +3253,9 @@ bool SimplifyCFGOpt::speculativelyExecuteBB(CondBrInst *BI,
   }
   assert(EndBB == BI->getSuccessor(!Invert) && "No edge from to end block");
 
+  if (TTI.getPredictableBranchThreshold().isZero())
+    return false;
+
   if (!isProfitableToSpeculate(BI, Invert, TTI))
     return false;
 
@@ -3987,6 +3990,9 @@ shouldFoldCondBranchesToCommonDestination(CondBrInst *BI, CondBrInst *PBI,
   assert(BI && PBI && "Both blocks must end with a conditional branches.");
   assert(is_contained(predecessors(BI->getParent()), PBI->getParent()) &&
          "PredBB must be a predecessor of BB.");
+
+  if (TTI && TTI->getPredictableBranchThreshold().isZero())
+    return std::nullopt;
 
   // We have the potential to fold the conditions together, but if the
   // predecessor branch is predictable, we may not want to merge them.

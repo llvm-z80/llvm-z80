@@ -1,0 +1,43 @@
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=prolog-epilog %s -o - | FileCheck %s
+#
+# A pair the register allocator filled in one half only still spills whole, and
+# nothing in the operands says which half is empty. Splitting the spill into
+# byte stores must not claim that the empty half was read.
+
+--- |
+  define void @never_defined() { ret void }
+  define void @already_killed() { ret void }
+...
+---
+name:            never_defined
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a
+    renamable $c = COPY $a
+    SPILL_GR16 renamable $bc, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    RET
+...
+---
+# CHECK-LABEL: name: never_defined
+# CHECK:      LD_HLind_r $c, implicit $hl
+# CHECK:      LD_HLind_r undef $b, implicit $hl
+---
+name:            already_killed
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $bc
+    ADD_HL_rr killed renamable $bc, implicit-def $hl, implicit-def $flags, implicit undef $hl
+    renamable $c = COPY $a
+    SPILL_GR16 renamable $bc, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    RET
+...
+---
+# CHECK-LABEL: name: already_killed
+# CHECK:      LD_HLind_r $c, implicit $hl
+# CHECK:      LD_HLind_r undef $b, implicit $hl

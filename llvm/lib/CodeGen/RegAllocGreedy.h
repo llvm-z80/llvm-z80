@@ -365,7 +365,7 @@ private:
   MCRegister tryBlockSplit(const LiveInterval &, AllocationOrder &,
                            SmallVectorImpl<Register> &);
   MCRegister tryInstructionSplit(const LiveInterval &, AllocationOrder &,
-                                 SmallVectorImpl<Register> &);
+                                 SmallVectorImpl<Register> &, bool LightSpill);
   MCRegister tryLocalSplit(const LiveInterval &, AllocationOrder &,
                            SmallVectorImpl<Register> &);
   MCRegister trySplit(const LiveInterval &, AllocationOrder &,

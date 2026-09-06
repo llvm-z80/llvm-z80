@@ -1,0 +1,63 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# A pair reloaded because one of its bytes is needed leaves the other one
+# dead once the halves become separate instructions.
+
+--- |
+  define void @dead_half() { ret void }
+  define void @volatile_kept() { ret void }
+  define void @live_half_kept() { ret void }
+...
+---
+name:            dead_half
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $ix, $b
+    $e = LD_r_IXd -2 :: (load (s8) from %stack.0)
+    $d = LD_r_IXd -1 :: (load (s8) from %stack.0 + 1)
+    $e = LD_r_r $b
+    RET implicit $de
+...
+---
+# CHECK-LABEL: name: dead_half
+# CHECK-NOT:  $e = LD_r_IXd
+# CHECK:      $d = LD_r_IXd -1
+---
+name:            volatile_kept
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $ix, $b
+    $e = LD_r_IXd -2 :: (volatile load (s8) from %stack.0)
+    $d = LD_r_IXd -1 :: (volatile load (s8) from %stack.0 + 1)
+    $e = LD_r_r $b
+    RET implicit $de
+...
+---
+# The program asked for the read, so it happens whether or not anything looks
+# at what it produced.
+#
+# CHECK-LABEL: name: volatile_kept
+# CHECK:      $e = LD_r_IXd -2
+# CHECK-NEXT: $d = LD_r_IXd -1
+---
+name:            live_half_kept
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $ix
+    $e = LD_r_IXd -2 :: (load (s8) from %stack.0)
+    $d = LD_r_IXd -1 :: (load (s8) from %stack.0 + 1)
+    RET implicit $de
+...
+---
+# CHECK-LABEL: name: live_half_kept
+# CHECK:      $e = LD_r_IXd -2
+# CHECK-NEXT: $d = LD_r_IXd -1

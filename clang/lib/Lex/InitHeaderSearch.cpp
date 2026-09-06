@@ -254,6 +254,12 @@ bool InitHeaderSearch::ShouldAddDefaultIncludePaths(
   if (triple.getArch() == llvm::Triple::hexagon)
     return false;
 
+  // On Z80 and SM83, include paths are managed by the driver. Host headers
+  // must never be searched: glibc's stdint.h defines int32_t as int, which
+  // is 16 bits on these targets.
+  if (triple.isZ80Family())
+    return false;
+
   return true; // Everything else uses AddDefaultIncludePaths().
 }
 

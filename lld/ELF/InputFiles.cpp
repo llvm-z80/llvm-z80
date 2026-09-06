@@ -1785,6 +1785,9 @@ static uint16_t getBitcodeMachineKind(Ctx &ctx, StringRef path,
     return t.isOSIAMCU() ? EM_IAMCU : EM_386;
   case Triple::x86_64:
     return EM_X86_64;
+  case Triple::z80:
+  case Triple::sm83:
+    return EM_Z80;
   default:
     ErrAlways(ctx) << path
                    << ": could not infer e_machine from bitcode target triple "

@@ -1,0 +1,30 @@
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-late-opt %s -o - | FileCheck %s
+#
+# The half of a pair the register allocator never filled reaches the block as a
+# byte store that reads nothing, and routing that store through A must not
+# claim the byte holds a value after all.
+
+--- |
+  define void @fuse_undef_half() { ret void }
+...
+---
+name:            fuse_undef_half
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 3, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $c, $d, $sp
+    LDHL_SP_e 0, implicit-def $hl, implicit-def $flags, implicit $sp
+    LD_HLind_r killed $c, implicit $hl :: (store (s16) into %stack.0, align 1)
+    $hl = INC_rr $hl
+    LD_HLind_r undef $b, implicit $hl :: (store (s16) into %stack.0, align 1)
+    $hl = INC_rr $hl
+    LD_HLind_r killed $d, implicit killed $hl :: (store (s8) into %stack.0 + 2)
+    $e = LD_r_n 8
+    RET implicit $e
+...
+---
+# CHECK-LABEL: name: fuse_undef_half
+# CHECK:      $a = LD_r_r undef $b
+# CHECK-NEXT: LD_HLI_A
