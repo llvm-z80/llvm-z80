@@ -6896,6 +6896,121 @@ caller cleanup. ``sdcccall(1)`` (the default) uses register-based parameter
 passing per the SDCC ``__sdcccall(1)`` convention.}];
 }
 
+def Z80AllRegDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Heading = "clang::z80_allreg";
+  let Content = [{
+The ``z80_allreg`` attribute specifies the all-register calling convention
+for Z80 targets. All arguments are passed in registers (HL, DE, BC, IX, IY
+for i16; A for i8), with no stack arguments. Nothing is callee-saved.}];
+}
+
+def Z80FastCallDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Heading = "clang::z80_fastcall";
+  let Content = [{
+The ``z80_fastcall`` attribute specifies the z88dk ``__z88dk_fastcall``
+calling convention for Z80 targets. A single argument is passed in a fixed
+register selected by width: ``i8`` in ``L``, ``i16`` in ``HL``, ``i32`` in
+``DE:HL`` (DE holds the high word, HL the low word). The return value uses
+the same registers. z88dk fastcall is single-argument by construction.}];
+}
+
+def Z80CalleeDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Heading = "clang::z80_callee";
+  let Content = [{
+The ``z80_callee`` attribute specifies the z88dk ``__z88dk_callee`` calling
+convention for Z80 targets. Arguments are passed on the stack exactly like
+``__sdcccall(0)``, but the callee cleans them up on return instead of the
+caller. The return value uses the z88dk classic registers (i8 in L, i16 in HL,
+i32 in DE:HL), the same as ``__sdcccall(0)``. Callee cleanup is forced for
+every non-variadic call, independent of the return size.}];
+}
+
+def Z80SmallCDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Heading = "clang::z80_smallc";
+  let Content = [{
+The ``z80_smallc`` attribute specifies SDCC's ``__smallc`` (small-C) calling
+convention for Z80 targets. All arguments are passed on the stack and the caller
+cleans them up, exactly like ``__sdcccall(0)`` -- except the argument order is
+reversed. ``__smallc`` pushes arguments left-to-right, so the caller pushes the
+first declared argument first (deepest) and the last argument last (nearest the
+return address); the callee therefore finds the last argument at the lowest
+stack address. This is the opposite of ``__sdcccall(0)``, which pushes
+right-to-left (first argument nearest the return address). The two are identical
+for functions taking a single argument. The return value uses the z88dk classic
+registers (i8 in L, i16 in HL, i32 in DE:HL). This convention exists so clang
+can call the z88dk classic C library, whose functions are compiled ``__smallc``.
+}];
+}
+
+def Z80PreservesRegsDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "clang::z80_preserves_regs";
+  let Content = [{
+The ``z80_preserves_regs`` attribute declares that a Z80 function preserves
+the listed registers across the call.  This is the clang/LLVM-IR analog of
+SDCC's ``__preserves_regs(...)``: callers can keep values alive in the
+listed registers across the call without spilling, on the programmer's
+assertion that the callee body genuinely does not modify them.
+
+Recognised register names (case-insensitive):
+
+  * 8-bit halves: ``a``, ``b``, ``c``, ``d``, ``e``, ``h``, ``l``
+  * 16-bit pairs: ``af``, ``bc``, ``de``, ``hl``, ``ix``, ``iy``
+
+Preserving a pair (e.g. ``de``) implies preserving its halves (``d`` and
+``e``).  If both halves of a pair are individually listed, the pair is
+also preserved (matching SDCC's ``__preserves_regs(d, e)`` UX).
+
+Example:
+
+.. code-block:: c
+
+  /* xport_send_byte preserves D, E, H, L, B, C — the caller can keep
+   * SNIOS state-machine variables (counters, accumulators, pointers)
+   * alive in those registers across the call. */
+  extern void xport_send_byte(uint8_t b)
+      __attribute__((z80_preserves_regs("d", "e", "h", "l", "b", "c")));
+
+The attribute is a *programmer assertion* about the callee body — clang
+does not currently verify that the callee actually preserves the listed
+registers.  Stating an attribute that the callee body violates yields
+undefined behavior.
+
+This is a Z80-specific attribute and is rejected on other targets.}];
+}
+
+def Z80CriticalDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "clang::z80_critical";
+  let Content = [{
+The ``z80_critical`` attribute marks a Z80 function as a critical section:
+the backend emits ``DI`` (disable interrupts) at function entry and ``EI``
+(enable interrupts) immediately before the return, so the entire body runs
+with interrupts disabled.  This is the clang/LLVM analog of SDCC's
+``__critical`` function specifier.
+
+Example:
+
+.. code-block:: c
+
+  /* The body runs uninterrupted: DI on entry, EI before ret. */
+  __attribute__((z80_critical))
+  void atomic_update(void) {
+      shared_counter++;
+      shared_flag = 1;
+  }
+
+On a function that is also an interrupt handler (``__attribute__((interrupt))``)
+the entry ``DI`` is omitted -- Z80 hardware already disables interrupts on
+interrupt entry -- while the handler's own ``EI; RETI`` epilogue is unchanged.
+
+This is a Z80-specific attribute and is rejected on other targets.}];
+}
+
 def PreferredNameDocs : Documentation {
   let Category = DocCatDecl;
   let Content = [{

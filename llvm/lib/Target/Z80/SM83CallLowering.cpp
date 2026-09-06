@@ -50,4 +50,24 @@ SM83CallLowering::SM83CallLowering(const TargetLowering *TL)
                                 /*Ret_I32_Lo=*/Z80::DE,
                                 /*IndirectCallReg=*/Z80::HL,
                                 /*IndirectCallOpc=*/Z80::CALL_HL,
+                            },
+                            // z88dk-fastcall registers (SM83).  UNVERIFIED: not
+                            // a shipping path — SM83 (Game Boy) is not the RC700
+                            // target.  Mirrors the SM83 sdcccall(0) registers so
+                            // the config is internally consistent.  First_I8 = E.
+                            CallingConvRegs{
+                                /*First_I16=*/Z80::DE,
+                                /*First_I32_Hi=*/Z80::HL,
+                                /*First_I32_Lo=*/Z80::DE,
+                                /*Second_AfterI8_I8=*/Register(),
+                                /*Second_AfterI8_I16=*/Register(),
+                                /*Second_AfterI16_I8=*/Register(),
+                                /*Second_AfterI16_I16=*/Register(),
+                                /*Ret_I8=*/Z80::E,
+                                /*Ret_I16=*/Z80::DE,
+                                /*Ret_I32_Hi=*/Z80::HL,
+                                /*Ret_I32_Lo=*/Z80::DE,
+                                /*IndirectCallReg=*/Z80::HL,
+                                /*IndirectCallOpc=*/Z80::CALL_HL,
+                                /*First_I8=*/Z80::E,
                             }) {}

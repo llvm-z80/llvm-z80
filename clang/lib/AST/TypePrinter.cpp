@@ -1222,6 +1222,21 @@ void TypePrinter::printFunctionAfter(const FunctionType::ExtInfo &Info,
     case CC_Z80SDCCCall0:
       OS << " __attribute__((sdcccall(0)))";
       break;
+    case CC_Z80AllReg:
+      OS << " __attribute__((z80_allreg))";
+      break;
+    case CC_Z80FastCall:
+      OS << " __attribute__((z80_fastcall))";
+      break;
+    case CC_Z80Callee:
+      OS << " __attribute__((z80_callee))";
+      break;
+    case CC_Z80SmallC:
+      OS << " __attribute__((z80_smallc))";
+      break;
+    case CC_Z80SmallCCallee:
+      OS << " __attribute__((z80_smallc)) __attribute__((z80_callee))";
+      break;
     }
   }
 

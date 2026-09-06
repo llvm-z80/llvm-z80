@@ -3404,6 +3404,11 @@ void MicrosoftCXXNameMangler::mangleCallingConvention(CallingConv CC,
         Out << "w";
       return;
     case CC_Z80SDCCCall0:
+    case CC_Z80AllReg:
+    case CC_Z80FastCall:
+    case CC_Z80Callee:
+    case CC_Z80SmallC:
+    case CC_Z80SmallCCallee:
       Out << 'A'; // Z80 doesn't use MSVC mangling; use default
       return;
   }

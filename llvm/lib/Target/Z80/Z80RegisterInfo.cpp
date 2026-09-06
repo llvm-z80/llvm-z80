@@ -91,15 +91,19 @@ Z80RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   }
   if (STI.hasSM83())
     return SM83_CSR_SaveList;
+  if (MF->getFunction().getCallingConv() == CallingConv::Z80_AllReg)
+    return Z80_AllReg_CSR_SaveList;
   return Z80_CSR_SaveList;
 }
 
 const uint32_t *
 Z80RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
-                                      CallingConv::ID CallingConv) const {
+                                      CallingConv::ID CC) const {
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
   if (STI.hasSM83())
     return SM83_CSR_RegMask;
+  if (CC == CallingConv::Z80_AllReg)
+    return Z80_AllReg_CSR_RegMask;
   return Z80_CSR_RegMask;
 }
 

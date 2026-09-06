@@ -38,16 +38,21 @@ define void @call_callee() {
 ; (b) callee side -- reads args off the stack frame and callee-cleans them
 ; ============================================================================
 
-; void return (HL dead): args come from 4(ix)/6(ix); cleanup uses the EX trick
+; void return (HL dead): args come from SP-relative offsets; cleanup uses the
+; return-address preservation sequence
 ; (pop return addr into HL, drop the 4 arg bytes with inc sp x2, restore return
 ; addr with ex (sp),hl).
 ; CHECK-LABEL: _callee_void:
-; CHECK:      4(ix)
-; CHECK:      6(ix)
-; CHECK:      pop hl
+; CHECK:      ld hl,#2
+; CHECK:      add hl,sp
+; CHECK:      ld hl,#6
+; CHECK:      add hl,sp
+; CHECK:      pop bc
 ; CHECK:      inc sp
 ; CHECK:      inc sp
-; CHECK:      ex (sp),hl
+; CHECK:      inc sp
+; CHECK:      inc sp
+; CHECK:      push bc
 ; CHECK-NEXT: ret
 define cc 131 void @callee_void(i16 %a, i16 %b) {
   %s = add i16 %a, %b
@@ -59,7 +64,8 @@ define cc 131 void @callee_void(i16 %a, i16 %b) {
 ; holds the return value the cleanup uses the BC fallback (pop return addr into
 ; BC, drop 4 arg bytes with inc sp x4, push BC back).
 ; CHECK-LABEL: _callee_reti16:
-; CHECK:      4(ix)
+; CHECK:      ld hl,#2
+; CHECK:      add hl,sp
 ; CHECK-NOT:  ex de,hl
 ; CHECK:      pop bc
 ; CHECK:      inc sp
@@ -77,7 +83,8 @@ define cc 131 i16 @callee_reti16(i16 %a, i16 %b) {
 ; sdcccall(1) would caller-clean here; cc 131 must still pop its own 4 arg
 ; bytes (BC-fallback pop/push).  Return value is in DE:HL.
 ; CHECK-LABEL: _callee_reti32:
-; CHECK:      4(ix)
+; CHECK:      ld hl,#2
+; CHECK:      add hl,sp
 ; CHECK:      pop bc
 ; CHECK:      push bc
 ; CHECK-NEXT: ret

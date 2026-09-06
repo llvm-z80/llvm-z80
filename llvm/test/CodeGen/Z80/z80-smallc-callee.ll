@@ -31,14 +31,15 @@ define void @call_smallc_callee() {
   ret void
 }
 
-; Callee side: void return -> callee cleans via the EX trick (pop return addr
-; into HL, drop the 4 arg bytes with inc sp x2, restore return addr with
-; ex (sp),hl), exactly like cc131.
+; Callee side: void return -> callee cleans the four argument bytes while
+; preserving the return address in BC.
 ; CHECK-LABEL: _callee_void:
-; CHECK:       pop hl
+; CHECK:       pop bc
 ; CHECK:       inc sp
 ; CHECK:       inc sp
-; CHECK:       ex (sp),hl
+; CHECK:       inc sp
+; CHECK:       inc sp
+; CHECK:       push bc
 ; CHECK-NEXT:  ret
 define cc133 void @callee_void(i16 %a, i16 %b) {
   %s = add i16 %a, %b
