@@ -98,14 +98,51 @@ uint64_t Z80FrameLowering::staticFrameSize(const MachineFrameInfo &MFI) const {
   return Size;
 }
 
+// Count the frame accesses that pay an extra byte when their slot moves to a
+// static address: those that materialize the whole slot address in HL, which
+// on SM83 is `ld hl,nn` (three bytes) against the stack's `ldhl sp,e` (two).
+// A wide slot always takes that path; an eight-bit slot reached through the
+// accumulator's direct load/store does not, so only wide slots are counted.
+static unsigned countWideFrameAccesses(const MachineFunction &MF) {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  unsigned N = 0;
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB)
+      for (const MachineOperand &MO : MI.operands()) {
+        if (!MO.isFI())
+          continue;
+        int Idx = MO.getIndex();
+        if (Idx >= 0 && !MFI.isFixedObjectIndex(Idx) &&
+            MFI.getObjectSize(Idx) > 1)
+          ++N;
+      }
+  return N;
+}
+
 void Z80FrameLowering::processFunctionBeforeFrameFinalized(
     MachineFunction &MF, RegScavenger *RS) const {
-  // Move every local of a provably non-reentrant function out of the stack:
-  // the objects get function-local offsets here, and the module-wide layout
-  // pass later turns them into absolute addresses. Fixed objects (incoming
-  // stack arguments) stay where the caller pushed them.
+  // Move the locals of a provably non-reentrant function out of the stack: the
+  // objects get function-local offsets here, and the module-wide layout pass
+  // later turns them into absolute addresses. Fixed objects (incoming stack
+  // arguments) stay where the caller pushed them.
   if (usesStaticFrame(MF)) {
     MachineFrameInfo &StaticMFI = MF.getFrameInfo();
+
+    // On SM83 an eight-bit slot is a free win in static memory (byte-neutral,
+    // a cycle cheaper), but a wide slot costs an extra byte per access. Moving
+    // the wide slots out too is what removes the stack pointer adjustment, so
+    // it pays off only while those extra bytes stay under the four bytes that
+    // adjustment costs. A speed build always takes the trade for the cycles;
+    // a size build keeps the wide slots on the stack once they no longer pay,
+    // leaving a mixed frame whose eight-bit slots are still static. Z80 has a
+    // direct absolute form for every class, so all of its slots go static.
+    bool KeepWideOnStack = false;
+    if (MF.getSubtarget<Z80Subtarget>().hasSM83() &&
+        MF.getFunction().hasOptSize()) {
+      const unsigned PrologueBytes = 4;
+      KeepWideOnStack = countWideFrameAccesses(MF) > PrologueBytes;
+    }
+
     // Callee-saved registers are saved by pushes; their slots have to stay
     // where the pushes put them.
     SmallSet<int, 8> CSRSlots;
@@ -118,6 +155,8 @@ void Z80FrameLowering::processFunctionBeforeFrameFinalized(
           StaticMFI.isVariableSizedObjectIndex(I) ||
           StaticMFI.getStackID(I) != TargetStackID::Default ||
           CSRSlots.count(I))
+        continue;
+      if (KeepWideOnStack && StaticMFI.getObjectSize(I) > 1)
         continue;
       StaticMFI.setStackID(I, TargetStackID::NoAlloc);
       StaticMFI.setObjectOffset(I, Offset);
