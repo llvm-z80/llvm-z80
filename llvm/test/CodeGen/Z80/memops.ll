@@ -4,18 +4,18 @@ declare void @llvm.memcpy.p0.p0.i16(ptr nocapture writeonly, ptr nocapture reado
 declare void @llvm.memmove.p0.p0.i16(ptr nocapture, ptr nocapture readonly, i16, i1 immarg)
 declare void @llvm.memset.p0.i16(ptr nocapture writeonly, i8, i16, i1 immarg)
 
-; Test: memcpy lowers to runtime call with correct args
+; Test: memcpy lowers to inline LDIR with the runtime argument registers.
 define void @test_memcpy(ptr %dst, ptr %src, i16 %n) {
 ; CHECK-LABEL: _test_memcpy:
-; CHECK:       call _memcpy
+; CHECK:       ldir
   call void @llvm.memcpy.p0.p0.i16(ptr %dst, ptr %src, i16 %n, i1 false)
   ret void
 }
 
-; Test: memmove lowers to runtime call with correct args
+; Test: unknown-direction memmove uses the all-register helper.
 define void @test_memmove(ptr %dst, ptr %src, i16 %n) {
 ; CHECK-LABEL: _test_memmove:
-; CHECK:       call _memmove
+; CHECK:       call ___memmove_rt
   call void @llvm.memmove.p0.p0.i16(ptr %dst, ptr %src, i16 %n, i1 false)
   ret void
 }
