@@ -31,6 +31,13 @@ _bss_loop:
 	jr	nz,_bss_loop
 _bss_done:
 
+	;; main() has the hosted signature and the tests read argc: several put it
+	;; in an array or add to it, so leaving whatever the .bss loop left in the
+	;; argument register makes their result depend on where .bss ends. The
+	;; suite runs each test once with no arguments, which is argc = 1.
+	ld	de,#1		; argc
+	ld	bc,#0		; argv
+
 	call	_main
 	;; main returns i16 in BC; SM83 has no `ld (nn),rr` for BC.
 	ld	hl,#_exitcode

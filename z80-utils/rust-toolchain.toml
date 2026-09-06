@@ -1,0 +1,6 @@
+# Pins the toolchain for this workspace only; it has no bearing on the LLVM
+# build, which is C++. Without it `cargo build` picks up whatever rustup
+# default is set globally, which on a machine set up for LLVM work is often an
+# old nightly, and dependencies that need a current compiler fail to build.
+[toolchain]
+channel = "stable"

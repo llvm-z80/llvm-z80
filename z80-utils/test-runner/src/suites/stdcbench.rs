@@ -16,16 +16,19 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::bench::{elf_text_size, ihx_code_size, winner, Winner};
+use crate::bench::{elf_text_size, ihx_code_size};
 use crate::config::{self, OptLevel, Paths, Target};
 use crate::runtime::{self, ElfRuntime};
+use owo_colors::OwoColorize;
+
+use crate::report::{self, Align, Table};
 use crate::{display, emulator, suite};
 
 const COMPILE_TIMEOUT: u64 = 60;
 const LINK_TIMEOUT: u64 = 60;
-/// One iteration of c90base costs on the order of 1e8 cycles, so the emulator
-/// needs noticeably longer than the per-test budget the other suites use.
-const EMU_TIMEOUT: u64 = 120;
+/// One iteration of c90base costs on the order of 1e8 cycles; several
+/// iterations still sit far inside this.
+const EMU_CYCLES: u64 = 40_000_000_000;
 
 pub struct StdcbenchConfig {
     pub target: Target,
@@ -75,14 +78,13 @@ pub fn run(paths: &Paths, config: &StdcbenchConfig) -> bool {
         }
     };
 
-    println!(
+    report::heading(&format!(
         "{} stdcbench c90base  {}, {} iteration{}",
         config.target.triple().to_uppercase(),
         config.opt,
         config.iterations,
         if config.iterations == 1 { "" } else { "s" }
-    );
-    println!("=========================================");
+    ));
 
     let work_root = std::env::temp_dir().join("z80-stdcbench");
     suite::cleanup_old_tmp_dirs(&work_root);
@@ -305,7 +307,7 @@ fn measure(
     tmp: &Path,
 ) -> Option<Measurement> {
     let dump = tmp.join(format!("{who}.ram"));
-    match emulator::run_program(bin, target, halt, berror_addr, &dump, EMU_TIMEOUT) {
+    match emulator::run_program(bin, target, halt, berror_addr, &dump, EMU_CYCLES) {
         Ok(run) => {
             // run_program reads a 16-bit word; berror is the low byte of it.
             let failed_check = !run.value.ends_with("00");
@@ -319,19 +321,9 @@ fn measure(
 }
 
 fn report(clang: Option<&Measurement>, sdcc: Option<&Measurement>) -> bool {
-    let tty = display::is_tty();
-    let bold = if tty { "\x1b[1m" } else { "" };
-    let green = if tty { "\x1b[32m" } else { "" };
-    let red = if tty { "\x1b[31m" } else { "" };
-    let reset = if tty { "\x1b[0m" } else { "" };
-
-    println!(
-        "  {bold}{:<10}{:>12}{:>16}  {}{reset}",
-        "Compiler", "Size (B)", "Cycles", "Checks"
-    );
-    println!(
-        "  {:<10}{:>12}{:>16}  {}",
-        "-".repeat(9), "-".repeat(11), "-".repeat(15), "-".repeat(6)
+    let mut table = Table::new(
+        &["Compiler", "Size (B)", "Cycles", "Checks"],
+        &[Align::Left, Align::Right, Align::Right, Align::Left],
     );
 
     let mut ok = true;
@@ -340,64 +332,68 @@ fn report(clang: Option<&Measurement>, sdcc: Option<&Measurement>) -> bool {
             Some(m) => {
                 let checks = if m.failed_check {
                     ok = false;
-                    format!("{red}FAILED{reset}")
+                    format!("{}", "FAILED".style(display::bad()))
                 } else {
-                    format!("{green}ok{reset}")
+                    format!("{}", "ok".style(display::ok()))
                 };
-                println!(
-                    "  {:<10}{:>12}{:>16}  {}",
-                    name,
-                    m.size,
-                    thousands(m.cycles),
-                    checks
-                );
+                table.row([
+                    name.to_string(),
+                    m.size.to_string(),
+                    report::thousands(m.cycles),
+                    checks,
+                ]);
             }
             None => {
                 ok = false;
-                println!("  {:<10}{red}did not build{reset}", name);
+                table.row([
+                    name.to_string(),
+                    format!("{}", "did not build".style(display::bad())),
+                    String::new(),
+                    String::new(),
+                ]);
             }
         }
     }
+    table.print();
 
-    if let (Some(c), Some(s)) = (clang, sdcc) {
-        println!();
-        println!("  {}", compare("Size", c.size as u64, s.size as u64, tty));
-        println!("  {}", compare("Speed", c.cycles, s.cycles, tty));
+    let built: Vec<(&str, &Measurement)> = [("clang", clang), ("sdcc", sdcc)]
+        .into_iter()
+        .filter_map(|(name, m)| m.map(|m| (name, m)))
+        .collect();
+    if built.len() >= 2 {
+        crate::say!();
+        let sizes: Vec<(&str, u64)> = built.iter().map(|(n, m)| (*n, m.size as u64)).collect();
+        let cycles: Vec<(&str, u64)> = built.iter().map(|(n, m)| (*n, m.cycles)).collect();
+        crate::say!("  {}", compare("Size", &sizes));
+        crate::say!("  {}", compare("Speed", &cycles));
     }
 
-    println!();
-    if ok {
-        println!("{green}stdcbench OK{reset}");
-    } else {
-        println!("{red}stdcbench FAILED{reset}");
-    }
+    crate::say!();
+    report::outcome(ok, "stdcbench OK", "stdcbench FAILED");
     ok
 }
 
-/// "Clang is 3.2% smaller" and the like, from whichever side won.
-fn compare(what: &str, clang: u64, sdcc: u64, tty: bool) -> String {
-    let bold = if tty { "\x1b[1m" } else { "" };
-    let reset = if tty { "\x1b[0m" } else { "" };
-    let (leader, lo, hi) = match winner(clang, sdcc) {
-        Winner::A => ("Clang", clang, sdcc),
-        Winner::B => ("SDCC", sdcc, clang),
-        Winner::Tie => return format!("{what}: tie"),
-    };
-    let pct = (hi - lo) as f64 / hi as f64 * 100.0;
-    let adjective = if what == "Size" { "smaller" } else { "faster" };
-    format!("{what}: {bold}{leader}{reset} by {pct:.1}% ({adjective})")
-}
+/// Who won and by how much over the next best, across however many
+/// toolchains built. Lower is better for both size and cycles, so one
+/// comparison serves both.
+fn compare(what: &str, entries: &[(&str, u64)]) -> String {
+    let mut ranked: Vec<&(&str, u64)> = entries.iter().collect();
+    ranked.sort_by_key(|(_, v)| *v);
 
-fn thousands(n: u64) -> String {
-    let s = n.to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(c);
+    let [best, next, ..] = ranked.as_slice() else {
+        return format!("{what}: nothing to compare");
+    };
+    if best.1 == next.1 {
+        return format!("{what}: tie");
     }
-    out
+
+    let pct = (next.1 - best.1) as f64 / next.1 as f64 * 100.0;
+    let adjective = if what == "Size" { "smaller" } else { "faster" };
+    format!(
+        "{what}: {} by {pct:.1}% over {} ({adjective})",
+        best.0.style(display::compiler(best.0).bold()),
+        next.0.style(display::compiler(next.0))
+    )
 }
 
 fn stem(p: &Path) -> String {

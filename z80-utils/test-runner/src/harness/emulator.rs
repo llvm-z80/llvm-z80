@@ -86,17 +86,15 @@ pub fn elf_to_bin(objcopy: &Path, elf: &Path, bin: &Path) -> Result<(), String> 
 /// spinning program would otherwise look like a clean run whose `_exitcode` is
 /// still the zero the .bss loop left there, and report as a pass.
 ///
-/// The budget is derived from the caller's wall-clock timeout rather than being
-/// a constant of its own: a fixed cycle cap silently overrides `-emu-timeout`,
-/// so raising the timeout to let a slow test finish has no effect. Measured
-/// throughput is around 435M cycles/s, so deriving at 400M leaves the cycle
-/// cap slightly inside the wall clock: exhaustion then reports deterministically
-/// as a cycle limit instead of racing the timeout for which one fires.
-const CYCLES_PER_SEC: u64 = 400_000_000;
-
-fn cycle_limit(timeout_secs: u64) -> u64 {
-    timeout_secs.saturating_mul(CYCLES_PER_SEC)
-}
+/// The budget a caller passes is in cycles, not seconds. Cycles are a property
+/// of the program: the same test burns the same number on an idle machine and
+/// on a loaded one. Wall-clock seconds are not, and deriving one from the other
+/// made a busy machine fail tests that were doing nothing wrong.
+///
+/// A wall-clock kill still exists, but only as a backstop for an emulator that
+/// has wedged rather than one that is merely slow, so it is set far above any
+/// budget a test should need.
+const WALL_LIMIT: Duration = Duration::from_secs(900);
 
 /// What a program left behind when it stopped.
 pub struct RunResult {
@@ -122,14 +120,18 @@ pub fn run_program(
     halt_addr: &str,
     result_addr: u32,
     dump: &Path,
-    timeout_secs: u64,
+    // How many emulated cycles this program may spend.
+    cycles: u64,
 ) -> Result<RunResult, String> {
+    // Emulation is the other expensive step; see `harness::pool`.
+    let _permit = crate::harness::pool::acquire();
+
     let mut cmd = Command::new("z88dk-ticks");
     for flag in target.emu_flags() {
         cmd.arg(flag);
     }
     cmd.args(["-end", halt_addr]);
-    cmd.args(["-counter", &cycle_limit(timeout_secs).to_string()]);
+    cmd.args(["-counter", &cycles.to_string()]);
     cmd.arg("-output").arg(dump);
     cmd.arg(bin);
     cmd.stdout(Stdio::piped());
@@ -144,7 +146,7 @@ pub fn run_program(
     });
 
     let start = std::time::Instant::now();
-    let timeout = Duration::from_secs(timeout_secs);
+    let timeout = WALL_LIMIT;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
@@ -152,20 +154,20 @@ pub fn run_program(
                 if start.elapsed() > timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("emulator timeout/{timeout_secs}s"));
+                    return Err(format!("emulator wedged: no exit after {}s", WALL_LIMIT.as_secs()));
                 }
                 std::thread::sleep(Duration::from_millis(2));
             }
             Err(e) => return Err(format!("wait: {e}")),
         }
     }
-    let cycles = reader
+    let spent = reader
         .join()
         .ok()
         .and_then(|out| out.lines().last().and_then(|l| l.trim().parse::<u64>().ok()))
         .unwrap_or(0);
-    if cycles >= cycle_limit(timeout_secs) {
-        return Err("never reached _halt (cycle limit)".to_string());
+    if spent >= cycles {
+        return Err(format!("exhausted its {cycles} cycle budget without reaching _halt"));
     }
 
     let data = std::fs::read(dump).map_err(|e| format!("RAM dump: {e}"))?;
@@ -175,7 +177,7 @@ pub fn run_program(
     }
     // Little endian.
     let value = format!("{:04X}", u16::from(data[at]) | u16::from(data[at + 1]) << 8);
-    Ok(RunResult { value, cycles })
+    Ok(RunResult { value, cycles: spent })
 }
 
 
@@ -190,14 +192,18 @@ pub fn run_to_halt(
     bin: &Path,
     target: Target,
     halt_addr: &str,
-    timeout_secs: u64,
+    // How many emulated cycles this program may spend.
+    cycles: u64,
 ) -> Result<(), String> {
+    // Emulation is the other expensive step; see `harness::pool`.
+    let _permit = crate::harness::pool::acquire();
+
     let mut cmd = Command::new("z88dk-ticks");
     for flag in target.emu_flags() {
         cmd.arg(flag);
     }
     cmd.args(["-end", halt_addr]);
-    cmd.args(["-counter", &cycle_limit(timeout_secs).to_string()]);
+    cmd.args(["-counter", &cycles.to_string()]);
     cmd.arg(bin);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::null());
@@ -210,19 +216,19 @@ pub fn run_to_halt(
         buf
     });
     let start = std::time::Instant::now();
-    let timeout = Duration::from_secs(timeout_secs);
+    let timeout = WALL_LIMIT;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => {
                 // Exiting on the cycle counter is not the same as stopping at
                 // the halt address; the emulator reports success either way.
-                let cycles = reader
+                let spent = reader
                     .join()
                     .ok()
                     .and_then(|o| o.lines().last().and_then(|l| l.trim().parse::<u64>().ok()))
                     .unwrap_or(0);
-                return if cycles >= cycle_limit(timeout_secs) {
-                    Err("never reached _halt (cycle limit)".to_string())
+                return if spent >= cycles {
+                    Err(format!("exhausted its {cycles} cycle budget without reaching _halt"))
                 } else {
                     Ok(())
                 };
@@ -231,7 +237,7 @@ pub fn run_to_halt(
                 if start.elapsed() > timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("never reached _halt within {timeout_secs}s"));
+                    return Err(format!("emulator wedged: no exit after {}s", WALL_LIMIT.as_secs()));
                 }
                 std::thread::sleep(Duration::from_millis(2));
             }

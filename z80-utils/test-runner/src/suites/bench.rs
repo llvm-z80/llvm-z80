@@ -1,12 +1,14 @@
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::config::{self, OptLevel, Paths, Target};
+use crate::display;
 use crate::emulator;
+use owo_colors::OwoColorize;
+
+use crate::report::{self, Align, Table};
 use crate::runtime::{self, ElfRuntime};
 use crate::suite;
 
@@ -76,33 +78,26 @@ pub fn run(paths: &Paths, config: &BenchConfig) {
 
     // Print header
     let target_upper = config.target.triple().to_uppercase();
-    println!("{target_upper} Compiler Benchmark: Clang vs SDCC");
-    println!("======================================");
-    println!("Target:   {}", config.target);
-    println!("Build:    {}", paths.build_dir.display());
+    crate::say!("{target_upper} Compiler Benchmark: Clang vs SDCC");
+    crate::say!("======================================");
+    crate::say!("Target:   {}", config.target);
+    crate::say!("Build:    {}", paths.build_dir.display());
     print!("SDCC:     ");
     if let Ok(output) = Command::new("sdcc").arg("--version").output() {
         let ver = String::from_utf8_lossy(&output.stdout);
         let first = ver.lines().next().unwrap_or("unknown");
-        println!("{}", first.strip_prefix("SDCC : ").unwrap_or(first));
+        crate::say!("{}", first.strip_prefix("SDCC : ").unwrap_or(first));
     } else {
-        println!("not found");
+        crate::say!("not found");
     }
-    println!("Opt:      {}", config.opt);
-    println!();
+    crate::say!("Opt:      {}", config.opt);
+    crate::say!();
 
     // Run all benchmarks in parallel
     let total = bench_files.len();
     let results: Vec<BenchResult> = {
         let results = Arc::new(Mutex::new(Vec::new()));
-        let done = Arc::new(AtomicUsize::new(0));
-        let tty = crate::display::is_tty();
-
-        let bar_width = 30usize;
-        if tty {
-            eprint!("\r  [{}] 0/{total}", " ".repeat(bar_width));
-            let _ = io::stderr().flush();
-        }
+        let progress = Arc::new(report::Line::new(total as u64, "benchmarks"));
 
         let handles: Vec<_> = bench_files
             .into_iter()
@@ -113,7 +108,7 @@ pub fn run(paths: &Paths, config: &BenchConfig) {
                 let opt = config.opt;
                 let sdcc_lib = sdcc_lib.clone();
                 let results = Arc::clone(&results);
-                let done = Arc::clone(&done);
+                let progress = Arc::clone(&progress);
                 let elf_rt = Arc::clone(&elf_rt);
 
                 thread::spawn(move || {
@@ -122,17 +117,7 @@ pub fn run(paths: &Paths, config: &BenchConfig) {
                         &elf_rt,
                     );
                     results.lock().unwrap().push(r);
-                    let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                    if tty {
-                        let filled = bar_width * n / total;
-                        let empty = bar_width - filled;
-                        eprint!(
-                            "\r  [\x1b[32m{}\x1b[0m{}] {n}/{total}",
-                            "#".repeat(filled),
-                            " ".repeat(empty),
-                        );
-                        let _ = io::stderr().flush();
-                    }
+                    progress.inc();
                 })
             })
             .collect();
@@ -141,10 +126,7 @@ pub fn run(paths: &Paths, config: &BenchConfig) {
             let _ = h.join();
         }
 
-        if tty {
-            eprint!("\r\x1b[2K");
-            let _ = io::stderr().flush();
-        }
+        Arc::into_inner(progress).expect("threads joined").clear();
 
         let mut v = Arc::try_unwrap(results).unwrap().into_inner().unwrap();
         v.sort_by(|a, b| a.name.cmp(&b.name));
@@ -305,7 +287,7 @@ fn compile_and_measure_clang(
     let result_addr = emulator::symbol_addr_from_elf(&llvm_tools.join("llvm-nm"), &elf, "_exitcode")?;
     let dump = bin.with_extension("ram");
     let run = emulator::run_program(&bin, target, &halt_addr, result_addr, &dump,
-                                    target.emu_timeout_secs()).ok();
+                                    target.emu_cycles()).ok();
     let tstates = run.as_ref().map(|r| r.cycles).unwrap_or(0);
     let reg_value = run.map(|r| r.value).unwrap_or_default();
     let correct = emulator::check_result(&reg_value, expected).is_ok();
@@ -415,7 +397,7 @@ fn measure_ihx(
     let result_addr = emulator::symbol_addr_from_map(map_file, "_exitcode")?;
     let dump = bin.with_extension("ram");
     let run = emulator::run_program(bin, target, halt_addr, result_addr, &dump,
-                                    target.emu_timeout_secs()).ok();
+                                    target.emu_cycles()).ok();
     let tstates = run.as_ref().map(|r| r.cycles).unwrap_or(0);
     let reg_value = run.map(|r| r.value).unwrap_or_default();
     let correct = emulator::check_result(&reg_value, expected).is_ok();
@@ -459,26 +441,17 @@ pub(crate) fn ihx_code_size(ihx: &Path) -> u32 {
 
 
 fn print_table(results: &[BenchResult], _config: &BenchConfig) {
-    let tty = crate::display::is_tty();
-
-    let bold = if tty { "\x1b[1m" } else { "" };
-    let green = if tty { "\x1b[32m" } else { "" };
-    let yellow = if tty { "\x1b[33m" } else { "" };
-    let red = if tty { "\x1b[31m" } else { "" };
-    let reset = if tty { "\x1b[0m" } else { "" };
-
-    // Header
-    println!(
-        "  {bold}{:<24}{:<5}{:>8}{:>8}  {:>9}{:>9}  {:<10}{reset}",
-        "Benchmark", "Opt", "Clang", "SDCC", "Clang", "SDCC", "Winner"
-    );
-    println!(
-        "  {bold}{:<24}{:<5}{:>8}{:>8}  {:>9}{:>9}  {:<10}{reset}",
-        "", "", "(bytes)", "(bytes)", "(T-cyc)", "(T-cyc)", ""
-    );
-    println!(
-        "  {:<24}{:<5}{:>8}{:>8}  {:>9}{:>9}  {:<10}",
-        "------------------------", "---", "-------", "-------", "--------", "--------", "----------"
+    let mut table = Table::new(
+        &["Benchmark", "Opt", "Clang (B)", "SDCC (B)", "Clang (T)", "SDCC (T)", "Winner"],
+        &[
+            Align::Left,
+            Align::Left,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+            Align::Left,
+        ],
     );
 
     let mut total = 0u32;
@@ -491,17 +464,20 @@ fn print_table(results: &[BenchResult], _config: &BenchConfig) {
     for r in results {
         total += 1;
 
-        if let Some(ref err) = r.error {
+        let (Some(clang), Some(sdcc)) = (r.clang.as_ref(), r.sdcc.as_ref()) else {
             errors += 1;
-            println!(
-                "  {red}{:<24}{:<5}  ERROR ({err}){reset}",
-                r.name, r.opt
-            );
+            let why = r.error.clone().unwrap_or_else(|| "did not build".into());
+            table.row([
+                r.name.clone(),
+                r.opt.to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                format!("{}", format_args!("ERROR ({why})").style(display::bad())),
+            ]);
             continue;
-        }
-
-        let clang = r.clang.as_ref().unwrap();
-        let sdcc = r.sdcc.as_ref().unwrap();
+        };
 
         let size_winner = winner(clang.size, sdcc.size);
         let speed_winner = winner(clang.tstates, sdcc.tstates);
@@ -517,40 +493,45 @@ fn print_table(results: &[BenchResult], _config: &BenchConfig) {
             Winner::Tie => {}
         }
 
-        let winner_str = match (&size_winner, &speed_winner) {
-            (Winner::A, Winner::A) => format!("{green}Clang{reset}"),
-            (Winner::B, Winner::B) => format!("{yellow}SDCC{reset}"),
-            (Winner::Tie, Winner::Tie) => "Tie".to_string(),
-            _ => format!(
-                "Size:{} Spd:{}",
-                match size_winner { Winner::A => "Clang", Winner::B => "SDCC", Winner::Tie => "Tie" },
-                match speed_winner { Winner::A => "Clang", Winner::B => "SDCC", Winner::Tie => "Tie" },
-            ),
+        let name_of = |w: &Winner| match w {
+            Winner::A => "Clang",
+            Winner::B => "SDCC",
+            Winner::Tie => "Tie",
         };
+        let mut verdict = match (&size_winner, &speed_winner) {
+            (Winner::A, Winner::A) => format!("{}", "Clang".style(display::compiler("clang"))),
+            (Winner::B, Winner::B) => format!("{}", "SDCC".style(display::compiler("sdcc"))),
+            (Winner::Tie, Winner::Tie) => "Tie".to_string(),
+            (sz, sp) => format!("Size:{} Spd:{}", name_of(sz), name_of(sp)),
+        };
+        // A wrong answer matters more than who won, so it rides along on the
+        // same line rather than in a column readers have to look for.
+        for (bad_one, label) in [(!clang.correct, "!Clang"), (!sdcc.correct, "!SDCC")] {
+            if bad_one {
+                verdict.push_str(&format!(" {}", label.style(display::bad())));
+            }
+        }
 
-        println!(
-            "  {:<24}{:<5}{:>5} B {:>5} B  {:>7} T {:>7} T  {}{}{}",
-            r.name,
-            format!("{}", r.opt),
-            clang.size,
-            sdcc.size,
-            clang.tstates,
-            sdcc.tstates,
-            winner_str,
-            if !clang.correct { format!(" {red}!Clang{reset}") } else { String::new() },
-            if !sdcc.correct { format!(" {red}!SDCC{reset}") } else { String::new() },
-        );
+        table.row([
+            r.name.clone(),
+            r.opt.to_string(),
+            clang.size.to_string(),
+            sdcc.size.to_string(),
+            report::thousands(clang.tstates),
+            report::thousands(sdcc.tstates),
+            verdict,
+        ]);
     }
+    table.print();
 
-    // Summary
     let size_tie = total - errors - clang_size_wins - sdcc_size_wins;
     let speed_tie = total - errors - clang_speed_wins - sdcc_speed_wins;
-    println!();
-    println!("======================================");
-    println!("Total: {total} comparisons ({errors} errors)");
-    println!();
-    println!("Code size wins:  Clang={clang_size_wins}  SDCC={sdcc_size_wins}  Tie={size_tie}");
-    println!("Speed wins:      Clang={clang_speed_wins}  SDCC={sdcc_speed_wins}  Tie={speed_tie}");
+    crate::say!();
+    report::fields(&[
+        ("Comparisons", format!("{total} ({errors} errors)")),
+        ("Code size", format!("Clang={clang_size_wins}  SDCC={sdcc_size_wins}  Tie={size_tie}")),
+        ("Speed", format!("Clang={clang_speed_wins}  SDCC={sdcc_speed_wins}  Tie={speed_tie}")),
+    ]);
 }
 
 pub(crate) enum Winner {

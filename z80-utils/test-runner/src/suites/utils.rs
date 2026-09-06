@@ -8,7 +8,6 @@
 //!   5. elf_ar_roundtrip:  .a → elf2rel → .lib → rel2elf → .a → lld → run
 //!   6. rel_ar_roundtrip:  .lib → rel2elf → .a → elf2rel → .lib → sdldz80 → run
 
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -16,12 +15,16 @@ use std::thread;
 use std::time::Duration;
 
 use crate::config::{self, OptLevel, Paths, Target};
+use owo_colors::OwoColorize;
+
 use crate::display;
+use crate::report;
 use crate::emulator;
 use crate::suite::*;
 
 const COMPILE_TIMEOUT: u64 = 30;
 
+#[derive(Clone)]
 pub struct UtilsConfig {
     pub target: Target,
     pub opt: OptLevel,
@@ -140,73 +143,29 @@ pub fn run_parallel(paths: &Paths, config: &UtilsConfig) -> bool {
         })
         .collect();
 
-    // Display loop
-    let tty = display::is_tty();
+    // Display loop. `report::Progress` owns the redraw; this only decides
+    // what each line says.
     let title = format!("{} elf2rel/rel2elf Utils Test", config.target.triple().to_uppercase());
+    let labels: Vec<String> = state.lock().unwrap().iter().map(|g| g.label.clone()).collect();
+    let mut progress = report::Progress::new(&title, &labels);
 
-    if tty {
-        print!("\x1b[?25l"); // hide cursor
-        print!("\x1b[1m{title}\x1b[0m\n");
-        print!("========================\n");
-        {
-            let lock = state.lock().unwrap();
-            for s in lock.iter() {
-                print!("  \x1b[2m\u{22ef} {}  -\x1b[0m\n", s.label);
+    loop {
+        thread::sleep(Duration::from_millis(100));
+
+        let lock = state.lock().unwrap();
+        for (i, g) in lock.iter().enumerate() {
+            match &g.result {
+                Some(r) => progress.finish(i, group_line(&g.label, r)),
+                None => progress.update(i, in_progress_line(g)),
             }
         }
-        print!("========================\n");
-        let _ = io::stdout().flush();
-
-        let total_lines = 2 + num + 1;
-
-        loop {
-            thread::sleep(Duration::from_millis(100));
-
-            let lock = state.lock().unwrap();
-            let finished = lock.iter().filter(|s| s.result.is_some()).count();
-
-            print!("\x1b[{total_lines}A");
-            print!("\x1b[1m{title}\x1b[0m\n");
-            print!("========================\n");
-            for s in lock.iter() {
-                render_group_line_tty(s);
-            }
-            print!("========================\n");
-            let _ = io::stdout().flush();
-
-            if finished == num {
-                drop(lock);
-                break;
-            }
-            drop(lock);
+        let finished = lock.iter().filter(|g| g.result.is_some()).count();
+        drop(lock);
+        if finished == num {
+            break;
         }
-
-        print!("\x1b[?25h"); // show cursor
-        let _ = io::stdout().flush();
-    } else {
-        let mut printed = vec![false; num];
-        println!("{title}");
-        println!("========================");
-
-        loop {
-            thread::sleep(Duration::from_millis(100));
-            let lock = state.lock().unwrap();
-            for (i, s) in lock.iter().enumerate() {
-                if !printed[i] {
-                    if let Some(ref r) = s.result {
-                        print_group_line_plain(&s.label, r);
-                        printed[i] = true;
-                    }
-                }
-            }
-            let finished = lock.iter().filter(|s| s.result.is_some()).count();
-            drop(lock);
-            if finished == num {
-                break;
-            }
-        }
-        println!("========================");
     }
+    progress.done();
 
     // Aggregate results
     let lock = state.lock().unwrap();
@@ -238,10 +197,10 @@ pub fn run_parallel(paths: &Paths, config: &UtilsConfig) -> bool {
                 for t in &r.results {
                     match &t.outcome {
                         TestOutcome::Fail { got, expected } => {
-                            println!("  FAIL  {}  (got {got}, expected {expected})", t.tag);
+                            crate::say!("  FAIL  {}  (got {got}, expected {expected})", t.tag);
                         }
                         TestOutcome::Fatal { reason } => {
-                            println!("  FATAL {}  ({reason})", t.tag);
+                            crate::say!("  FATAL {}  ({reason})", t.tag);
                         }
                         _ => {}
                     }
@@ -253,42 +212,35 @@ pub fn run_parallel(paths: &Paths, config: &UtilsConfig) -> bool {
     all_ok
 }
 
-fn render_group_line_tty(s: &GroupState) {
-    print!("\x1b[2K");
-    match &s.result {
-        None => {
-            if s.total > 0 {
-                print!("  \x1b[2m\u{22ef} {}  [{}/{}]\x1b[0m\n", s.label, s.done, s.total);
-            } else {
-                print!("  \x1b[2m\u{22ef} {}  ...\x1b[0m\n", s.label);
-            }
-        }
-        Some(r) => {
-            if !r.all_ok() {
-                print!("  \x1b[31m\u{2717}\x1b[0m {}  {}/{}", s.label, r.pass, r.total);
-                if r.fail > 0 { print!("  \x1b[31mfail={}\x1b[0m", r.fail); }
-                if r.fatal > 0 { print!("  \x1b[31mfatal={}\x1b[0m", r.fatal); }
-                println!();
-            } else {
-                print!("  \x1b[32m\u{2713}\x1b[0m {}  {}/{}", s.label, r.pass, r.total);
-                if r.skip > 0 { print!("  \x1b[33mskip={}\x1b[0m", r.skip); }
-                println!();
-            }
-        }
-    }
+/// The line a group shows while it is still running.
+fn in_progress_line(g: &GroupState) -> String {
+    let body = if g.total > 0 {
+        format!("  \u{22ef} {}  [{}/{}]", g.label, g.done, g.total)
+    } else {
+        format!("  \u{22ef} {}  ...", g.label)
+    };
+    format!("{}", body.style(display::faint()))
 }
 
-fn print_group_line_plain(label: &str, r: &SuiteResult) {
-    if !r.all_ok() {
-        print!("  x {label}  {}/{}", r.pass, r.total);
-        if r.fail > 0 { print!("  fail={}", r.fail); }
-        if r.fatal > 0 { print!("  fatal={}", r.fatal); }
+/// The line a group settles on. Same wording as the suite lines in `run_all`,
+/// because a reader should not have to learn two vocabularies for the same
+/// thing.
+fn group_line(label: &str, r: &SuiteResult) -> String {
+    let mut line = if r.all_ok() {
+        format!("  {} {label}  {}/{}", "ok".style(display::ok()), r.pass, r.total)
     } else {
-        print!("  ok {label}  {}/{}", r.pass, r.total);
-        if r.skip > 0 { print!("  skip={}", r.skip); }
+        format!("  {} {label}  {}/{}", "x".style(display::bad()), r.pass, r.total)
+    };
+    if r.fail > 0 {
+        line.push_str(&format!("  {}", format_args!("fail={}", r.fail).style(display::bad())));
     }
-    println!();
-    let _ = io::stdout().flush();
+    if r.fatal > 0 {
+        line.push_str(&format!("  {}", format_args!("fatal={}", r.fatal).style(display::bad())));
+    }
+    if r.skip > 0 {
+        line.push_str(&format!("  skip={}", r.skip));
+    }
+    line
 }
 
 fn build_groups(config: &UtilsConfig) -> Vec<GroupDef> {
@@ -619,7 +571,7 @@ fn test_shipped_crt0(
         return TestResult::skip(tag, "binary exceeds the 64 KB address space");
     }
 
-    let r = match emulator::run_to_halt(&bin, target, &halt_addr, target.emu_timeout_secs()) {
+    let r = match emulator::run_to_halt(&bin, target, &halt_addr, target.emu_cycles()) {
         Ok(()) => TestResult::pass(tag, "booted"),
         Err(e) => TestResult::fail(tag, e, "reaches _halt"),
     };

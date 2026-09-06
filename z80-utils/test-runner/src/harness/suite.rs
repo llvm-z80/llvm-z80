@@ -65,7 +65,7 @@ pub fn judge(
     source: &str,
 ) -> TestResult {
     let got = match crate::emulator::run_program(
-        bin, target, halt_addr, result_addr, dump, target.emu_timeout_secs())
+        bin, target, halt_addr, result_addr, dump, target.emu_cycles())
     {
         Ok(r) => r.value,
         Err(e) => return TestResult::fatal(tag, e),
@@ -349,6 +349,9 @@ pub fn run_cmd_timeout(
     cmd: &mut std::process::Command,
     timeout_secs: u64,
 ) -> Result<(i32, String, String), String> {
+    // Held for the whole subprocess, released when this returns.
+    let _permit = crate::harness::pool::acquire();
+
     use std::io::Read;
     use std::time::{Duration, Instant};
 

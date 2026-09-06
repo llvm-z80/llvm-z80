@@ -8,6 +8,7 @@ use crate::suite::*;
 
 const COMPILE_TIMEOUT: u64 = 30;
 
+#[derive(Clone)]
 pub struct ClangConfig {
     pub target: Target,
     pub opt_levels: Vec<OptLevel>,

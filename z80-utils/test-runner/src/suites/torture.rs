@@ -19,7 +19,6 @@
 //! is therefore red for as long as any bug is outstanding, which is the point,
 //! and why it is not part of `run_all`.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::collections::BTreeSet;
@@ -31,19 +30,22 @@ use crate::display;
 use crate::emulator;
 use crate::runtime::{self, ElfRuntime};
 use crate::suite::{remove_tmp_dir, run_cmd_timeout, unique_tmp_dir};
+use owo_colors::OwoColorize;
+
+use crate::report;
+
 use crate::torture_data::{self, Manifest};
 
 const COMPILE_TIMEOUT: u64 = 20;
 const LINK_TIMEOUT: u64 = 20;
-/// Default emulator budget, which also sets the cycle budget. Wide enough for
-/// the slowest tests that legitimately finish: arith-rand-ll runs 10000 rounds
-/// of 64-bit div/mod and needs some 9.4e9 cycles, 920501-6 sieves three large
-/// primes with 64-bit modulo and needs 2.7e9. A tighter budget reported those
-/// as TIMEOUT, which reads as a failure and would have cost the coverage they
-/// carry. The price is that a test that really does hang now burns this long
-/// before it is reported; tests run in parallel, so the effect on a full run
-/// is small.
-pub const EMU_TIMEOUT: u64 = 30;
+/// Cycles a torture test may spend under emulation.
+///
+/// Sized by the slowest tests that legitimately finish: arith-rand-ll runs
+/// 10000 rounds of 64-bit div/mod and 920501-6 sieves three large primes with
+/// 64-bit modulo, both in the billions. This is a property of the program, so
+/// it does not shift when the machine is busy; the wall-clock backstop in
+/// `emulator` is separate and far looser.
+pub const EMU_CYCLES: u64 = 10_000_000_000;
 
 /// Stack budget advertised to the tests, in bytes. The stack starts at the top
 /// of the address space and grows down toward .bss, so this is a self-imposed
@@ -88,9 +90,30 @@ pub struct TortureConfig {
     pub run_skipped: bool,
     pub list_failures: Option<PathBuf>,
     pub std: String,
-    /// Seconds a test may run on the emulator before it counts as hung.
-    pub emu_timeout: u64,
+    /// Cycles a test may spend on the emulator before it counts as looping.
+    pub emu_cycles: u64,
 }
+
+impl TortureConfig {
+    /// The configuration `torture` runs with when no flags are given, so the
+    /// CLI and `full` cannot drift apart on what a default run means.
+    pub fn defaults(target: Target) -> Self {
+        TortureConfig {
+            target,
+            opt_levels: vec![OptLevel::Os],
+            tiers: vec![Tier::Compile, Tier::Execute],
+            jobs: crate::harness::pool::capacity(),
+            pattern: None,
+            freestanding: false,
+            verify: false,
+            run_skipped: false,
+            list_failures: None,
+            std: "gnu17".to_string(),
+            emu_cycles: EMU_CYCLES,
+        }
+    }
+}
+
 
 pub enum Verdict {
     Pass,
@@ -123,9 +146,21 @@ impl Verdict {
     fn is_pass(&self) -> bool {
         matches!(self, Verdict::Pass)
     }
-    /// Outcomes that need no investigation.
+    /// Outcomes that need no investigation. Controls what the report lists.
     fn is_ok(&self) -> bool {
         matches!(self, Verdict::Pass | Verdict::Xfail { .. } | Verdict::Skip { .. })
+    }
+    /// Whether this verdict should fail the run.
+    ///
+    /// A CLANG verdict is still listed, because it is a real failure and
+    /// someone should see it, but the manifest has attributed it to an
+    /// upstream defect rather than to this backend. Failing the run on it
+    /// would mean a red build that nothing in this repository can turn green,
+    /// so it is reported and tolerated; it goes away on its own when upstream
+    /// fixes the bug, and `-run-skipped` guards against the attribution
+    /// silently going stale.
+    fn fails_run(&self) -> bool {
+        !self.is_ok() && !matches!(self, Verdict::Clang { .. })
     }
     fn label(&self) -> &'static str {
         match self {
@@ -157,24 +192,24 @@ impl Verdict {
             Verdict::Skip { reason } => reason.clone(),
         }
     }
-    /// Colour from the shared palette in `display`, following the same
+    /// Style from the shared palette in `display`, following the same
     /// conventions as the other suites: green pass, magenta crash, red wrong
     /// answer, yellow for "never got far enough to answer".
-    fn color(&self) -> &'static str {
+    fn style(&self) -> owo_colors::Style {
         match self {
-            Verdict::Pass => display::GREEN,
-            Verdict::Ice { .. } => display::MAGENTA,
-            Verdict::Clang { .. } => display::PURPLE,
+            Verdict::Pass => display::ok(),
+            Verdict::Ice { .. } => display::crash(),
+            Verdict::Clang { .. } => display::upstream(),
             // Green like a pass: the test was rejected exactly as upstream
             // expects, so there is nothing to look at.
-            Verdict::Xfail { .. } => display::GREEN,
-            Verdict::Fail { .. } => display::RED,
-            Verdict::Optim { .. } => display::BLUE,
-            Verdict::Skip { .. } => display::GRAY,
+            Verdict::Xfail { .. } => display::ok(),
+            Verdict::Fail { .. } => display::bad(),
+            Verdict::Optim { .. } => display::info(),
+            Verdict::Skip { .. } => display::muted(),
             Verdict::CompileFail { .. }
             | Verdict::LinkFail { .. }
             | Verdict::Timeout
-            | Verdict::TooBig { .. } => display::YELLOW,
+            | Verdict::TooBig { .. } => display::warn(),
         }
     }
 
@@ -716,14 +751,14 @@ fn link_and_run(
     };
     let dump = tmp.join("ram.bin");
     let v = match emulator::run_program(
-        &bin, config.target, &halt, result_addr, &dump, config.emu_timeout)
+        &bin, config.target, &halt, result_addr, &dump, config.emu_cycles)
         .map(|r| r.value)
     {
         // A cycle-limit stop is a timeout too: the program never reached
         // _halt within its budget. Left as a LinkFail it would report as a
         // link error, and which of the two fires is a race with the wall
         // clock rather than a property of the test.
-        Err(e) if e.contains("timeout") || e.contains("cycle limit") => Verdict::Timeout,
+        Err(e) if e.contains("cycle budget") || e.contains("wedged") => Verdict::Timeout,
         Err(e) => Verdict::LinkFail { detail: e },
         // Every torture execute test succeeds by leaving 0 in the return
         // register, so there is no per-test expected value to parse.
@@ -739,21 +774,48 @@ fn link_and_run(
     v
 }
 
-pub fn run(paths: &Paths, config: &TortureConfig) -> bool {
+/// `shared` reports into a progress line that spans more than this run, which
+/// is what `full` uses so its phases do not each draw their own.
+/// Everything a run needs decided before any test is compiled.
+///
+/// Split out so a caller can learn the size of a run without starting it:
+/// `full` sizes one progress line across several phases, and a total that
+/// grows as each phase wakes up is worse than no total at all.
+pub struct Plan {
+    tasks: Vec<Task>,
+    skipped: Vec<TortureResult>,
+    dg_candidates: BTreeSet<String>,
+    work_root: std::path::PathBuf,
+    clang: std::path::PathBuf,
+    manifest_empty: bool,
+    /// Staged crt0 + builtins, needed only by the execute tier.
+    rt: Option<(ElfRuntime, std::path::PathBuf)>,
+}
+
+impl Plan {
+    /// How many results this run will produce.
+    pub fn len(&self) -> usize {
+        self.tasks.len()
+    }
+}
+
+/// Discover the tests, apply the manifest and read the dg directives.
+/// Returns `None` if the suite cannot run at all.
+pub fn plan(paths: &Paths, config: &TortureConfig) -> Option<Plan> {
     let root = paths.torture_src_dir();
     let root = root.canonicalize().unwrap_or(root);
     if !root.join("execute").is_dir() {
         eprintln!("torture sources not found at {}", root.display());
         eprintln!("initialize the submodule:");
         eprintln!("  git submodule update --init z80-utils/vendor/gcc-torture");
-        return false;
+        return None;
     }
 
     let manifest = match Manifest::load(&paths.torture_manifest()) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("manifest: {e}");
-            return false;
+            return None;
         }
     };
 
@@ -772,7 +834,7 @@ pub fn run(paths: &Paths, config: &TortureConfig) -> bool {
             (Ok(r), Ok(s)) => Some((r, s)),
             (Err(e), _) | (_, Err(e)) => {
                 eprintln!("torture runtime: {e}");
-                return false;
+                return None;
             }
         }
     } else {
@@ -854,6 +916,49 @@ pub fn run(paths: &Paths, config: &TortureConfig) -> bool {
         }
     }
 
+    Some(Plan {
+        tasks,
+        skipped,
+        dg_candidates,
+        work_root,
+        clang,
+        manifest_empty: manifest.is_empty(),
+        rt,
+    })
+}
+
+/// Plan and run in one step, for the standalone `torture` command.
+pub fn run(
+    paths: &Paths,
+    config: &TortureConfig,
+    shared: Option<&std::sync::Arc<report::Line>>,
+) -> bool {
+    match plan(paths, config) {
+        Some(p) => run_planned(paths, config, p, shared),
+        None => false,
+    }
+}
+
+/// Run a plan that has already been made, so its size was known in advance.
+///
+/// A `shared` line must already account for `plan.len()`; this does not add to
+/// it.
+pub fn run_planned(
+    paths: &Paths,
+    config: &TortureConfig,
+    plan: Plan,
+    shared: Option<&std::sync::Arc<report::Line>>,
+) -> bool {
+    let Plan {
+        mut tasks,
+        skipped,
+        dg_candidates,
+        work_root,
+        clang,
+        manifest_empty,
+        rt,
+    } = plan;
+    let _ = paths;
     let accepted = probe_flags(&clang, config.target, &work_root, &dg_candidates);
     let dropped = dg_candidates.len() - accepted.len();
     for t in &mut tasks {
@@ -862,33 +967,44 @@ pub fn run(paths: &Paths, config: &TortureConfig) -> bool {
 
     let tiers: Vec<&str> = config.tiers.iter().map(|t| t.dir()).collect();
     let opts: Vec<&str> = config.opt_levels.iter().map(|o| o.clang_flag()).collect();
-    println!(
-        "torture/{} {} {}  {} tests, {} jobs, -std={}, emu {}s{}",
+    crate::say!(
+        "torture/{} {} {}  {} tests, {} jobs, -std={}, emu {} cycles{}",
         tiers.join("+"),
         config.target,
         opts.join(","),
         tasks.len(),
         config.jobs,
         config.std,
-        config.emu_timeout,
+        config.emu_cycles,
         if config.run_skipped { "  [-run-skipped]" } else { "" }
     );
     if !dg_candidates.is_empty() {
-        println!(
+        crate::say!(
             "  dg-options: {} distinct flags, {} accepted by this clang, {dropped} dropped",
             dg_candidates.len(),
             accepted.len()
         );
     }
-    if manifest.is_empty() && !config.run_skipped {
-        println!("  (manifest is empty: nothing is skipped yet)");
+    if manifest_empty && !config.run_skipped {
+        crate::say!("  (manifest is empty: nothing is skipped yet)");
     }
 
     let next = AtomicUsize::new(0);
-    let done = AtomicUsize::new(0);
     let results: Mutex<Vec<TortureResult>> = Mutex::new(Vec::new());
     let total = tasks.len();
-    let start = std::time::Instant::now();
+    // Either report into the caller's line, which may span other phases, or
+    // own one for this run alone.
+    let owned = shared
+        .is_none()
+        .then(|| std::sync::Arc::new(report::Line::new(total as u64, "tests")));
+    // A shared line is sized by whoever made the plan, since the point of
+    // planning ahead is that the total is known before anything starts; adding
+    // to it here would count this run twice.
+    let progress: &std::sync::Arc<report::Line> = match (shared, &owned) {
+        (Some(line), _) => line,
+        (None, Some(line)) => line,
+        (None, None) => unreachable!("owned is Some when shared is None"),
+    };
 
     std::thread::scope(|scope| {
         for _ in 0..config.jobs.max(1) {
@@ -925,30 +1041,20 @@ pub fn run(paths: &Paths, config: &TortureConfig) -> bool {
                         verdict,
                         skip_reason: task.skip_reason.clone(),
                     });
-                    let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                    let tty = display::is_tty();
-                    if n == total || n % if tty { 10 } else { 250 } == 0 {
-                        // No ETA: it would be a linear extrapolation from the
-                        // average, but a single test can sit on the emulator
-                        // budget for 30s, so the estimate is noise.
-                        let el = start.elapsed().as_secs_f64();
-                        let line = format!("  {n}/{total}  {el:.0}s elapsed");
-                        if tty {
-                            // Repaint in place; erased once the run finishes.
-                            print!("\r{}\x1b[K", display::paint(display::DIM, &line));
-                            let _ = std::io::stdout().flush();
-                        } else {
-                            println!("{line}");
-                        }
-                    }
+                    // No ETA: it would be a linear extrapolation from the
+                    // average, but a single test can sit on the emulator
+                    // budget for 30s, so the estimate is noise.
+                    progress.inc();
                 }
             });
         }
     });
 
-    if display::is_tty() {
-        print!("\r\x1b[K");
-        let _ = std::io::stdout().flush();
+    // Only the owner takes the line down; a shared one outlives this phase.
+    if let Some(line) = owned {
+        if let Some(line) = std::sync::Arc::into_inner(line) {
+            line.clear();
+        }
     }
 
     let mut results = results.into_inner().unwrap();
@@ -966,45 +1072,43 @@ fn report(results: &mut [TortureResult], config: &TortureConfig) -> bool {
     });
 
     // Counts in severity order, which is the order `results` is now in.
-    let mut counts: Vec<(&str, &str, usize)> = Vec::new();
+    let mut counts: Vec<report::Count> = Vec::new();
     for r in results.iter() {
-        let l = r.verdict.label();
-        match counts.iter_mut().find(|(k, _, _)| *k == l) {
-            Some((_, _, n)) => *n += 1,
-            None => counts.push((l, r.verdict.color(), 1)),
+        let label = r.verdict.label();
+        match counts.iter_mut().find(|c| c.label == label) {
+            Some(c) => c.n += 1,
+            None => counts.push(report::Count {
+                label: label.to_string(),
+                style: r.verdict.style(),
+                n: 1,
+            }),
         }
     }
-    let summary = || {
-        let cells: Vec<String> = counts
-            .iter()
-            .map(|(k, c, n)| display::paint(&format!("{}{}", display::BOLD, c), &format!("{k} {n}")))
-            .collect();
-        println!("  {}", cells.join("   "));
-    };
+    let summary = || report::tally(&counts);
 
     if config.run_skipped {
         let now_passing: Vec<&TortureResult> =
             results.iter().filter(|r| r.verdict.is_pass()).collect();
         if now_passing.is_empty() {
-            println!("  every skipped test still fails; the skip list is accurate");
+            crate::say!("  every skipped test still fails; the skip list is accurate");
         } else {
-            println!("  now passing ({}):", now_passing.len());
+            crate::say!("  now passing ({}):", now_passing.len());
             for r in now_passing {
-                println!(
+                crate::say!(
                     "    {:<40} {:<3} {}",
                     r.name,
                     r.opt.clang_flag(),
                     r.skip_reason.as_deref().unwrap_or("")
                 );
             }
-            println!();
-            println!(
+            crate::say!();
+            crate::say!(
                 "  a manifest entry above is ours to delete; a \
 dg-require-effective-target one is upstream's and just means this target is \
 more capable than GCC's gate assumes."
             );
         }
-        println!();
+        crate::say!();
         summary();
         return true;
     }
@@ -1016,10 +1120,10 @@ more capable than GCC's gate assumes."
         }
         if r.verdict.label() != last_label {
             last_label = r.verdict.label();
-            let n = counts.iter().find(|(k, _, _)| *k == last_label).map(|(_, _, n)| *n).unwrap_or(0);
-            println!("{}", display::paint(r.verdict.color(), &format!("{last_label} ({n})")));
+            let n = counts.iter().find(|c| c.label == last_label).map(|c| c.n).unwrap_or(0);
+            crate::say!("{}", format_args!("{last_label} ({n})").style(r.verdict.style()));
         }
-        println!("  {:<44} {:<3} {}", r.name, r.opt.clang_flag(), r.verdict.detail());
+        crate::say!("  {:<44} {:<3} {}", r.name, r.opt.clang_flag(), r.verdict.detail());
     }
 
     if let Some(path) = &config.list_failures {
@@ -1028,12 +1132,12 @@ more capable than GCC's gate assumes."
             out.push_str(&format!("{}\t{}\t{}\n", r.name, r.opt.clang_flag(), r.verdict.label()));
         }
         match std::fs::write(path, out) {
-            Ok(()) => println!("\nfailures written to {}", path.display()),
+            Ok(()) => crate::say!("\nfailures written to {}", path.display()),
             Err(e) => eprintln!("cannot write {}: {e}", path.display()),
         }
     }
 
-    println!();
+    crate::say!();
     summary();
-    results.iter().all(|r| r.verdict.is_ok())
+    results.iter().all(|r| !r.verdict.fails_run())
 }

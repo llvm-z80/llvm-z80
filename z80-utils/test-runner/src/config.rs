@@ -37,10 +37,11 @@ impl Target {
         }
     }
 
-    pub fn emu_timeout_secs(&self) -> u64 {
+    /// Cycles a test may spend under emulation. Generous: the suites' own
+    /// tests are small, and a program that overruns this is looping, not slow.
+    pub fn emu_cycles(&self) -> u64 {
         match self {
-            Target::Z80 => 30,
-            Target::SM83 => 30,
+            Target::Z80 | Target::SM83 => 10_000_000_000,
         }
     }
 
@@ -165,9 +166,6 @@ impl Paths {
         self.project_dir.join("testcases/sdcc")
     }
 
-    pub fn custom_test_dir(&self) -> PathBuf {
-        self.project_dir.join("testcases/custom")
-    }
 
     pub fn llc_test_dir(&self) -> PathBuf {
         self.project_dir.join("testcases/llc")

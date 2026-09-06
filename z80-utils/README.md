@@ -67,9 +67,14 @@ Dynamic test runner for LLVM-Z80. Compiles C and LLVM IR test programs, runs the
 
 ```bash
 cd z80-utils
-cargo run                        # Run all test suites (default: O1, O2, Os)
-cargo run -- -full                  # Run all optimization levels (O0-Oz)
+cargo run                  # Print usage
+cargo run test             # The end-to-end suites (O1, O2, Os)
+cargo run full             # Everything a regression check needs
 ```
+
+`full` runs every suite at every optimisation level, this backend's LLVM lit
+tests, and the GCC C torture suite at O1, O2 and Os on both targets. It is the
+one to run before deciding a change is safe; `test` is the quick pass.
 
 ### Test Suites
 
@@ -111,9 +116,25 @@ roundtrip. The first links the way a user does, letting the clang driver pick
 the startup code, so the crt0 that actually ships stays covered.
 
 ```bash
-cargo run utils                           # Z80, O1
+cargo run utils                           # Z80, Os
 cargo run utils -target sm83              # SM83
 ```
+
+#### lit — LLVM's Own Tests
+
+Runs the lit tests this project owns: `llvm/test/CodeGen/Z80`,
+`llvm/test/MC/Z80` and the three z80 tests under `clang/test`. Also run by
+`full`.
+
+```bash
+cargo run lit                             # all of them
+cargo run lit peephole                    # only tests whose name matches
+```
+
+These are the only tests here that check *how* something is compiled rather
+than what it computes, so a peephole that stops firing shows up here and
+nowhere else. The rest of LLVM's test tree is upstream's business and is not
+run.
 
 #### torture — GCC C Torture Suite
 Runs `gcc.c-torture` from the `vendor/gcc-torture` submodule. Not part of the
@@ -125,9 +146,9 @@ git submodule update --init vendor/gcc-torture
 ```
 
 ```bash
-cargo run torture                          # both tiers, Z80, O1
+cargo run torture                          # both tiers, Z80, Os
 cargo run torture -tier execute -target sm83
-cargo run torture -emu-timeout 60          # widen the budget for a slow test
+cargo run torture -emu-cycles 20000000000   # widen the budget for a slow test
 cargo run torture -run-skipped             # re-check what the manifest skips
 ```
 
@@ -141,8 +162,9 @@ it turns green when clang fixes it), `FAIL`, `OPTIM` (an optimization that
 should have deleted a call did not), `TIMEOUT`, `COMPILE`, `LINK`, `TOOBIG`.
 
 `TIMEOUT` covers two different failures and can hide a miscompile. One is a
-test that is merely slower than the emulation budget, which `-emu-timeout`
-settles. The other is a program that reached `__builtin_trap()`: that lowers to
+test that needs more emulated cycles than its budget allows, which
+`-emu-cycles` settles. The other is a program that reached `__builtin_trap()`:
+that lowers to
 `HALT`, which stops the CPU somewhere other than `_halt`, so the run burns its
 whole budget and looks identical to a slow test. A test that traps got a wrong
 answer. z88dk-ticks does not report the final PC, so the runner cannot tell the
@@ -154,20 +176,12 @@ cannot do. A backend bug never belongs there: it keeps failing until it is
 fixed. Upstream's own `dg-skip-if`, `dg-require-effective-target` and
 `dg-options` are read straight from the test sources instead.
 
-#### custom — Ad-hoc Compile Check
-Checks that files in `test-runner/testcases/custom/` compile without errors (no emulation).
-
-```bash
-cargo run custom                          # Auto-discover .c/.ll files
-cargo run custom file.c                   # Specific file
-```
-
 #### bench — Code Size Benchmarks
 Measures compiled code size across benchmarks.
 
 ```bash
-cargo run bench                           # Z80, O1
-cargo run bench -target sm83 -opt Os      # SM83, Os
+cargo run bench                           # Z80, Os
+cargo run bench -target sm83 -opt O2      # SM83, O2
 ```
 
 #### stdcbench — Clang vs SDCC on an Outside Benchmark
@@ -238,7 +252,6 @@ define i16 @main() {
 * [`test-runner/testcases/clang/`](test-runner/testcases/clang/) — C source tests for Clang
 * [`test-runner/testcases/llc/`](test-runner/testcases/llc/) — LLVM IR tests for LLC
 * [`test-runner/testcases/sdcc/`](test-runner/testcases/sdcc/) — SDCC cross-build compatibility test pairs
-* [`test-runner/testcases/custom/`](test-runner/testcases/custom/) — User-supplied files for compile checking
 * [`vendor/gcc-torture/`](vendor/gcc-torture/) — GCC C torture suite (submodule)
 
 ### Harness Runtime

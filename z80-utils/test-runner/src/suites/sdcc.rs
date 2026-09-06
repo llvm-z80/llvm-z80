@@ -7,6 +7,7 @@ use crate::suite::*;
 
 const COMPILE_TIMEOUT: u64 = 30;
 
+#[derive(Clone)]
 pub struct SdccConfig {
     pub target: Target,
     pub opt_levels: Vec<OptLevel>,
@@ -218,7 +219,7 @@ fn run_single(
     };
     let dump = tmp_dir.join(format!("{tag}.ram"));
     let result = match emulator::run_program(
-        &bin, target, &halt_addr, result_addr, &dump, target.emu_timeout_secs())
+        &bin, target, &halt_addr, result_addr, &dump, target.emu_cycles())
         .map(|r| r.value)
     {
         Err(e) => TestResult::fatal(tag, e),
