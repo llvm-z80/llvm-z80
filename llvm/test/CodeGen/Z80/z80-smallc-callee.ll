@@ -12,6 +12,8 @@
 declare cc133 i16 @fsc(i16, i16, i16)
 declare cc133 void @sink2(i16, i16)
 
+%ByValPair = type { i16, i16 }
+
 ; Caller side proves BOTH axes at once:
 ;   order  = __smallc: push 1st, 2nd, 3rd (left-to-right)  -- unlike cc131
 ;   cleanup= callee:   NO pop / inc sp after the call      -- unlike cc132
@@ -44,5 +46,19 @@ define void @call_smallc_callee() {
 define cc133 void @callee_void(i16 %a, i16 %b) {
   %s = add i16 %a, %b
   store i16 %s, ptr inttoptr(i16 16384 to ptr)
+  ret void
+}
+
+; Byval arguments follow the same left-to-right mirrored stack layout as
+; scalar arguments.  The aggregate starts at the highest stack offset here.
+; CHECK-LABEL: _callee_byval:
+; CHECK:       ld hl,#2
+; CHECK:       add hl,sp
+; CHECK:       ld hl,#4
+; CHECK:       add hl,sp
+define cc133 void @callee_byval(ptr byval(%ByValPair) %p, i16 %x) {
+  %v = load i16, ptr %p
+  %r = add i16 %v, %x
+  store i16 %r, ptr inttoptr(i16 16384 to ptr)
   ret void
 }

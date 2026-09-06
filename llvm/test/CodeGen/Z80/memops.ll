@@ -4,11 +4,20 @@ declare void @llvm.memcpy.p0.p0.i16(ptr nocapture writeonly, ptr nocapture reado
 declare void @llvm.memmove.p0.p0.i16(ptr nocapture, ptr nocapture readonly, i16, i1 immarg)
 declare void @llvm.memset.p0.i16(ptr nocapture writeonly, i8, i16, i1 immarg)
 
-; Test: memcpy lowers to inline LDIR with the runtime argument registers.
+; Variable-size memcpy uses the guarded register-CC helper because BC=0
+; would make a raw LDIR copy 65536 bytes.
 define void @test_memcpy(ptr %dst, ptr %src, i16 %n) {
 ; CHECK-LABEL: _test_memcpy:
-; CHECK:       ldir
+; CHECK:       call ___memmove_rt
   call void @llvm.memcpy.p0.p0.i16(ptr %dst, ptr %src, i16 %n, i1 false)
+  ret void
+}
+
+; A proven non-zero constant keeps the compact inline LDIR lowering.
+define void @test_memcpy_constant(ptr %dst, ptr %src) {
+; CHECK-LABEL: _test_memcpy_constant:
+; CHECK:       ldir
+  call void @llvm.memcpy.p0.p0.i16(ptr %dst, ptr %src, i16 16, i1 false)
   ret void
 }
 

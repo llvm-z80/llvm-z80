@@ -1296,14 +1296,35 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     }
 
     // CRITICAL: LDIR with BC=0 runs 65536 iterations, trashing 64 KB of
-    // memory.  When Size is a known constant 0, drop the op entirely
-    // (#63).  When Size is a non-zero constant, emit the unguarded
-    // LDIR — that's smaller and the BC test is a known win.  When
-    // Size is variable (may be 0 at run-time), emit LDIR_GUARDED so
-    // post-RA expansion adds a `LD A,B; OR C; JR Z, skip` runtime
-    // guard around the LDIR (#105).
+    // memory.  A variable size uses the register-CC runtime helper, whose
+    // entry guard handles BC==0.  Keep inline LDIR for non-zero constants.
     auto SizeC = getIConstantVRegSExtVal(Size, MRI);
     if (SizeC && *SizeC == 0) {
+      MI.eraseFromParent();
+      return true;
+    }
+    if (!SizeC) {
+      MIRBuilder.setInsertPt(*MI.getParent(), MI.getIterator());
+      auto &Ctx = MIRBuilder.getMF().getFunction().getContext();
+      SmallVector<CallLowering::ArgInfo, 3> Args;
+      Args.push_back(
+          {DstPtr, PointerType::get(Ctx, MRI.getType(DstPtr).getAddressSpace()),
+           0});
+      Args.push_back(
+          {SrcPtr, PointerType::get(Ctx, MRI.getType(SrcPtr).getAddressSpace()),
+           0});
+      Args.push_back(
+          {Size, IntegerType::get(Ctx, MRI.getType(Size).getSizeInBits()), 0});
+
+      CallLowering::CallLoweringInfo Info;
+      Info.CallConv = CallingConv::Z80_AllReg;
+      Info.Callee = MachineOperand::CreateES("__memmove_rt");
+      Info.OrigRet = CallLowering::ArgInfo({0}, Type::getVoidTy(Ctx), 0);
+      llvm::append_range(Info.OrigArgs, Args);
+
+      const auto &CLI = *MIRBuilder.getMF().getSubtarget().getCallLowering();
+      if (!CLI.lowerCall(MIRBuilder, Info))
+        return false;
       MI.eraseFromParent();
       return true;
     }
@@ -1342,9 +1363,8 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     }
 
     // CRITICAL: LDIR/LDDR with BC=0 runs 65536 iterations.  size==0 →
-    // erase (#63).  Non-zero constant Size → unguarded LDIR/LDDR.
-    // Variable-size case → guarded form so a run-time BC==0 skips
-    // the block-move (#105).
+    // erase (#63).  Variable-size moves use __memmove_rt, which guards
+    // BC==0 and handles overlap without unavailable guarded pseudos.
     auto SizeC = getIConstantVRegSExtVal(Size, MRI);
     if (SizeC && *SizeC == 0) {
       MI.eraseFromParent();
@@ -1399,7 +1419,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       MI.eraseFromParent();
       return true;
     }
-    if (Dir == Direction::Unknown) {
+    if (Dir == Direction::Unknown || !SizeC) {
       // Runtime-unknown direction: call the register-CC helper __memmove_rt
       // (z80_allreg: dst=HL, src=DE, size=BC) instead of the heavy stack-ABI
       // _memmove libcall -- no stack arg / IX frame / callee-cleanup, ~7x

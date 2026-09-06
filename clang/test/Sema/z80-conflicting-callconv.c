@@ -30,6 +30,10 @@ void allreg_callee(int a, int b)
 void just_smallc(int a, int b) __attribute__((z80_smallc)); // ok
 void just_callee(int a, int b) __attribute__((z80_callee)); // ok
 void just_fast(int a) __attribute__((z80_fastcall));        // ok
+void fast_too_many(int a, int b)
+    __attribute__((z80_fastcall)); // expected-error {{z80_fastcall function must have exactly one parameter}}
+void fast_variadic(int a, ...)
+    __attribute__((z80_fastcall)); // expected-error {{z80_fastcall function must have exactly one parameter}}
 
 // Repeating the SAME convention is not a conflict.
 void same_twice(int a, int b)

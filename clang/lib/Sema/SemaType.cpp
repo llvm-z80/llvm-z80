@@ -8440,6 +8440,14 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
     }
   }
 
+  if (CC == CC_Z80FastCall) {
+    const auto *FnP = dyn_cast<FunctionProtoType>(fn);
+    if (FnP && (FnP->isVariadic() || FnP->getNumParams() != 1)) {
+      attr.setInvalid();
+      return S.Diag(attr.getLoc(), diag::err_z80_fastcall_params);
+    }
+  }
+
   // Diagnose use of variadic functions with calling conventions that
   // don't support them (e.g. because they're callee-cleanup).
   // We delay warning about this on unprototyped function declarations

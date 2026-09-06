@@ -766,13 +766,15 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
     // to those bytes. Consumes a register parameter position (SDCC counts
     // struct args), so subsequent scalar args can't use that register slot.
     if (Arg.hasAttribute(Attribute::ByVal)) {
+      if (CC == CallingConv::Z80_AllReg)
+        return false;
       classifyArg(Regs, RegParamCount, FirstKind, 64, IsVarArg, CC);
       Type *ByValTy = Arg.getParamByValType();
       unsigned ByValSize = MF.getDataLayout().getTypeAllocSize(ByValTy);
       // An empty aggregate still needs an address, but occupies no stack;
       // give it a one-byte object overlapping the next slot.
       int FI = MFI.CreateFixedObject(std::max(ByValSize, 1u),
-                                     2 + StackArgOffset, true);
+                                     frameOff(ByValSize), true);
       MIRBuilder.buildFrameIndex(VReg, FI);
       StackArgOffset += ByValSize;
       HasStackArgs = true;
@@ -790,6 +792,8 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
 
     ArgAssignment Assign =
         classifyArg(Regs, RegParamCount, FirstKind, BitWidth, IsVarArg, CC);
+    if (!Assign.InReg && CC == CallingConv::Z80_AllReg)
+      return false;
     if (Assign.InReg) {
       if (BitWidth <= 32 && Assign.PhysReg2.isValid()) {
         // i32: Hi:Lo pair
@@ -983,6 +987,8 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
     // NOTE: variadic + byval combination is untested.
     if (Arg.Flags[0].isByVal()) {
       unsigned ByValSize = Arg.Flags[0].getByValSize();
+      if (CC == CallingConv::Z80_AllReg)
+        return false;
       classifyArg(Regs, RegParamCount, FirstKind, 64, Info.IsVarArg, CC);
       StackArgIndices.push_back(ArgIdx);
       StackArgBytes += ByValSize;
@@ -998,6 +1004,10 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                        Info.IsVarArg, CC);
 
     if (!Assign.InReg) {
+      // z80_allreg has no stack fallback: silently spilling here would
+      // produce a call that disagrees with every conforming callee.
+      if (CC == CallingConv::Z80_AllReg)
+        return false;
       if (BitWidth % 16 != 0 && BitWidth > 16) {
         return false; // Non-16-bit-aligned wide types not supported
       }
@@ -1027,7 +1037,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
     unsigned StackIdx =
         PushForward ? StackArgIndices[K] : StackArgIndices[N - 1 - K];
     const ArgInfo &Arg = Info.OrigArgs[StackIdx];
-    Register VReg = Arg.Regs[0];
+    Register VReg = vectorToInt(MIRBuilder, MRI, Arg.Regs[0]);
 
     // Byval: copy struct bytes from source pointer to stack.
     // Push from highest offset to lowest so that lowest offset ends up
