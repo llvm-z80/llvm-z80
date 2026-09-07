@@ -33,11 +33,11 @@ define void @normal(i16 %x) {
   ret void
 }
 
-; The excluded tree's block copy becomes a memcpy call only during
-; instruction selection, so the module's own memcpy is part of the tree
-; even though no IR edge says so.
-; CHECK-NOT: memcpy.frame
-define ptr @memcpy(ptr %d, ptr %s, i16 %n) norecurse {
+; The excluded tree's block copy becomes a call to the block-copy runtime
+; only during instruction selection, so the module's own copy of it is part
+; of the tree even though no IR edge says so.
+; CHECK-NOT: __z80_memcpy_builtin.frame
+define ptr @__z80_memcpy_builtin(ptr %d, ptr %s, i16 %n) norecurse {
 entry:
   %saved = alloca ptr
   store volatile ptr %d, ptr %saved
@@ -72,4 +72,4 @@ attributes #0 = { "target-features"="-static-frame" }
 ; excluded tree again past the positive match above.
 ; CHECK-NOT: from_asm_isr.frame
 ; CHECK-NOT: isr_helper.frame
-; CHECK-NOT: memcpy.frame
+; CHECK-NOT: __z80_memcpy_builtin.frame

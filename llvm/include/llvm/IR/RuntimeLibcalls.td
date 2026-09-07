@@ -3651,7 +3651,7 @@ def WasmSystemLibrary
 // TODO: Should make every target explicit.
 def isDefaultLibcallArch : RuntimeLibcallAvailability<
   (any_of IsMIPS, IsLoongArch, IsVE, IsBPF, IsArchCSKY, IsArchArc, IsArchM68k,
-          IsArchXtensa, IsArchZ80, IsArchSM83,
+          IsArchXtensa,
           (all_of IsSystemZ, (not IsOSzOS)))>;
 
 
@@ -4494,6 +4494,44 @@ defset list<RuntimeLibcallImpl> ARMPL_VECFUNCS = {
   def armpl_vtgammaq_f32 : RuntimeLibcallImpl<TGAMMA_V4F32>;
   def armpl_vtgammaq_f64 : RuntimeLibcallImpl<TGAMMA_V2F64>;
 }
+
+//===----------------------------------------------------------------------===//
+// Z80 / SM83 Runtime Libcalls
+//===----------------------------------------------------------------------===//
+
+// The C memory routines take their length in the third argument, which the
+// SDCC ABI puts on the stack: the callee reads it back out and cleans up on
+// the way out, work unrelated to the copy that costs more than the copy
+// itself once the block is short.  These stand-ins take every argument in a
+// register, the length included, and drop the destination the C functions
+// return but nobody here uses, as ARM's __aeabi_mem* routines do.  The C
+// entry points stay in the runtime for source that calls them by name, and
+// share one body with these.
+def __z80_memcpy_builtin : RuntimeLibcallImpl<MEMCPY>;
+def __z80_memmove_builtin : RuntimeLibcallImpl<MEMMOVE>;
+def __z80_memset_builtin : RuntimeLibcallImpl<MEMSET>;
+
+def Z80MemCalls : LibcallsWithCC<
+  (add __z80_memcpy_builtin, __z80_memmove_builtin, __z80_memset_builtin),
+  Z80_BUILTIN>;
+
+def isZ80Family : RuntimeLibcallAvailability<(any_of IsArchZ80, IsArchSM83)>;
+
+// Everything the legacy default arm provided, with the three block routines
+// swapped for the register-argument forms.  The sets listed after them are the
+// ones that arm carried, repeated here so that moving off it changes nothing
+// else; the two it also carried behind isArch64Bit and the fp128 long-double
+// predicate are left out because neither holds on a 16-bit target.  Every
+// target with its own library enumerates these the same way.
+def Z80SystemLibrary
+    : SystemRuntimeLibrary<isZ80Family,
+      (add (sub DefaultRuntimeLibcallImpls,
+                memcpy, memmove, memset),
+           Z80MemCalls,
+           LibmHasSinCosF32, LibmHasSinCosF64,
+           exp10f, exp10, exp10l_f128,
+           __powisf2, __powidf2, __powitf2_f128,
+           DefaultStackProtector, DefaultSafeStackGlobals)>;
 
 //===----------------------------------------------------------------------===//
 // AMD vector math library (AMDLIBM) functions
