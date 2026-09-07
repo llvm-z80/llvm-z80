@@ -17,27 +17,25 @@ _strncmp:
 _strncmp_loop:
 	ld	a, b
 	or	c
-	jr	z, _strncmp_eq	; n exhausted, strings equal
-	ld	a, (de)
-	ld	4(ix), a	; temp = *str2 (reuse stack slot)
-	ld	a, (hl)		; A = *str1
-	sub	4(ix)		; A = *str1 - *str2
-	jr	nz, _strncmp_done
-	ld	a, (hl)
-	or	a
-	jr	z, _strncmp_eq	; both null
+	jr	z, _strncmp_eq	; n exhausted, strings equal so far
+	ld	a, (de)		; A = *str2, so the compare can use (HL) directly
+	cp	(hl)		; zero if equal, carry if *str2 < *str1
+	jr	nz, _strncmp_diff
+	or	a		; A is *str2, equal to *str1; zero ends both
+	jr	z, _strncmp_eq
 	inc	hl
 	inc	de
 	dec	bc
 	jr	_strncmp_loop
 _strncmp_eq:
-	xor	a
-_strncmp_done:
-	ld	e, a
-	ld	d, #0
-	bit	7, a
-	jr	z, _strncmp_ret
-	ld	d, #0xFF
+	ld	de, #0
+	jr	_strncmp_ret
+_strncmp_diff:
+	jr	c, _strncmp_greater	; *str2 < *str1, so str1 sorts after
+	ld	de, #0xFFFF
+	jr	_strncmp_ret
+_strncmp_greater:
+	ld	de, #1
 _strncmp_ret:
 	pop	ix
 	pop	bc		; save return address

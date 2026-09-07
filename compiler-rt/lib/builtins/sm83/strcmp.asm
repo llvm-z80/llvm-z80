@@ -17,19 +17,20 @@ _strcmp:
 _strcmp_loop:
 	ld	a, (de)		; A = *str2
 	ld	c, a		; C = *str2
-	ld	a, (hl+)		; A = *str1, HL++
-	sub	c		; A = *str1 - *str2
-	jr	nz, _strcmp_done
-	; Equal so far. Check if both null.
-	or	c		; A = 0 | *str2 (== *str1 since equal)
-	jr	z, _strcmp_done	; both null, A = 0
+	ld	a, (hl+)	; A = *str1, HL++
+	cp	c		; zero if equal, carry if *str1 < *str2
+	jr	nz, _strcmp_diff
+	or	a		; A is still *str1; zero means both ended
+	jr	z, _strcmp_eq
 	inc	de
 	jr	_strcmp_loop
-_strcmp_done:
-	; Sign-extend A into BC
-	ld	c, a
-	ld	b, #0
-	bit	7, a
-	ret	z
-	ld	b, #0xFF
+_strcmp_eq:
+	ld	bc, #0
+	ret
+_strcmp_diff:
+	jr	c, _strcmp_less
+	ld	bc, #1
+	ret
+_strcmp_less:
+	ld	bc, #0xFFFF
 	ret

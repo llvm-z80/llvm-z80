@@ -3,43 +3,60 @@
 	.globl _memcmp
 
 ;===------------------------------------------------------------------------===;
-; _memcmp - Compare memory blocks
+; ___z80_memcmp_builtin - Compare memory blocks, shared body
+;
+; Input:  HL = ptr1, DE = ptr2, BC = size
+; Output: DE = negative / zero / positive
+;
+; CPI compares A against (HL), steps HL and drops BC in one instruction, and
+; leaves P/V set while BC is still non-zero, which is the loop this needs.
+; That is 46 T-states a byte against the 104 a hand-rolled compare costs.
+;
+; The result must carry the sign of an UNSIGNED byte comparison.  Subtracting
+; the bytes and sign-extending the difference gets that wrong whenever they
+; differ by 128 or more: 0x00 against 0xFF yields +1 rather than a negative
+; number.  The carry flag decides the direction instead.
+;===------------------------------------------------------------------------===;
+___z80_memcmp_builtin:
+	ld	a, b
+	or	c
+	jr	z, ___z80_memcmp_eq	; size == 0 compares equal
+	ex	de, hl			; HL = ptr2 (CPI's pointer), DE = ptr1
+___z80_memcmp_loop:
+	ld	a, (de)			; A = *ptr1
+	inc	de
+	cpi				; A - *ptr2; HL++; BC--
+	jr	nz, ___z80_memcmp_diff
+	jp	pe, ___z80_memcmp_loop	; P/V stays set while BC != 0
+___z80_memcmp_eq:
+	ld	de, #0
+	ret
+___z80_memcmp_diff:
+	dec	hl			; back to the byte that differed
+	cp	(hl)			; carry set when *ptr1 < *ptr2
+	jr	c, ___z80_memcmp_less
+	ld	de, #1
+	ret
+___z80_memcmp_less:
+	ld	de, #0xFFFF
+	ret
+
+;===------------------------------------------------------------------------===;
+; _memcmp - Compare memory blocks, C entry point
 ;
 ; Input:  HL = ptr1, DE = ptr2, stack = size (i16)
-; Output: DE = negative/zero/positive
+; Output: DE = negative / zero / positive
 ;===------------------------------------------------------------------------===;
-
 _memcmp:
 	push	ix
 	ld	ix, #0
 	add	ix, sp
 	ld	c, 4(ix)	; BC = size
 	ld	b, 5(ix)
-_memcmp_loop:
-	ld	a, b
-	or	c
-	jr	z, _memcmp_eq
-	ld	a, (de)
-	ld	4(ix), a	; temp = *ptr2
-	ld	a, (hl)
-	sub	4(ix)		; A = *ptr1 - *ptr2
-	jr	nz, _memcmp_done
-	inc	hl
-	inc	de
-	dec	bc
-	jr	_memcmp_loop
-_memcmp_eq:
-	xor	a
-_memcmp_done:
-	ld	e, a
-	ld	d, #0
-	bit	7, a
-	jr	z, _memcmp_ret
-	ld	d, #0xFF
-_memcmp_ret:
+	call	___z80_memcmp_builtin
 	pop	ix
 	pop	bc		; save return address
 	inc	sp
 	inc	sp		; callee-cleanup: skip 2 bytes of stack args
-	push	bc
+	push	bc		; re-push return address
 	ret
