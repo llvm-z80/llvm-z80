@@ -52,6 +52,8 @@ private:
                       const Z80InstrInfo &TII, bool IsDiv);
   bool expandSDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
                       const Z80InstrInfo &TII, bool IsDiv);
+  bool expandGuardedBlockMove(MachineBasicBlock &MBB, MachineInstr &MI,
+                              const Z80InstrInfo &TII);
   bool expandSatArith8(MachineBasicBlock &MBB, MachineInstr &MI,
                        const Z80InstrInfo &TII);
   bool expandMul16(MachineBasicBlock &MBB, MachineInstr &MI,
@@ -134,6 +136,10 @@ bool Z80ExpandPseudo::runOnMachineFunction(MachineFunction &MF) {
       case Z80::SADDSAT8:
       case Z80::SSUBSAT8:
         Modified |= expandSatArith8(MBB, Inst, TII);
+        MI = MBB.end();
+        break;
+      case Z80::LDIR_GUARDED:
+        Modified |= expandGuardedBlockMove(MBB, Inst, TII);
         MI = MBB.end();
         break;
       default:
@@ -567,6 +573,39 @@ bool Z80ExpandPseudo::expandSDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
     BuildMI(NegResMBB, DL, TII.get(Z80::NEG));
   }
   NegResMBB->addSuccessor(TailMBB); // fall through
+
+  MI.eraseFromParent();
+  return true;
+}
+
+bool Z80ExpandPseudo::expandGuardedBlockMove(MachineBasicBlock &MBB,
+                                             MachineInstr &MI,
+                                             const Z80InstrInfo &TII) {
+  // LDIR_GUARDED:  LD A,B; OR C; JR Z,.done; LDIR; .done:
+  //
+  // LDIR decrements BC before testing it for zero, so a zero length would copy
+  // 65536 bytes.  The guard costs four bytes and is only emitted for lengths
+  // the compiler could not prove non-zero.
+  MachineFunction *MF = MBB.getParent();
+  DebugLoc DL = MI.getDebugLoc();
+
+  MachineBasicBlock *TailMBB = MF->CreateMachineBasicBlock();
+  MF->insert(std::next(MBB.getIterator()), TailMBB);
+  TailMBB->splice(TailMBB->begin(), &MBB,
+                  std::next(MachineBasicBlock::iterator(MI)), MBB.end());
+  TailMBB->transferSuccessorsAndUpdatePHIs(&MBB);
+
+  MachineBasicBlock *MoveMBB = MF->CreateMachineBasicBlock();
+  MF->insert(TailMBB->getIterator(), MoveMBB);
+
+  Z80::buildLD8(&MBB, DL, TII, Z80::A, Z80::B);
+  Z80::buildAlu8(&MBB, DL, TII, Z80::OR_r, Z80::C);
+  BuildMI(&MBB, DL, TII.get(Z80::JR_Z_e)).addMBB(TailMBB);
+  MBB.addSuccessor(TailMBB);
+  MBB.addSuccessor(MoveMBB);
+
+  BuildMI(MoveMBB, DL, TII.get(Z80::LDIR));
+  MoveMBB->addSuccessor(TailMBB);
 
   MI.eraseFromParent();
   return true;

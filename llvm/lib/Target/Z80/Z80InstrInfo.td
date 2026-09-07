@@ -931,6 +931,21 @@ def SMOD16 : Z80Pseudo<(outs), (ins)> {
   let Uses = [HL, DE];
   let Defs = [A, B, C, DE, HL, FLAGS];
 }
+// Guarded block move, expanded to a branch around LDIR in Z80ExpandPseudo:
+//   LD A,B; OR C; JR Z,.done; LDIR; .done:
+// LDIR decrements BC before testing it, so entering with BC == 0 copies 65536
+// bytes.  Block moves whose length is a non-zero constant use LDIR directly;
+// this pseudo is what a runtime length lowers to.
+def LDIR_GUARDED : Z80Pseudo<(outs), (ins)> {
+  let Uses = [HL, DE, BC];
+  let Defs = [HL, DE, BC, A, FLAGS];
+  let mayLoad = true;
+  let mayStore = true;
+  // LDIR itself is an unmodeled-side-effect instruction, and passes that
+  // track memory rely on that to invalidate what they know.
+  let hasSideEffects = 1;
+}
+
 // 8-bit unsigned saturating add pseudo.
 // ADD A,src; JR NC,.done; LD A,#0xFF; .done:
 def UADDSAT8 : Z80Pseudo<(outs), (ins GR8:$src)> {
