@@ -8149,22 +8149,13 @@ static bool mergeZ80CCBases(std::optional<Z80CCBase> A,
   return true;
 }
 
-/// Compose two Z80 calling-convention attributes written on one function.
-/// SDCC builds its Z80 conventions from an argument-passing base plus the
-/// orthogonal __z88dk_callee modifier and stacks the keywords freely, so
-/// `__smallc __z88dk_callee` and `__sdcccall(0) __z88dk_callee` have to mean
-/// what they do there instead of being rejected as a conflict.
-///
-/// Whatever the composition accepts, it resolves to the same convention in any
-/// spelling order.  Rejection is not quite order-independent: attributes fold
-/// pairwise onto the type, so two contradictory __sdcccall levels are caught
-/// only when they meet each other rather than an overriding base in between.
-/// `__sdcccall(0) __sdcccall(1) __smallc` is diagnosed while
-/// `__sdcccall(0) __smallc __sdcccall(1)` is accepted as __smallc; SDCC rejects
-/// both.  Neither spelling can produce a wrong ABI, only a missing diagnostic
-/// on a contradiction that an overriding base makes moot.
-///
+/// Compose two Z80 calling-convention attributes written on one function,
+/// resolving a clash between bases the way SDCC does instead of rejecting it.
 /// Returns true and sets \p Composed on success.
+///
+/// Acceptance is order-independent; rejection is not, since attributes fold
+/// pairwise: a contradiction with an overriding base written between its two
+/// halves goes undiagnosed.  The composed ABI is the same either way.
 static bool composeZ80CallingConvs(CallingConv A, CallingConv B,
                                    CallingConv &Composed) {
   std::optional<Z80CCBase> BaseA, BaseB, Merged;
@@ -8501,10 +8492,7 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
 
   if (CCOld != CC) {
     // There's already a calling-convention attribute on the type and the CCs
-    // don't match.  The Z80 conventions are built from an argument-passing
-    // base plus the orthogonal z88dk_callee modifier and SDCC lets the
-    // keywords stack up, so compose them the way it does; anything else is a
-    // genuine conflict.
+    // don't match.  A Z80 base and modifier compose; anything else conflicts.
     if (S.getCallingConvAttributedType(type)) {
       CallingConv Composed;
       if (composeZ80CallingConvs(CCOld, CC, Composed)) {
@@ -8521,11 +8509,9 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
   }
 
   if (CC == CC_Z80Z88dkFastCall) {
-    // An unprototyped declaration promises nothing about its parameters, and a
-    // later prototyped redeclaration inherits the convention through decl
-    // merging without coming back through here, so the count could never be
-    // checked at all.  Requiring a prototype keeps the one-argument rule
-    // enforceable.
+    // A later prototyped redeclaration inherits the convention through decl
+    // merging without returning here, so without a prototype now the
+    // one-argument rule could never be checked at all.
     const auto *FnP = dyn_cast<FunctionProtoType>(fn);
     if (!FnP || FnP->isVariadic() || FnP->getNumParams() != 1) {
       attr.setInvalid();
