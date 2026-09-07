@@ -1236,13 +1236,32 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     // Callee-cleanup return: pop return address, skip N bytes of stack args,
     // then return via indirect jump.
     unsigned Amount = MI.getOperand(0).getImm();
+    // SM83's ADD SP,e takes a signed 8-bit displacement, so a cleanup of more
+    // than 127 bytes has to be split across several adds.
+    auto addToSP = [&](unsigned Bytes) {
+      while (Bytes) {
+        unsigned Step = std::min(Bytes, 127u);
+        BuildMI(MBB, MI, DL, get(Z80::ADD_SP_e)).addImm(Step);
+        Bytes -= Step;
+      }
+    };
     MachineInstrBuilder Term;
     if (Amount == 0) {
+      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
+    } else if (STI->hasSM83() && MI.readsRegister(Z80::HL, TRI)) {
+      // SM83 with an i32/float return: the z88dk classic conventions bring it
+      // back in HLDE, and SM83's only indirect jump goes through HL, so the
+      // usual scratch would destroy the high word.  Return through the stack
+      // instead, on BC, which is not part of a return in that family.
+      // POP BC; ADD SP,e; PUSH BC; RET
+      BuildMI(MBB, MI, DL, get(Z80::POP_BC));
+      addToSP(Amount);
+      BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
       Term = BuildMI(MBB, MI, DL, get(Z80::RET));
     } else if (STI->hasSM83()) {
       // SM83: POP HL; ADD SP,e; JP (HL)
       BuildMI(MBB, MI, DL, get(Z80::POP_HL));
-      BuildMI(MBB, MI, DL, get(Z80::ADD_SP_e)).addImm(Amount & 0xFF);
+      addToSP(Amount);
       Term = BuildMI(MBB, MI, DL, get(Z80::JP_HLind));
     } else if (Amount <= 8) {
       // Z80 small: POP BC; INC SP × N; PUSH BC; RET
@@ -1535,6 +1554,22 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::SHL16_VAR: return IsSM83 ? 8 : 7;
     case Z80::LSHR16_VAR:
     case Z80::ASHR16_VAR: return IsSM83 ? 11 : 10;
+    // LD A,B; OR C; JR Z,e; LDIR
+    case Z80::LDIR_GUARDED: return 6;
+    // Callee-cleanup return.  The sequences are in expandPostRAPseudoImpl;
+    // SM83 needs one ADD SP,e per 127 bytes because the displacement is
+    // signed 8-bit.
+    case Z80::RET_CLEANUP: {
+      unsigned Amount = MI.getOperand(0).getImm();
+      if (Amount == 0)
+        return 1;
+      bool ReadsHL = MI.readsRegister(Z80::HL, STI.getRegisterInfo());
+      if (IsSM83)
+        return (ReadsHL ? 3 : 2) + 2 * ((Amount + 126) / 127);
+      if (Amount <= 8)
+        return 3 + Amount;
+      return ReadsHL ? 11 : 8;
+    }
     case Z80::UADDSAT8: return 5;
     case Z80::USUBSAT8: return 4;
     case Z80::SADDSAT8:
