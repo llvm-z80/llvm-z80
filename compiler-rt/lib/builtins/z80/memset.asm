@@ -9,11 +9,6 @@
 ; Input:  HL = dest, DE = value (E = byte), BC = size
 ; Output: none
 ;
-; The form the compiler calls for a memset it synthesised itself.  Taking the
-; size in BC saves the IX frame, the stack read, the callee cleanup and the
-; destination this would otherwise preserve to return, around 150 T-states a
-; call.  On a short block that is most of the work.
-;
 ; Writes the first byte, then uses LDIR to propagate it across the rest.
 ;===------------------------------------------------------------------------===;
 ___z80_memset_builtin:
@@ -36,9 +31,6 @@ ___z80_memset_builtin:
 ;
 ; Input:  HL = dest, DE = value (E = byte), stack = size (i16)
 ; Output: DE = dest (original)
-;
-; Reads the size off the stack into BC and shares the body above, so the two
-; entry points cost one `call` between them rather than a second copy.
 ;===------------------------------------------------------------------------===;
 _memset:
 	push	ix

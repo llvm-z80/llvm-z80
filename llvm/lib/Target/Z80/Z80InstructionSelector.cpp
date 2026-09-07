@@ -311,10 +311,9 @@ bool Z80InstructionSelector::selectUDivMod8(MachineInstr &MI, bool IsDiv) {
   if (MF.getSubtarget<Z80Subtarget>().hasSM83() ||
       MF.getFunction().hasMinSize()) {
     // Call the dedicated 8-bit runtime function instead.  There is no RTLIB
-    // slot for 8-bit division, so the call is built here rather than through
-    // the libcall table, but it follows CallingConv::Z80_Builtin all the same:
-    // the dividend goes in A and the divisor in the low half of the first
-    // argument pair, L on Z80 and E on SM83, with the result in A.
+    // slot for it, so the call is built by hand, but it follows
+    // CallingConv::Z80_Builtin: dividend in A, divisor in the low half of the
+    // first argument pair, result in A.
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
         !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
         !RBI.constrainGenericRegister(Src2Reg, Z80::GR8RegClass, MRI))

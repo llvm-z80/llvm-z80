@@ -10,13 +10,8 @@
 ; Input:  HL = dest, DE = src, BC = size
 ; Output: none
 ;
-; The form the compiler calls for a copy it synthesised itself.  Taking the
-; size in BC saves the IX frame, the stack read, the callee cleanup and the
-; destination this would otherwise preserve to return.
-;
-; LDIR copies (HL)->(DE) and steps both up, so the pointers arrive swapped
-; relative to the C argument order.  It decrements BC before testing it, so a
-; zero size has to be turned away first or it would copy 65536 bytes.
+; LDIR copies (HL)->(DE), the opposite of the C argument order, and decrements
+; BC before testing it, so a zero size would copy 65536 bytes.
 ;===------------------------------------------------------------------------===;
 ___z80_memcpy_builtin:
 	ex	de, hl		; HL = src, DE = dest (LDIR format)
@@ -32,11 +27,9 @@ ___z80_memcpy_builtin:
 ; Input:  HL = dest, DE = src, stack = size (i16)
 ; Output: DE = dest (original)
 ;
-; SDCC lowers a struct assignment to a call to __memcpy, its own name for this
-; routine.  Both names live in one module in SDCC's library, so a program that
-; links this runtime and reaches for __memcpy would otherwise drag in SDCC's
-; memcpy alongside ours and fail on the duplicate.  Defining both here keeps
-; that module out of the link entirely.
+; SDCC lowers a struct assignment to __memcpy and keeps both names in one
+; library module, so defining only one of them pulls in SDCC's memcpy too and
+; the link fails on the duplicate.
 ;===------------------------------------------------------------------------===;
 _memcpy:
 ___memcpy:

@@ -9,17 +9,11 @@
 ; Input:  HL = dest, DE = src, BC = size
 ; Output: none
 ;
-; The form the compiler calls for a move it synthesised itself, and the one it
-; falls back to when it cannot tell at compile time which way the regions
-; overlap.  Taking the size in BC saves the IX frame, the stack read, the
-; callee cleanup and the preserved destination.
-;
 ;   dest < src : forward copy  (LDIR)
 ;   dest > src : backward copy (LDDR)
 ;   dest == src or size == 0 : nothing to do
 ;
-; LDIR and LDDR decrement BC before testing it, so a zero size has to be
-; turned away first or it would copy 65536 bytes.
+; Both decrement BC before testing it, so a zero size would copy 65536 bytes.
 ;===------------------------------------------------------------------------===;
 ___z80_memmove_builtin:
 	ld	a, b

@@ -143,10 +143,8 @@ static bool isCalleeCleanup(bool IsVarArg, Type *RetTy, Type *FirstArgTy,
 }
 /// Bytes an argument of \p BitWidth occupies in the stack frame.
 /// __sdcccall(0) packs an i8 into a single byte, for which SDCC emits
-/// `push af; inc sp`, while __smallc gives every argument a full 2-byte slot
-/// and pushes it whole.  Getting this wrong shifts every argument past the
-/// first narrow one, and under __z88dk_callee it also makes the callee pop
-/// the wrong count.
+/// `push af; inc sp`; __smallc gives every argument a full 2-byte slot.  Get
+/// this wrong and every argument past the first narrow one shifts.
 static unsigned stackSlotBytes(unsigned BitWidth, const Z80CCAxes &Axes) {
   unsigned Bytes = (BitWidth + 7) / 8;
   return Axes.isLeftToRight() ? alignTo(Bytes, 2u) : Bytes;
@@ -162,12 +160,9 @@ struct ArgAssignment {
 };
 
 /// Backend-internal rtlib helpers.  Arguments come out of one pool in
-/// declaration order, following __sdcccall(1)'s own order for the subtarget
-/// and continuing into the pair that convention does not reach: HL, DE, BC on
-/// Z80 and DE, BC, HL on SM83.  A narrower value takes A while it is free and
-/// afterwards the low half of the next free pair.  Nothing goes on the stack:
-/// these stand in for C routines whose third argument __sdcccall(1) would
-/// push.
+/// declaration order: HL, DE, BC on Z80 and DE, BC, HL on SM83.  A narrower
+/// value takes A while it is free, afterwards the low half of the next free
+/// pair.  Nothing goes on the stack.
 ///
 /// State rides in \p RegParamCount as a bitmask: bits 0-2 are the three pairs
 /// in pool order and bit 3 is A.
@@ -221,10 +216,9 @@ static ArgAssignment classifyArgBuiltin(const CallingConvRegs &Regs,
 /// z88dk __z88dk_fastcall: a single argument in a fixed register.
 ///   i8 -> First_I8 (L), i16 -> First_I16 (HL),
 ///   i32 -> First_I32_Hi:_Lo (DE:HL).
-/// Only the first argument is register-passed.  z88dk fastcall is
-/// single-argument by construction; a 2nd+ argument is rejected by the
-/// frontend, but if one reaches here we leave it InReg=false (stack) rather
-/// than assert, so the backend degrades safely.
+/// The convention is single-argument by construction and the frontend rejects
+/// a second one; should one reach here it is left InReg=false rather than
+/// asserted on.
 static ArgAssignment classifyArgFastCall(const CallingConvRegs &Regs,
                                          unsigned &RegParamCount,
                                          unsigned BitWidth) {
@@ -325,11 +319,9 @@ Z80CallLowering::Z80CallLowering(const TargetLowering *TL)
                                 /*Half_2=*/Z80::E,
                                 /*Half_3=*/Z80::C,
                             },
-                            // z88dk/SDCC block registers.  The stack
-                            // conventions read only the return half; the
-                            // First_* fields are what __z88dk_fastcall passes
-                            // its sole argument in, and z88dk deliberately
-                            // makes those the same registers.
+                            // z88dk block: the stack conventions read only
+                            // the return half, and __z88dk_fastcall passes its
+                            // sole argument in those same registers.
                             CallingConvRegs{
                                 /*First_I16=*/Z80::HL,
                                 /*First_I32_Hi=*/Z80::DE,

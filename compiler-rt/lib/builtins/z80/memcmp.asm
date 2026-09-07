@@ -9,13 +9,11 @@
 ; Output: DE = negative / zero / positive
 ;
 ; CPI compares A against (HL), steps HL and drops BC in one instruction, and
-; leaves P/V set while BC is still non-zero, which is the loop this needs.
-; That is 46 T-states a byte against the 104 a hand-rolled compare costs.
+; leaves P/V set while BC is non-zero.
 ;
-; The result must carry the sign of an UNSIGNED byte comparison.  Subtracting
-; the bytes and sign-extending the difference gets that wrong whenever they
-; differ by 128 or more: 0x00 against 0xFF yields +1 rather than a negative
-; number.  The carry flag decides the direction instead.
+; The result carries the sign of an UNSIGNED byte comparison, so it comes from
+; the carry flag: sign-extending the difference would make 0x00 against 0xFF
+; positive.
 ;===------------------------------------------------------------------------===;
 ___z80_memcmp_builtin:
 	ld	a, b

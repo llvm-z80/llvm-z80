@@ -10,11 +10,8 @@
 ; Input:  DE = dest, BC = src, HL = size
 ; Output: none
 ;
-; The convention follows __sdcccall(1)'s order for this subtarget and adds the
-; pair that convention does not reach, so the first two arguments arrive where
-; the C entry below already had them and only the size is new.  The loop needs
-; its moving pointer in HL, the only register SM83 auto-increments, so the
-; three rotate once on entry.
+; HL is the only register SM83 auto-increments, so the three rotate on entry to
+; put the moving pointer there.
 ;===------------------------------------------------------------------------===;
 ___z80_memcpy_builtin:
 	ld	a, h
@@ -40,9 +37,8 @@ ___z80_memcpy_loop:
 ; Input:  DE = dest, BC = src, stack = size (i16)
 ; Output: BC = dest (original)
 ;
-; SDCC lowers a struct assignment to a call to __memcpy, its own name for this
-; routine, and keeps both names in one library module.  Defining both here
-; keeps that module, and the duplicate memcpy it carries, out of the link.
+; SDCC lowers a struct assignment to __memcpy and keeps both names in one
+; library module; defining only one of them pulls in SDCC's memcpy too.
 ;===------------------------------------------------------------------------===;
 _memcpy:
 ___memcpy:

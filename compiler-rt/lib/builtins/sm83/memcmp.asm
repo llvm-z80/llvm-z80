@@ -11,10 +11,9 @@
 ; SM83 can only compare A against (HL), so ptr2 moves there and ptr1 is read
 ; through DE.
 ;
-; The result must carry the sign of an UNSIGNED byte comparison.  Subtracting
-; the bytes and sign-extending the difference gets that wrong whenever they
-; differ by 128 or more: 0x00 against 0xFF yields +1 rather than a negative
-; number.  The carry flag decides the direction instead.
+; The result carries the sign of an UNSIGNED byte comparison, so it comes from
+; the carry flag: sign-extending the difference would make 0x00 against 0xFF
+; positive.
 ;===------------------------------------------------------------------------===;
 ___z80_memcmp_builtin:
 	ld	a, h

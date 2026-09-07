@@ -9,10 +9,9 @@
 ; Input:  DE = dest, BC = value (C = byte), HL = size
 ; Output: none
 ;
-; Holding the fill byte in A for the whole loop needs a counter that does not
-; go through A, so the size is split into a pair of 8-bit counts: B is bumped
-; when C is non-zero and the inner DEC C borrows into it.  That drops the loop
-; from 40 to 24 T-states a byte.
+; The fill byte stays in A, so the count cannot pass through it: the size is
+; split into two 8-bit counters, with B bumped when C is non-zero so the inner
+; DEC C borrows into it.
 ;===------------------------------------------------------------------------===;
 ___z80_memset_builtin:
 	ld	a, h

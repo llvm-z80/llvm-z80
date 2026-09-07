@@ -4499,14 +4499,11 @@ defset list<RuntimeLibcallImpl> ARMPL_VECFUNCS = {
 // Z80 / SM83 Runtime Libcalls
 //===----------------------------------------------------------------------===//
 
-// The C memory routines take their length in the third argument, which the
-// SDCC ABI puts on the stack: the callee reads it back out and cleans up on
-// the way out, work unrelated to the copy that costs more than the copy
-// itself once the block is short.  These stand-ins take every argument in a
-// register, the length included, and drop the destination the C functions
-// return but nobody here uses, as ARM's __aeabi_mem* routines do.  The C
-// entry points stay in the runtime for source that calls them by name, and
-// share one body with these.
+// The SDCC ABI puts the length on the stack, so the C routines build a frame
+// to read it back and clean up on the way out.  These stand-ins take every
+// argument in a register and drop the returned destination, as ARM's
+// __aeabi_mem* routines do.  The C entry points stay in the runtime for source
+// that calls them by name.
 def __z80_memcpy_builtin : RuntimeLibcallImpl<MEMCPY>;
 def __z80_memmove_builtin : RuntimeLibcallImpl<MEMMOVE>;
 def __z80_memset_builtin : RuntimeLibcallImpl<MEMSET>;
@@ -4517,12 +4514,9 @@ def Z80MemCalls : LibcallsWithCC<
 
 def isZ80Family : RuntimeLibcallAvailability<(any_of IsArchZ80, IsArchSM83)>;
 
-// Everything the legacy default arm provided, with the three block routines
-// swapped for the register-argument forms.  The sets listed after them are the
-// ones that arm carried, repeated here so that moving off it changes nothing
-// else; the two it also carried behind isArch64Bit and the fp128 long-double
-// predicate are left out because neither holds on a 16-bit target.  Every
-// target with its own library enumerates these the same way.
+// The legacy default arm, with the three block routines swapped for the
+// register-argument forms.  Its 128-bit and fp128 long-double sets are left
+// out; neither predicate holds on a 16-bit target.
 def Z80SystemLibrary
     : SystemRuntimeLibrary<isZ80Family,
       (add (sub DefaultRuntimeLibcallImpls,
