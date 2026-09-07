@@ -4160,8 +4160,11 @@ def warn_cconv_knr : Warning<
   InGroup<DiagGroup<"missing-prototype-for-cc">>;
 def err_cconv_varargs : Error<
   "variadic function cannot use %0 calling convention">;
-def err_z80_fastcall_params : Error<
-  "z80_fastcall function must have exactly one parameter">;
+def err_z88dk_fastcall_params : Error<
+  "z88dk_fastcall function must be declared with exactly one parameter">;
+def err_z88dk_fastcall_type : Error<
+  "z88dk_fastcall %select{parameter|return}0 type must fit in registers: "
+  "a scalar no wider than 32 bits">;
 def err_regparm_mismatch : Error<"function declared with regparm(%0) "
   "attribute was previously declared "
   "%plural{0:without the regparm|:with the regparm(%1)}1 attribute">;

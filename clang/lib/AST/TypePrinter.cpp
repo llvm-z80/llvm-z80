@@ -1222,20 +1222,20 @@ void TypePrinter::printFunctionAfter(const FunctionType::ExtInfo &Info,
     case CC_Z80SDCCCall0:
       OS << " __attribute__((sdcccall(0)))";
       break;
-    case CC_Z80AllReg:
-      OS << " __attribute__((z80_allreg))";
-      break;
-    case CC_Z80FastCall:
-      OS << " __attribute__((z80_fastcall))";
-      break;
-    case CC_Z80Callee:
-      OS << " __attribute__((z80_callee))";
-      break;
     case CC_Z80SmallC:
-      OS << " __attribute__((z80_smallc))";
+      OS << " __attribute__((smallc))";
+      break;
+    case CC_Z80Z88dkFastCall:
+      OS << " __attribute__((z88dk_fastcall))";
+      break;
+    case CC_Z80Z88dkCallee:
+      OS << " __attribute__((z88dk_callee))";
+      break;
+    case CC_Z80SDCCCall0Callee:
+      OS << " __attribute__((sdcccall(0))) __attribute__((z88dk_callee))";
       break;
     case CC_Z80SmallCCallee:
-      OS << " __attribute__((z80_smallc)) __attribute__((z80_callee))";
+      OS << " __attribute__((smallc)) __attribute__((z88dk_callee))";
       break;
     }
   }
@@ -2154,6 +2154,18 @@ void TypePrinter::printAttributedAfter(const AttributedType *T,
     break;
   case attr::RISCVVLSCC:
     OS << "riscv_vls_cc";
+    break;
+  case attr::SDCCCall:
+    OS << "sdcccall";
+    break;
+  case attr::SmallC:
+    OS << "smallc";
+    break;
+  case attr::Z88dkCallee:
+    OS << "z88dk_callee";
+    break;
+  case attr::Z88dkFastCall:
+    OS << "z88dk_fastcall";
     break;
   case attr::NoDeref:
     OS << "noderef";

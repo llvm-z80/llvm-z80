@@ -3783,16 +3783,16 @@ StringRef FunctionType::getNameForCallConv(CallingConv CC) {
     return "preserve_none";
   case CC_Z80SDCCCall0:
     return "sdcccall(0)";
-  case CC_Z80AllReg:
-    return "z80_allreg";
-  case CC_Z80FastCall:
-    return "z80_fastcall";
-  case CC_Z80Callee:
-    return "z80_callee";
   case CC_Z80SmallC:
-    return "z80_smallc";
+    return "smallc";
+  case CC_Z80Z88dkFastCall:
+    return "z88dk_fastcall";
+  case CC_Z80Z88dkCallee:
+    return "z88dk_callee";
+  case CC_Z80SDCCCall0Callee:
+    return "sdcccall(0) z88dk_callee";
   case CC_Z80SmallCCallee:
-    return "z80_smallc z80_callee";
+    return "smallc z88dk_callee";
     // clang-format off
   case CC_RISCVVectorCall: return "riscv_vector_cc";
 #define CC_VLS_CASE(ABI_VLEN) \
@@ -4606,10 +4606,9 @@ bool AttributedType::isCallingConv() const {
   case attr::RISCVVectorCC:
   case attr::RISCVVLSCC:
   case attr::SDCCCall:
-  case attr::Z80AllReg:
-  case attr::Z80FastCall:
-  case attr::Z80Callee:
-  case attr::Z80SmallC:
+  case attr::Z88dkFastCall:
+  case attr::Z88dkCallee:
+  case attr::SmallC:
     return true;
   }
   llvm_unreachable("invalid attr kind");

@@ -1,8 +1,8 @@
 // RUN: %clang_cc1 -triple z80 -emit-llvm -o - %s | FileCheck %s
 //
-// __attribute__((z80_smallc)) and __attribute__((z80_callee)) live on
-// ORTHOGONAL ABI axes -- argument order
-// (left-to-right, from smallc) and stack cleanup (callee, from callee) -- so
+// __attribute__((smallc)) and __attribute__((z88dk_callee)) live on
+// ORTHOGONAL ABI axes, argument order
+// (left-to-right, from smallc) and stack cleanup (callee, from callee), so
 // writing both on one function COMPOSES them into the z88dk
 // `__smallc __z88dk_callee` convention instead of conflicting.  clang
 // lowers the composition to CallingConv::Z80_SmallCCallee = 133 (`cc133`) on
@@ -11,9 +11,9 @@
 // llvm/test/CodeGen/Z80/z80-smallc-callee.ll.
 
 // CHECK: define{{.*}}cc133 void @sink2(i16
-__attribute__((z80_smallc)) __attribute__((z80_callee))
+__attribute__((smallc)) __attribute__((z88dk_callee))
 void sink2(unsigned short a, unsigned short b);
-__attribute__((z80_smallc)) __attribute__((z80_callee))
+__attribute__((smallc)) __attribute__((z88dk_callee))
 void sink2(unsigned short a, unsigned short b) {
   (void)a;
   (void)b;
@@ -21,7 +21,7 @@ void sink2(unsigned short a, unsigned short b) {
 
 // The composition is order-independent: callee-then-smallc yields the same CC.
 // CHECK: define{{.*}}cc133 {{.*}}i16 @ordered2(i16
-__attribute__((z80_callee)) __attribute__((z80_smallc))
+__attribute__((z88dk_callee)) __attribute__((smallc))
 unsigned short ordered2(unsigned short a, unsigned short b) {
   return 10 * a + b;
 }
@@ -31,11 +31,11 @@ unsigned short ordered2(unsigned short a, unsigned short b) {
 // CHECK: call cc133 void @sink2(i16 noundef {{(zeroext )?}}1, i16 noundef {{(zeroext )?}}2)
 void call_sink2(void) { sink2(1, 2); }
 
-// A call THROUGH A FUNCTION POINTER must carry the convention too -- this is the
+// A call THROUGH A FUNCTION POINTER must carry the convention too, this is the
 // reason the axes must live in the function type (indirect calls have no decl to
 // consult).  qsort-style comparators declared this way are the motivating case.
 typedef void (*sink_fp)(unsigned short, unsigned short)
-    __attribute__((z80_smallc)) __attribute__((z80_callee));
+    __attribute__((smallc)) __attribute__((z88dk_callee));
 // CHECK-LABEL: @call_via_ptr(
 // CHECK: call cc133 void %{{.*}}(i16
 void call_via_ptr(sink_fp f) { f(3, 4); }

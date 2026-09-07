@@ -297,54 +297,26 @@ namespace CallingConv {
     /// stateless compartment.
     CHERIoT_LibraryCall = 127,
 
-    /// Z80 SDCC __sdcccall(0) - all parameters on stack, caller cleanup.
-    /// Return: Z80 i8->L, i16->HL, i32->DEHL; SM83 i8->E, i16->DE, i32->HLDE.
+    /// Z80 SDCC __sdcccall(0): every parameter on the stack, pushed
+    /// right-to-left, caller cleanup.  Returns i8->L, i16->HL, i32->DE:HL on
+    /// Z80, and i8->E, i16->DE, i32->HL:DE on SM83.
     Z80_SDCCCall0 = 128,
-
-    /// Z80 all-register calling convention — pass all args in registers.
-    /// i8: A, then low bytes of remaining pairs.
-    /// i16: HL, DE, BC, IX, IY in order.
-    /// i32: HLDE, then BCIY.
-    /// No stack arguments. Error if registers exhausted.
-    Z80_AllReg = 129,
-
-    /// Z80 z88dk __z88dk_fastcall — a single argument passed in a fixed
-    /// register: i8->L, i16->HL, i32->DE:HL (DE=high, HL=low).  The return
-    /// value uses the same registers (i8->L, i16->HL, i32->DE:HL), matching
-    /// __sdcccall(0).  Only one argument is register-passed; z88dk fastcall is
-    /// single-argument by construction (the frontend rejects >1 arg).
+    /// Z80 SDCC __smallc: __sdcccall(0) pushed left-to-right instead.
+    Z80_SmallC = 129,
+    /// Z80 z88dk __z88dk_fastcall: one argument, passed in L/HL/DE:HL.
     Z80_Z88dkFastCall = 130,
-
-    /// Z80 z88dk __z88dk_callee — arguments are pushed on the stack exactly
-    /// like __sdcccall(0), but the CALLEE cleans them up on return (Z80 has no
-    /// `ret N`, so the backend uses the RET_CLEANUP pseudo).  Return value uses
-    /// the z88dk classic registers (i8->L, i16->HL, i32->DE:HL), same as
-    /// __sdcccall(0).  Callee cleanup is forced regardless of return size
-    /// (unlike __sdcccall(1), which caller-cleans for >16-bit returns).
+    /// Z80 z88dk __z88dk_callee: __sdcccall(1), but the callee pops the stack
+    /// arguments whatever the return size.
     Z80_Z88dkCallee = 131,
-
-    /// Z80 SDCC __smallc (small-C) — all parameters on stack, caller cleanup,
-    /// exactly like __sdcccall(0) EXCEPT the argument order is reversed.
-    /// __smallc pushes left-to-right, so the caller pushes the first declared
-    /// argument first (deepest) and the last argument last (nearest the return
-    /// address); the callee finds the last argument at the lowest stack address
-    /// (IX+4).  This is the opposite of __sdcccall(0) (right-to-left, first arg
-    /// at IX+4).  Identical for single-argument functions.  Return value uses
-    /// the z88dk classic registers (i8->L, i16->HL, i32->DE:HL), same as
-    /// __sdcccall(0).  Exists so clang can call the z88dk classic C library,
-    /// whose functions are compiled __smallc.
-    Z80_SmallC = 132,
-
-    /// Z80 z88dk __smallc __z88dk_callee — the composition of the __smallc
-    /// argument order (left-to-right push, first declared arg deepest, last at
-    /// IX+4) with __z88dk_callee stack cleanup (the CALLEE pops the arguments).
-    /// Stack layout and return registers are identical to __smallc / sdcccall(0)
-    /// (i8->L, i16->HL, i32->DE:HL); it differs from __smallc only in cleanup,
-    /// and from __z88dk_callee only in argument order.  This is what the z88dk
-    /// classic clib actually uses for its `_callee` entry points (e.g. all of
-    /// <graphics.h>).  The backend decodes the two orthogonal axes (order,
-    /// cleanup) rather than hand-authoring a convention per combination.
+    /// Z80 SDCC __sdcccall(0) __z88dk_callee.
+    Z80_SDCCCall0Callee = 132,
+    /// Z80 SDCC __smallc __z88dk_callee, used by the z88dk classic C library.
     Z80_SmallCCallee = 133,
+    /// Z80 rtlib helpers, which put in registers what __sdcccall(1) would have
+    /// spilled: a pair-wide argument takes the next free one of HL, DE, BC,
+    /// and a narrower one takes A if free, else that pair's low half.  There
+    /// is no stack fallback.  Returns as __sdcccall(1).  Backend-internal.
+    Z80_Builtin = 134,
 
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023

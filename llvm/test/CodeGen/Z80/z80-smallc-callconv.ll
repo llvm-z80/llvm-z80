@@ -2,13 +2,13 @@
 ;
 ; SDCC has two distinct stack calling conventions with OPPOSITE argument order:
 ;   __sdcccall(0) (cc128): right-to-left push -> first arg nearest return addr.
-;   __smallc      (cc132): left-to-right push -> last  arg nearest return addr.
+;   __smallc      (cc129): left-to-right push -> last  arg nearest return addr.
 ; They are identical for a single argument.  z88dk's classic C library is
-; compiled __smallc, so clang needs cc132 to call it correctly.  Constants:
+; compiled __smallc, so clang needs cc129 to call it correctly.  Constants:
 ; 0x1111=4369, 0x2222=8738, 0x3333=13107.
 
 declare cc128 i16 @f0(i16, i16, i16)
-declare cc132 i16 @fs(i16, i16, i16)
+declare cc129 i16 @fs(i16, i16, i16)
 
 ; sdcccall(0): push 3rd, 2nd, 1st (first arg ends nearest the return address).
 define void @call_sdcccall0() {
@@ -34,6 +34,6 @@ define void @call_smallc() {
 ; CHECK:       ld hl,#13107
 ; CHECK:       push hl
 ; CHECK:       call _fs
-  call cc132 i16 @fs(i16 4369, i16 8738, i16 13107)
+  call cc129 i16 @fs(i16 4369, i16 8738, i16 13107)
   ret void
 }

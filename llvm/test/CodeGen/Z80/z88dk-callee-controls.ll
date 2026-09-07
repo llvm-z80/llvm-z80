@@ -1,15 +1,12 @@
 ; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 ;
-; Positive controls for the __z88dk_callee work (planned cc 131).  These pin the
-; neighbouring __smallc / sdcccall(0) convention (cc 128), which shares the
-; stack-passing of __z88dk_callee but keeps CALLER-side cleanup.  Implementing
-; cc 131 must not turn cc 128 into a callee-cleanup convention.  NOT XFAIL: pass
-; today and must keep passing.
+; Controls for __z88dk_callee (cc 132): the neighbouring conventions it must not
+; disturb.
 
 ; ----------------------------------------------------------------------------
-; __smallc (cc 128): caller pushes args, and the CALLER pops them after the
-; call (`pop af` x2 for two i16 args).  This is exactly what distinguishes it
-; from __z88dk_callee, whose caller does NOT clean up.
+; __sdcccall(0) (cc 128): the caller pushes the args and the CALLER pops them
+; after the call (`pop af` x2 for two i16 args).  That cleanup side is exactly
+; what distinguishes it from __z88dk_callee, whose caller does not clean up.
 ; ----------------------------------------------------------------------------
 declare cc 128 void @sc2(i16, i16)
 define void @sc_caller() {

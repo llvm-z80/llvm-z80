@@ -3631,37 +3631,19 @@ def SDCCCall : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
   let Documentation = [SDCCCallDocs];
 }
 
-def Z80AllReg : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
-  let Spellings = [Clang<"z80_allreg">];
-  let Documentation = [Z80AllRegDocs];
+def Z88dkFastCall : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [Clang<"z88dk_fastcall">];
+  let Documentation = [Z88dkFastCallDocs];
 }
 
-def Z80FastCall : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
-  let Spellings = [Clang<"z80_fastcall">];
-  let Documentation = [Z80FastCallDocs];
+def Z88dkCallee : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [Clang<"z88dk_callee">];
+  let Documentation = [Z88dkCalleeDocs];
 }
 
-def Z80Callee : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
-  let Spellings = [Clang<"z80_callee">];
-  let Documentation = [Z80CalleeDocs];
-}
-
-def Z80SmallC : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
-  let Spellings = [Clang<"z80_smallc">];
-  let Documentation = [Z80SmallCDocs];
-}
-
-def Z80PreservesRegs : InheritableAttr, TargetSpecificAttr<TargetZ80> {
-  let Spellings = [Clang<"z80_preserves_regs">];
-  let Args = [VariadicStringArgument<"Regs">];
-  let Subjects = SubjectList<[Function], ErrorDiag>;
-  let Documentation = [Z80PreservesRegsDocs];
-}
-
-def Z80Critical : InheritableAttr, TargetSpecificAttr<TargetZ80> {
-  let Spellings = [Clang<"z80_critical">];
-  let Subjects = SubjectList<[Function], ErrorDiag>;
-  let Documentation = [Z80CriticalDocs];
+def SmallC : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [Clang<"smallc">];
+  let Documentation = [SmallCDocs];
 }
 
 def Target : InheritableAttr {
