@@ -1835,6 +1835,14 @@ static unsigned getDwarfCC(CallingConv CC, const llvm::Triple &T) {
     return llvm::dwarf::DW_CC_LLVM_X86RegCall;
   case CC_M68kRTD:
     return llvm::dwarf::DW_CC_LLVM_M68kRTD;
+  // DWARF has no code for the SDCC and z88dk conventions.
+  case CC_Z80SDCCCall0:
+  case CC_Z80SmallC:
+  case CC_Z80Z88dkFastCall:
+  case CC_Z80Z88dkCallee:
+  case CC_Z80SDCCCall0Callee:
+  case CC_Z80SmallCCallee:
+    return 0;
   case CC_PreserveNone:
     return llvm::dwarf::DW_CC_LLVM_PreserveNone;
   case CC_RISCVVectorCall:
