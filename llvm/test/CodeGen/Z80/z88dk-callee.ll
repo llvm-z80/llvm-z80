@@ -34,22 +34,36 @@ define void @call_callee() {
 
 ; Callee side with a 32-bit return: __sdcccall(1) alone would let the CALLER
 ; pop the two argument bytes here, but the modifier forces the callee to do it.
-; The return value occupies HL:DE, so the cleanup takes its scratch elsewhere.
+; The expression a-b-c uses all three argument positions non-commutatively:
+; a is in HL (first register), b is in DE (second register), c is on the stack.
+; A register swap would produce a wrong result for any distinct a, b, c.
 ; CHECK-LABEL: _callee_reti32:
-; CHECK:      ld hl,#0
-; CHECK-NEXT: pop bc
+; CHECK:      ld c,l
+; CHECK-NEXT: ld b,h
+; CHECK:      ld hl,#4
+; CHECK-NEXT: add hl,sp
+; CHECK:      sbc hl,de
+; CHECK:      pop bc
 ; CHECK-NEXT: inc sp
 ; CHECK-NEXT: inc sp
 ; CHECK-NEXT: push bc
 ; CHECK-NEXT: ret
 define cc 131 i32 @callee_reti32(i16 %a, i16 %b, i16 %c) {
-  %z = zext i16 %c to i32
+  %ab = sub i16 %a, %b
+  %abc = sub i16 %ab, %c
+  %z = sext i16 %abc to i32
   ret i32 %z
 }
 
 ; A 16-bit return would be callee-cleaned under plain __sdcccall(1) too, so
 ; this one only pins that the modifier does not double-clean.
+; Same a-b-c expression, return value in DE.
 ; CHECK-LABEL: _callee_reti16:
+; CHECK:      ld c,l
+; CHECK-NEXT: ld b,h
+; CHECK:      ld hl,#4
+; CHECK-NEXT: add hl,sp
+; CHECK:      sbc hl,de
 ; CHECK:      ex de,hl
 ; CHECK-NEXT: pop bc
 ; CHECK-NEXT: inc sp
@@ -57,8 +71,9 @@ define cc 131 i32 @callee_reti32(i16 %a, i16 %b, i16 %c) {
 ; CHECK-NEXT: push bc
 ; CHECK-NEXT: ret
 define cc 131 i16 @callee_reti16(i16 %a, i16 %b, i16 %c) {
-  %s = sub i16 %a, %c
-  ret i16 %s
+  %ab = sub i16 %a, %b
+  %abc = sub i16 %ab, %c
+  ret i16 %abc
 }
 
 ; No stack argument at all, nothing to clean, and no spurious pop.

@@ -32,14 +32,13 @@ define void @call_smallc_callee() {
   ret void
 }
 
-; Callee side: both args on the stack (left-to-right push means arg1 is
-; deepest at SP+4, arg2 is shallower at SP+2).  The non-commutative result
-; 10*a+b makes an accidental swap observable.  Callee pops 4 bytes.
+; Callee side: arg1 (a) is deepest (SP+4), arg2 (b) is shallowest (SP+2).
+; The non-commutative result a-b makes an accidental swap observable.
+; Callee pops all 4 bytes.
 ; CHECK-LABEL: _callee_void:
 ; CHECK:       ld hl,#4
 ; CHECK-NEXT:  add hl,sp
-; CHECK:       ld hl,#2
-; CHECK-NEXT:  add hl,sp
+; CHECK:       sbc hl,bc
 ; CHECK:       pop bc
 ; CHECK-NEXT:  inc sp
 ; CHECK-NEXT:  inc sp
@@ -48,20 +47,22 @@ define void @call_smallc_callee() {
 ; CHECK-NEXT:  push bc
 ; CHECK-NEXT:  ret
 define cc133 void @callee_void(i16 %a, i16 %b) {
-  %scaled_a = mul i16 %a, 10
-  %s = add i16 %scaled_a, %b
+  %s = sub i16 %a, %b
   store i16 %s, ptr inttoptr(i16 16384 to ptr)
   ret void
 }
 
 ; Byval cannot go in registers, so both args land on the stack.
-; With left-to-right push: byval (arg1, 4 bytes) is deepest at SP+4,
-; scalar (arg2, 2 bytes) is shallower at SP+2.  Callee pops all 6 bytes.
+; With left-to-right push: byval (arg1, 4 bytes) is deepest,
+; scalar x (arg2, 2 bytes) is shallowest at SP+2.  The non-commutative
+; result (byval first i16) - x makes an accidental swap observable.
+; Callee pops all 6 bytes.
 ; CHECK-LABEL: _callee_byval:
 ; CHECK:       ld hl,#2
 ; CHECK-NEXT:  add hl,sp
 ; CHECK:       ld hl,#4
 ; CHECK-NEXT:  add hl,sp
+; CHECK:       sbc hl,bc
 ; CHECK:       pop bc
 ; CHECK-NEXT:  inc sp
 ; CHECK-NEXT:  inc sp
@@ -73,8 +74,7 @@ define cc133 void @callee_void(i16 %a, i16 %b) {
 ; CHECK-NEXT:  ret
 define cc133 void @callee_byval(ptr byval(%ByValPair) %p, i16 %x) {
   %v = load i16, ptr %p
-  %scaled = mul i16 %v, 10
-  %r = add i16 %scaled, %x
+  %r = sub i16 %v, %x
   store i16 %r, ptr inttoptr(i16 16384 to ptr)
   ret void
 }
