@@ -310,8 +310,10 @@ bool Z80InstructionSelector::selectUDivMod8(MachineInstr &MI, bool IsDiv) {
 
   if (MF.getSubtarget<Z80Subtarget>().hasSM83() ||
       MF.getFunction().hasMinSize()) {
-    // Call the dedicated 8-bit runtime function instead.
-    // Convention: A = dividend, E = divisor, return A = result.
+    // Call the dedicated 8-bit runtime function instead.  There is no RTLIB
+    // slot for it, so the call is built by hand, but it follows
+    // CallingConv::Z80_Builtin: dividend in A, divisor in the low half of the
+    // first argument pair, result in A.
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
         !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
         !RBI.constrainGenericRegister(Src2Reg, Z80::GR8RegClass, MRI))
@@ -327,11 +329,14 @@ bool Z80InstructionSelector::selectUDivMod8(MachineInstr &MI, bool IsDiv) {
     GlobalValue *GV = cast<GlobalValue>(Func.getCallee());
 
     BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(Src1Reg);
-    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::E).addReg(Src2Reg);
+    Register DivisorReg =
+        MF.getSubtarget<Z80Subtarget>().hasSM83() ? Z80::E : Z80::L;
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DivisorReg)
+        .addReg(Src2Reg);
     BuildMI(MBB, MI, DL, TII.get(Z80::CALL_nn))
         .addGlobalAddress(GV)
         .addUse(Z80::A, RegState::Implicit)
-        .addUse(Z80::E, RegState::Implicit);
+        .addUse(DivisorReg, RegState::Implicit);
     BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::A);
 
     MI.eraseFromParent();

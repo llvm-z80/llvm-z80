@@ -5,7 +5,7 @@
 ;===------------------------------------------------------------------------===;
 ; ___umodqi3 - 8-bit unsigned modulo (remainder)
 ;
-; Input:  A = dividend, E = divisor
+; Input:  A = dividend, L = divisor
 ; Output: A = remainder
 ; Clobbers: B, D, FLAGS
 ;===------------------------------------------------------------------------===;
@@ -16,9 +16,9 @@ ___umodqi3:
 ___umodqi3_loop:
 	sla	d		; shift dividend MSB -> carry
 	rla			; remainder = remainder*2 + carry
-	cp	e		; compare remainder with divisor
+	cp	l		; compare remainder with divisor
 	jr	c, ___umodqi3_skip
-	sub	e		; remainder -= divisor
+	sub	l		; remainder -= divisor
 	inc	d		; set quotient bit
 ___umodqi3_skip:
 	djnz	___umodqi3_loop

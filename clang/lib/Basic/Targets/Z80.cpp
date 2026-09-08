@@ -108,7 +108,13 @@ Z80TargetInfo::checkCallingConvention(CallingConv CC) const {
   switch (CC) {
   case CC_C:
   case CC_Z80SDCCCall0:
+  case CC_Z80SmallC:
+  case CC_Z80Z88dkCallee:
+  case CC_Z80SDCCCall0Callee:
+  case CC_Z80SmallCCallee:
     return CCCR_OK;
+  case CC_Z80Z88dkFastCall:
+    return getTriple().isSM83() ? CCCR_Warning : CCCR_OK;
   default:
     return CCCR_Warning;
   }

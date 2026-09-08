@@ -6896,6 +6896,78 @@ caller cleanup. ``sdcccall(1)`` (the default) uses register-based parameter
 passing per the SDCC ``__sdcccall(1)`` convention.}];
 }
 
+def Z88dkFastCallDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Heading = "clang::z88dk_fastcall";
+  let Content = [{
+The ``z88dk_fastcall`` attribute selects the z88dk ``__z88dk_fastcall``
+calling convention for Z80 targets. A single argument is passed in a fixed
+register chosen by width: ``i8`` in ``L``, ``i16`` in ``HL``, ``i32`` in
+``DE:HL`` (DE holds the high word, HL the low word). The return value uses the
+same registers. z88dk fastcall is single-argument by construction, and clang
+rejects a declaration with any other number of parameters or with an ellipsis.
+
+Nothing travels on the stack, so this convention overrides every other
+argument-passing base and absorbs ``__attribute__((z88dk_callee))``, whose
+only effect is on stack cleanup.
+
+The convention is Z80-only: its SM83 register assignment has never been
+specified, and SDCC rejects the keyword there too.}];
+}
+
+def Z88dkCalleeDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Heading = "clang::z88dk_callee";
+  let Content = [{
+The ``z88dk_callee`` attribute applies SDCC's ``__z88dk_callee`` modifier for
+Z80 targets: the callee pops the stack arguments on return instead of the
+caller, for every non-variadic call and independent of the return size.
+``__sdcccall(1)`` otherwise hands that job back to the caller once the return
+exceeds 16 bits.
+
+It is a modifier rather than a convention of its own, so it leaves the
+argument passing alone and composes with whichever base is in effect. On its
+own that base is the default, ``__sdcccall(1)``, which passes the first two
+arguments in registers. Writing ``__attribute__((sdcccall(0)))`` or
+``__attribute__((smallc))`` alongside it selects one of the all-on-the-stack
+bases instead, and the return registers follow the base.
+``__attribute__((z88dk_fastcall))`` passes nothing on the stack, so it absorbs
+this modifier rather than combining with it.
+
+.. code-block:: c
+
+  /* Registers for the first two arguments; the callee pops the third. */
+  int f(int a, int b, int c) __attribute__((z88dk_callee));
+
+  /* Every argument on the stack, and the callee pops all of them. */
+  int g(int a, int b, int c)
+      __attribute__((sdcccall(0))) __attribute__((z88dk_callee));}];
+}
+
+def SmallCDocs : Documentation {
+  let Category = DocCatCallingConvs;
+  let Heading = "clang::smallc";
+  let Content = [{
+The ``smallc`` attribute selects SDCC's ``__smallc`` (small-C) calling
+convention for Z80 targets. Every argument is passed on the stack and the
+caller cleans them up, and the return value uses the z88dk classic registers
+(i8 in ``L``, i16 in ``HL``, i32 in ``DE:HL``). It exists so clang can call the
+z88dk classic C library, which is compiled ``__smallc``.
+
+Two things separate it from ``__sdcccall(0)``. Arguments are pushed
+left-to-right, so the caller pushes the first declared argument first
+(deepest) and the last one nearest the return address, where ``__sdcccall(0)``
+pushes right-to-left. And every argument occupies a full two-byte slot,
+including one narrower than a word, where ``__sdcccall(0)`` packs a single
+byte into a single byte. The two therefore differ even for a function taking
+one ``char``.
+
+``__smallc`` is an argument-passing base, so it overrides whichever
+``__attribute__((sdcccall(N)))`` level is in effect rather than conflicting
+with it, and it composes with ``__attribute__((z88dk_callee))``, the pairing
+the z88dk classic library uses for its ``_callee`` entry points.}];
+}
+
 def PreferredNameDocs : Documentation {
   let Category = DocCatDecl;
   let Content = [{

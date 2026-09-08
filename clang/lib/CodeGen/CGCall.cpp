@@ -130,6 +130,16 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
 #undef CC_VLS_CASE
   case CC_Z80SDCCCall0:
     return llvm::CallingConv::Z80_SDCCCall0;
+  case CC_Z80SmallC:
+    return llvm::CallingConv::Z80_SmallC;
+  case CC_Z80Z88dkFastCall:
+    return llvm::CallingConv::Z80_Z88dkFastCall;
+  case CC_Z80Z88dkCallee:
+    return llvm::CallingConv::Z80_Z88dkCallee;
+  case CC_Z80SDCCCall0Callee:
+    return llvm::CallingConv::Z80_SDCCCall0Callee;
+  case CC_Z80SmallCCallee:
+    return llvm::CallingConv::Z80_SmallCCallee;
   }
 }
 

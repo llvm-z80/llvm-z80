@@ -931,6 +931,18 @@ def SMOD16 : Z80Pseudo<(outs), (ins)> {
   let Uses = [HL, DE];
   let Defs = [A, B, C, DE, HL, FLAGS];
 }
+// Block move for a length that is not a known non-zero constant.
+// LD A,B; OR C; JR Z,.done; LDIR; .done:
+// LDIR decrements BC before testing it, so BC == 0 would copy 65536 bytes.
+def LDIR_GUARDED : Z80Pseudo<(outs), (ins)> {
+  let Uses = [HL, DE, BC];
+  let Defs = [HL, DE, BC, A, FLAGS];
+  let mayLoad = true;
+  let mayStore = true;
+  // As on LDIR itself: passes that track memory invalidate on this.
+  let hasSideEffects = 1;
+}
+
 // 8-bit unsigned saturating add pseudo.
 // ADD A,src; JR NC,.done; LD A,#0xFF; .done:
 def UADDSAT8 : Z80Pseudo<(outs), (ins GR8:$src)> {
