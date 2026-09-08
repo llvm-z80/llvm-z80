@@ -32,13 +32,26 @@ define void @call_smallc_callee() {
   ret void
 }
 
-; Callee side: arg1 (a) is deepest (SP+4), arg2 (b) is shallowest (SP+2).
-; The non-commutative result a-b makes an accidental swap observable.
-; Callee pops all 4 bytes.
+; Callee side: arg1 (a) is deepest at SP+4, arg2 (b) shallowest at SP+2.
+; The result a-2b gives the two operands distinct coefficients, so a swapped
+; layout changes the value rather than leaving it alone, and the doubling is
+; visibly applied to whichever slot b came from.  The callee pops all 4 bytes.
 ; CHECK-LABEL: _callee_void:
 ; CHECK:       ld hl,#4
 ; CHECK-NEXT:  add hl,sp
-; CHECK:       sbc hl,bc
+; CHECK-NEXT:  ld c,(hl)
+; CHECK-NEXT:  inc hl
+; CHECK-NEXT:  ld b,(hl)
+; CHECK-NEXT:  ld hl,#2
+; CHECK-NEXT:  add hl,sp
+; CHECK-NEXT:  ld e,(hl)
+; CHECK-NEXT:  inc hl
+; CHECK-NEXT:  ld d,(hl)
+; b is the doubled operand.
+; CHECK-NEXT:  ld l,e
+; CHECK-NEXT:  ld h,d
+; CHECK-NEXT:  add hl,hl
+; CHECK:       sbc hl,de
 ; CHECK:       pop bc
 ; CHECK-NEXT:  inc sp
 ; CHECK-NEXT:  inc sp
@@ -47,22 +60,31 @@ define void @call_smallc_callee() {
 ; CHECK-NEXT:  push bc
 ; CHECK-NEXT:  ret
 define cc133 void @callee_void(i16 %a, i16 %b) {
-  %s = sub i16 %a, %b
+  %b2 = shl i16 %b, 1
+  %s = sub i16 %a, %b2
   store i16 %s, ptr inttoptr(i16 16384 to ptr)
   ret void
 }
 
-; Byval cannot go in registers, so both args land on the stack.
-; With left-to-right push: byval (arg1, 4 bytes) is deepest,
-; scalar x (arg2, 2 bytes) is shallowest at SP+2.  The non-commutative
-; result (byval first i16) - x makes an accidental swap observable.
-; Callee pops all 6 bytes.
+; Byval cannot go in registers, so both arguments land on the stack.  Declared
+; first, the aggregate sits deepest at SP+4 through SP+7, leaving the trailing
+; scalar at SP+2.  The scalar is read first here, and the aggregate afterwards
+; through SP+6 because the push in between moved SP.  The callee pops all 6
+; bytes.
 ; CHECK-LABEL: _callee_byval:
 ; CHECK:       ld hl,#2
 ; CHECK-NEXT:  add hl,sp
-; CHECK:       ld hl,#4
+; CHECK-NEXT:  ld c,(hl)
+; CHECK-NEXT:  inc hl
+; CHECK-NEXT:  ld b,(hl)
+; CHECK-NEXT:  ld l,c
+; CHECK-NEXT:  ld h,b
+; CHECK-NEXT:  push hl
+; CHECK-NEXT:  ld hl,#6
 ; CHECK-NEXT:  add hl,sp
-; CHECK:       sbc hl,bc
+; The scalar is the doubled operand, so swapping the two slots is observable.
+; CHECK:       add hl,hl
+; CHECK:       sbc hl,de
 ; CHECK:       pop bc
 ; CHECK-NEXT:  inc sp
 ; CHECK-NEXT:  inc sp
@@ -74,7 +96,8 @@ define cc133 void @callee_void(i16 %a, i16 %b) {
 ; CHECK-NEXT:  ret
 define cc133 void @callee_byval(ptr byval(%ByValPair) %p, i16 %x) {
   %v = load i16, ptr %p
-  %r = sub i16 %v, %x
+  %x2 = shl i16 %x, 1
+  %r = sub i16 %v, %x2
   store i16 %r, ptr inttoptr(i16 16384 to ptr)
   ret void
 }

@@ -2,13 +2,18 @@
 ;
 ; __z88dk_fastcall (cc 130 = CallingConv::Z80_Z88dkFastCall).  z88dk's classic
 ; clib passes a SINGLE argument in a fixed register chosen by width, and
-; returns in that same register — always a subset of DEHL:
+; returns in that same register, always a subset of DEHL:
 ;
 ;   width | argument & return register
 ;   ------+----------------------------
 ;   i8    | L
 ;   i16   | HL
 ;   i32   | DEHL  (DE = high word, HL = low word)
+;
+; Verified from z88dk source: libsrc/target/osca/rs232/rs232_put.asm reads its
+; i8 argument with `ld a, l` (arg in L); libsrc/classic/stdlib/swapendian.asm
+; takes/returns a void* in HL.  These are exactly the __sdcccall(0) RETURN
+; registers; fastcall additionally passes its sole argument in them.
 
 ; ============================================================================
 ; (a) exact pattern, caller loads the single argument into the fixed register
@@ -20,6 +25,7 @@ declare cc 130 void @sink32(i32)
 ; i8 argument in L (never A).
 define void @call_i8() {
 ; CHECK-LABEL: _call_i8:
+; CHECK-NOT:  ld a,#17
 ; CHECK:      ld l,#17
 ; CHECK-NEXT: call _sink8
   call cc 130 void @sink8(i8 17)
