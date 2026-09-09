@@ -14,6 +14,7 @@
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80.h"
+#include "Z80InstrInfo.h"
 #include "Z80RegisterInfo.h"
 #include "Z80Subtarget.h"
 
@@ -1781,6 +1782,39 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
     const DebugLoc &DL = MI.getDebugLoc();
 
+    // Port I/O: address_space(2) → IN A,(n) or IN A,(C)
+    if (MI.hasOneMemOperand() &&
+        (*MI.memoperands_begin())->getAddrSpace() == Z80::AS_IO) {
+      if (DstTy.getSizeInBits() > 8)
+        return false; // Only 8-bit port reads supported
+      // Extract constant port address from G_INTTOPTR(G_CONSTANT n)
+      MachineInstr *AddrDef = MRI.getVRegDef(AddrReg);
+      int64_t PortAddr = -1;
+      if (AddrDef && AddrDef->getOpcode() == TargetOpcode::G_INTTOPTR) {
+        Register SrcReg = AddrDef->getOperand(1).getReg();
+        MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
+        if (SrcDef && SrcDef->getOpcode() == TargetOpcode::G_CONSTANT)
+          PortAddr = SrcDef->getOperand(1).getCImm()->getZExtValue() & 0xFF;
+      } else if (AddrDef && AddrDef->getOpcode() == TargetOpcode::G_CONSTANT) {
+        // The combiner folded G_INTTOPTR(G_CONSTANT n) into a pointer-typed
+        // constant (e.g. port 0 shows up as `ptr addrspace(2) null`).
+        PortAddr = AddrDef->getOperand(1).getCImm()->getZExtValue() & 0xFF;
+      }
+      // Only a compile-time-constant port is supported (selects IN A,(n)).
+      // A runtime/PHI'd port is intentionally rejected rather than silently
+      // emitting IN A,(C): that form puts B on the high address bits, which is
+      // only *coincidentally* harmless on RC700 (low-8-bit port decode). Fail
+      // loudly instead of baking that hardware assumption into codegen (#44).
+      if (PortAddr < 0)
+        return false;
+      if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
+        return false;
+      BuildMI(MBB, MI, DL, TII.get(Z80::IN_A_n)).addImm(PortAddr);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::A);
+      MI.eraseFromParent();
+      return true;
+    }
+
     // A compile-time address needs no pointer in a register: SM83 reaches the
     // high page 0xFF00-0xFFFF in two bytes and anywhere else in three, against
     // four for loading a pair and going indirect.
@@ -1996,6 +2030,38 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     Register AddrReg = MI.getOperand(1).getReg();
     const LLT SrcTy = MRI.getType(SrcReg);
     const DebugLoc &DL = MI.getDebugLoc();
+
+    // Port I/O: address_space(2) → OUT (n),A or OUT (C),A
+    if (MI.hasOneMemOperand() &&
+        (*MI.memoperands_begin())->getAddrSpace() == Z80::AS_IO) {
+      if (SrcTy.getSizeInBits() > 8)
+        return false; // Only 8-bit port writes supported
+      MachineInstr *AddrDef = MRI.getVRegDef(AddrReg);
+      int64_t PortAddr = -1;
+      if (AddrDef && AddrDef->getOpcode() == TargetOpcode::G_INTTOPTR) {
+        Register IntReg = AddrDef->getOperand(1).getReg();
+        MachineInstr *IntDef = MRI.getVRegDef(IntReg);
+        if (IntDef && IntDef->getOpcode() == TargetOpcode::G_CONSTANT)
+          PortAddr = IntDef->getOperand(1).getCImm()->getZExtValue() & 0xFF;
+      } else if (AddrDef && AddrDef->getOpcode() == TargetOpcode::G_CONSTANT) {
+        // The combiner folded G_INTTOPTR(G_CONSTANT n) into a pointer-typed
+        // constant (e.g. port 0 shows up as `ptr addrspace(2) null`).
+        PortAddr = AddrDef->getOperand(1).getCImm()->getZExtValue() & 0xFF;
+      }
+      // Only a compile-time-constant port is supported (selects OUT (n),A).
+      // A runtime/PHI'd port is intentionally rejected rather than silently
+      // emitting OUT (C),A: that form puts B on the high address bits, which is
+      // only *coincidentally* harmless on RC700 (low-8-bit port decode). Fail
+      // loudly instead of baking that hardware assumption into codegen (#44).
+      if (PortAddr < 0)
+        return false;
+      if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
+        return false;
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(SrcReg);
+      BuildMI(MBB, MI, DL, TII.get(Z80::OUT_n_A)).addImm(PortAddr);
+      MI.eraseFromParent();
+      return true;
+    }
 
     // See the matching fold in G_LOAD.
     if (SrcTy.getSizeInBits() == 8 && MI.hasOneMemOperand() &&

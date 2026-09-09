@@ -671,7 +671,7 @@ private:
 
 namespace Z80 {
 
-enum AddressSpace : unsigned { AS_Memory = 0, NumAddrSpaces };
+enum AddressSpace : unsigned { AS_Memory = 0, AS_IO = 2, NumAddrSpaces };
 
 /// Target-specific flags on symbol machine operands. They select which part
 /// of the symbol's link-time address an 8-bit immediate slot receives; the

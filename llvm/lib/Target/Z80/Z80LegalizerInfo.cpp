@@ -54,14 +54,18 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   const LLT S64 = LLT::scalar(64);
   const LLT S128 = LLT::scalar(128);
   const LLT P0 = LLT::pointer(0, 16); // Default address space, 16-bit pointers
+  const LLT P2 = LLT::pointer(2, 16); // I/O address space for port operations
 
   // Basic type legalization for Z80
   // Most operations need to be broken down to 8-bit or 16-bit
   // 32-bit operations are narrowed to pairs of 16-bit operations
 
   // Constants - clamp to legal sizes, narrow larger
+  // P2 (port I/O) pointer constants arise when the combiner folds
+  // G_INTTOPTR(G_CONSTANT n) for a constant port into a pointer-typed constant;
+  // like P0 it is a 16-bit pointer, so it is legal here.
   getActionDefinitionsBuilder(G_CONSTANT)
-      .legalFor({S8, S16, P0})
+      .legalFor({S8, S16, P0, P2})
       .widenScalarToNextPow2(0, 8)
       .clampScalar(0, S8, S16);
 
@@ -248,7 +252,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // count, volatile included); scalar narrowing then handles wide elements.
   getActionDefinitionsBuilder(G_LOAD)
       .legalForTypesWithMemDesc(
-          {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1}})
+          {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1},
+           {S8, P2, S8, 1}}) // Port I/O: IN A,(n)
       .scalarize(0)
       .lowerIfMemSizeNotByteSizePow2()
       .customIf([](const LegalityQuery &Q) {
@@ -259,7 +264,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   getActionDefinitionsBuilder(G_STORE)
       .legalForTypesWithMemDesc(
-          {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1}})
+          {{S8, P0, S8, 1}, {S16, P0, S16, 1}, {P0, P0, S16, 1},
+           {S8, P2, S8, 1}}) // Port I/O: OUT (n),A
       .scalarize(0)
       .lowerIfMemSizeNotByteSizePow2()
       // Truncating stores (value wider than memory, e.g. the tail byte of
@@ -279,10 +285,10 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Pointer/integer conversions - no-op on Z80 (both are 16-bit)
   // Wider integers (e.g. s32 from GEP with i32 index) are narrowed to s16.
   getActionDefinitionsBuilder(G_INTTOPTR)
-      .legalFor({{P0, S16}})
+      .legalFor({{P0, S16}, {P2, S16}})
       .clampScalar(1, S16, S16);
   getActionDefinitionsBuilder(G_PTRTOINT)
-      .legalFor({{S16, P0}})
+      .legalFor({{S16, P0}, {S16, P2}})
       .clampScalar(0, S16, S16);
 
   // Bitcast - no-op reinterpretation between same-size types.
@@ -308,15 +314,18 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       [](const LegalityQuery &) { return true; });
 
   // PHI nodes
+  // P2 (port I/O address space) is 16-bit like P0 -- both are legal for PHI.
+  // Without P2 here, conditional port_out (e.g. SIO channel A vs B) crashes the
+  // Legalizer when the optimizer merges the port pointers into a PHI (#44).
   getActionDefinitionsBuilder(G_PHI)
-      .legalFor({S8, S16, P0})
+      .legalFor({S8, S16, P0, P2})
       .scalarize(0)
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S16);
 
   // Freeze - converts undef to a deterministic value. No-op at codegen level.
   getActionDefinitionsBuilder(G_FREEZE)
-      .legalFor({S8, S16, P0})
+      .legalFor({S8, S16, P0, P2})
       .scalarize(0)
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S16);
