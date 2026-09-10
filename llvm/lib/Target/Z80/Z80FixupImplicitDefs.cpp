@@ -98,6 +98,7 @@
 #include "Z80FixupImplicitDefs.h"
 #include "Z80.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -106,6 +107,11 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "z80-fixup-implicit-defs"
+
+STATISTIC(NumRelocatedDefsRemoved,
+          "Number of relocated defs removed from pair copies");
+STATISTIC(NumSuperRegDefsRemoved,
+          "Number of spurious super-register implicit-defs removed");
 
 namespace {
 
@@ -203,6 +209,7 @@ static bool removeRelocatedDefs(MachineBasicBlock &MBB,
       LLVM_DEBUG(dbgs() << "Z80FixupImplicitDefs: removing relocated def "
                         << printReg(Reg, &TRI) << " from: " << MI);
       MI.removeOperand(I);
+      ++NumRelocatedDefsRemoved;
       Changed = true;
     }
   }
@@ -249,6 +256,7 @@ bool Z80FixupImplicitDefs::runOnMachineFunction(MachineFunction &MF) {
         LLVM_DEBUG(dbgs() << "Z80FixupImplicitDefs: removing implicit-def "
                           << printReg(Reg, TRI) << " from: " << MI);
         MI.removeOperand(I);
+        ++NumSuperRegDefsRemoved;
         Changed = true;
       }
     }

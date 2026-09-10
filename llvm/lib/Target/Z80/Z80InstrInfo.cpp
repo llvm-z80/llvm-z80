@@ -377,9 +377,8 @@ void Z80InstrInfo::storeRegToStackSlot(
         Z80::IR16RegClass.hasSubClassEq(RC)) {
       // Whatever doesn't fit the GR16 operand goes through the Anyi16 twin;
       // see the definitions in Z80InstrInfo.td.
-      bool InGR16 = SrcReg.isPhysical()
-                        ? Z80::GR16RegClass.contains(SrcReg)
-                        : Z80::GR16RegClass.hasSubClassEq(RC);
+      bool InGR16 = SrcReg.isPhysical() ? Z80::GR16RegClass.contains(SrcReg)
+                                        : Z80::GR16RegClass.hasSubClassEq(RC);
       BuildMI(MBB, MI, DL, get(InGR16 ? Z80::SPILL_GR16 : Z80::SPILL_ANY16))
           .addReg(SrcReg, getKillRegState(isKill))
           .addFrameIndex(FrameIndex)
@@ -426,9 +425,8 @@ void Z80InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
     if (RC->hasSuperClassEq(&Z80::GR16RegClass) ||
         TRI->getCommonSubClass(RC, &Z80::GR16RegClass) ||
         Z80::IR16RegClass.hasSubClassEq(RC)) {
-      bool InGR16 = DestReg.isPhysical()
-                        ? Z80::GR16RegClass.contains(DestReg)
-                        : Z80::GR16RegClass.hasSubClassEq(RC);
+      bool InGR16 = DestReg.isPhysical() ? Z80::GR16RegClass.contains(DestReg)
+                                         : Z80::GR16RegClass.hasSubClassEq(RC);
       BuildMI(MBB, MI, DL, get(InGR16 ? Z80::RELOAD_GR16 : Z80::RELOAD_ANY16))
           .addReg(DestReg, RegState::Define)
           .addFrameIndex(FrameIndex)
@@ -1476,10 +1474,11 @@ unsigned Z80InstrInfo::removeBranch(MachineBasicBlock &MBB,
 
 // An 8-bit ALU operation can read its register operand out of a frame slot
 // instead, so a value spilled only to be read there does not need reloading.
-MachineInstr *Z80InstrInfo::foldMemoryOperandImpl(
-    MachineFunction &MF, MachineInstr &MI, ArrayRef<unsigned> Ops,
-    int FrameIndex, MachineInstr *&CopyMI, LiveIntervals *LIS,
-    VirtRegMap *VRM) const {
+MachineInstr *
+Z80InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
+                                    ArrayRef<unsigned> Ops, int FrameIndex,
+                                    MachineInstr *&CopyMI, LiveIntervals *LIS,
+                                    VirtRegMap *VRM) const {
   // The slot is read, so only the one register operand may be folded.
   if (Ops.size() != 1 || Ops[0] != 0 || MI.getOperand(0).isDef())
     return nullptr;
@@ -1532,9 +1531,9 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   // SM83 expansions are larger due to lacking ADC HL,HL / SBC HL,DE / EX DE,HL
   // / DJNZ and requiring byte-wise emulation + PUSH/POP AF for counter.
   {
-    const auto &STI =
-        MI.getParent()->getParent()->getSubtarget<Z80Subtarget>();
+    const auto &STI = MI.getParent()->getParent()->getSubtarget<Z80Subtarget>();
     bool IsSM83 = STI.hasSM83();
+    // clang-format off
     switch (Opcode) {
     case Z80::MUL16:  return IsSM83 ? 24 : 20;
     case Z80::UDIV16: return IsSM83 ? 45 : 32;
@@ -1576,6 +1575,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::SSUBSAT8: return 8;
     default: break;
     }
+    // clang-format on
   }
 
   // Handle pseudo-instructions that have no encoding
@@ -1878,8 +1878,7 @@ Z80InstrInfo::getOutliningTypeImpl(const MachineModuleInfo &MMI,
                                    MachineBasicBlock::iterator &MIT,
                                    unsigned Flags) const {
   MachineInstr &MI = *MIT;
-  const TargetRegisterInfo *TRI =
-      MI.getMF()->getSubtarget().getRegisterInfo();
+  const TargetRegisterInfo *TRI = MI.getMF()->getSubtarget().getRegisterInfo();
 
   // Control flow has to stay where it is: a branch inside the outlined body
   // would leave it, and a call or return there would fight over the return

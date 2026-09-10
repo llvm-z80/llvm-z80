@@ -21,6 +21,7 @@
 #include "Z80OpcodeUtils.h"
 #include "Z80Subtarget.h"
 
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -28,6 +29,16 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 
 #define DEBUG_TYPE "z80-expand-pseudo"
+
+STATISTIC(NumVarShifts, "Number of expandVarShift pseudos expanded");
+STATISTIC(NumMul8, "Number of expandMul8 pseudos expanded");
+STATISTIC(NumUDivMod8, "Number of expandUDivMod8 pseudos expanded");
+STATISTIC(NumSDivMod8, "Number of expandSDivMod8 pseudos expanded");
+STATISTIC(NumBlockMoves, "Number of expandGuardedBlockMove pseudos expanded");
+STATISTIC(NumSatArith8, "Number of expandSatArith8 pseudos expanded");
+STATISTIC(NumMul16, "Number of expandMul16 pseudos expanded");
+STATISTIC(NumUDivMod16, "Number of expandUDivMod16 pseudos expanded");
+STATISTIC(NumSDivMod16, "Number of expandSDivMod16 pseudos expanded");
 
 using namespace llvm;
 
@@ -248,6 +259,7 @@ bool Z80ExpandPseudo::expandVarShift(MachineBasicBlock &MBB, MachineInstr &MI,
   LoopMBB->addSuccessor(TailMBB); // fall through when done
 
   MI.eraseFromParent();
+  ++NumVarShifts;
   return true;
 }
 
@@ -321,9 +333,13 @@ bool Z80ExpandPseudo::expandMul8(MachineBasicBlock &MBB, MachineInstr &MI,
   SkipMBB->addSuccessor(TailMBB); // fall through when done
 
   MI.eraseFromParent();
+  ++NumMul8;
   return true;
 }
 
+// The inline-runtime expansions below annotate each emitted instruction in
+// column-aligned assembly style; keep the manual alignment.
+// clang-format off
 bool Z80ExpandPseudo::expandUDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
                                      const Z80InstrInfo &TII, bool IsDiv) {
   // Expand UDIV8/UMOD8 pseudo into an 8-bit restoring division loop.
@@ -404,6 +420,7 @@ bool Z80ExpandPseudo::expandUDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
   // For UMOD8, remainder is already in A
 
   MI.eraseFromParent();
+  ++NumUDivMod8;
   return true;
 }
 
@@ -575,6 +592,7 @@ bool Z80ExpandPseudo::expandSDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
   NegResMBB->addSuccessor(TailMBB); // fall through
 
   MI.eraseFromParent();
+  ++NumSDivMod8;
   return true;
 }
 
@@ -608,6 +626,7 @@ bool Z80ExpandPseudo::expandGuardedBlockMove(MachineBasicBlock &MBB,
   MoveMBB->addSuccessor(TailMBB);
 
   MI.eraseFromParent();
+  ++NumBlockMoves;
   return true;
 }
 
@@ -686,6 +705,7 @@ bool Z80ExpandPseudo::expandSatArith8(MachineBasicBlock &MBB, MachineInstr &MI,
   }
 
   MI.eraseFromParent();
+  ++NumSatArith8;
   return true;
 }
 
@@ -824,6 +844,7 @@ bool Z80ExpandPseudo::expandMul16(MachineBasicBlock &MBB, MachineInstr &MI,
   }
 
   MI.eraseFromParent();
+  ++NumMul16;
   return true;
 }
 
@@ -981,6 +1002,7 @@ bool Z80ExpandPseudo::expandUDivMod16(MachineBasicBlock &MBB, MachineInstr &MI,
   }
 
   MI.eraseFromParent();
+  ++NumUDivMod16;
   return true;
 }
 
@@ -1193,8 +1215,10 @@ bool Z80ExpandPseudo::expandSDivMod16(MachineBasicBlock &MBB, MachineInstr &MI,
   NegResMBB->addSuccessor(TailMBB);  // fall through
 
   MI.eraseFromParent();
+  ++NumSDivMod16;
   return true;
 }
+// clang-format on
 
 } // namespace
 

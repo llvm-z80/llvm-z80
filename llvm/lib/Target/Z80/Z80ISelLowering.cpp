@@ -118,7 +118,6 @@ void Z80TargetLowering::computeKnownBitsForTargetInstr(
   }
 }
 
-
 TargetLowering::ConstraintType
 Z80TargetLowering::getConstraintType(StringRef Constraint) const {
   if (Constraint.size() == 1) {

@@ -369,9 +369,8 @@ inline MachineInstrBuilder buildSbcAA(MachineBasicBlock *MBB,
 /// live, or an earlier instruction defines it and nothing since has retired it.
 /// This mirrors the bookkeeping the machine verifier does, so a read the scan
 /// rejects is one that carries nothing.
-inline bool hasLiveValue(MachineBasicBlock &MBB,
-                         MachineBasicBlock::iterator MI, MCRegister Reg,
-                         const TargetRegisterInfo *TRI) {
+inline bool hasLiveValue(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+                         MCRegister Reg, const TargetRegisterInfo *TRI) {
   for (MachineBasicBlock::iterator I = MI; I != MBB.begin();) {
     --I;
     bool LiveDef = false, Def = false, Use = false, Killed = false;
@@ -633,10 +632,9 @@ public:
       std::vector<outliner::Candidate> &RepeatedSequenceLocs,
       unsigned MinRepeats) const override;
 
-  outliner::InstrType
-  getOutliningTypeImpl(const MachineModuleInfo &MMI,
-                       MachineBasicBlock::iterator &MIT,
-                       unsigned Flags) const override;
+  outliner::InstrType getOutliningTypeImpl(const MachineModuleInfo &MMI,
+                                           MachineBasicBlock::iterator &MIT,
+                                           unsigned Flags) const override;
 
   void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
                           const outliner::OutlinedFunction &OF) const override;

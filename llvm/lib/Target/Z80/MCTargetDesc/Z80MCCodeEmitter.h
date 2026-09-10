@@ -41,44 +41,12 @@ public:
       : MCII(MCII), Ctx(Ctx) {}
 
 private:
-  /// Finishes up encoding an LD/ST instruction.
-  /// The purpose of this function is to set an bit in the instruction
-  /// which follows no logical pattern. See the implementation for details.
-  unsigned loadStorePostEncoder(const MCInst &MI, unsigned EncodedValue,
-                                const MCSubtargetInfo &STI) const;
-
-  /// Gets the encoding for a conditional branch target.
-  template <Z80::Fixups Fixup>
-  unsigned encodeRelCondBrTarget(const MCInst &MI, unsigned OpNo,
-                                 SmallVectorImpl<MCFixup> &Fixups,
-                                 const MCSubtargetInfo &STI) const;
-
-  /// Encodes the `PTRREGS` operand to a load or store instruction.
-  unsigned encodeLDSTPtrReg(const MCInst &MI, unsigned OpNo,
-                            SmallVectorImpl<MCFixup> &Fixups,
-                            const MCSubtargetInfo &STI) const;
-
-  /// Encodes a `register+immediate` operand for `LDD`/`STD`.
-  unsigned encodeMemri(const MCInst &MI, unsigned OpNo,
-                       SmallVectorImpl<MCFixup> &Fixups,
-                       const MCSubtargetInfo &STI) const;
-
-  /// Takes the complement of a number (~0 - val).
-  unsigned encodeComplement(const MCInst &MI, unsigned OpNo,
-                            SmallVectorImpl<MCFixup> &Fixups,
-                            const MCSubtargetInfo &STI) const;
-
   /// Encodes an immediate value with a given fixup.
   /// \tparam Offset The offset into the instruction for the fixup.
   template <Z80::Fixups Fixup, unsigned Offset>
   unsigned encodeImm(const MCInst &MI, unsigned OpNo,
                      SmallVectorImpl<MCFixup> &Fixups,
                      const MCSubtargetInfo &STI) const;
-
-  /// Gets the encoding of the target for the `CALL k` instruction.
-  unsigned encodeCallTarget(const MCInst &MI, unsigned OpNo,
-                            SmallVectorImpl<MCFixup> &Fixups,
-                            const MCSubtargetInfo &STI) const;
 
   /// TableGen'ed function to get the binary encoding for an instruction.
   uint64_t getBinaryCodeForInstr(const MCInst &MI,

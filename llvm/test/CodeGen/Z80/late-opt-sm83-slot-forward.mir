@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 #
 # Serving a stack load from the register that still holds the slot's value
 # reads that register past the store, which allocation had recorded as the last

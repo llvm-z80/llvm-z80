@@ -141,7 +141,7 @@ def SF : Z80Reg<55, "sf">;   // Sign flag
 
 // Standalone FLAGS register for dependency tracking by RA/scheduler.
 // NOT a sub-register of AF to avoid implicit-def $af issues
-// (see known-issues.md: LDrn/CBRotate implicit-def problem).
+// (LDrn/CBRotate implicit-def problem).
 def FLAGS : Z80Reg<56, "flags">;
 
 //===----------------------------------------------------------------------===//

@@ -28,13 +28,13 @@
 
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 
 #define DEBUG_TYPE "z80-framelowering"
@@ -48,8 +48,8 @@ Z80FrameLowering::Z80FrameLowering()
 /// PUSH AF moves SP by two. The bytes it writes become frame space that the
 /// locals overwrite, so what it reads out of AF never reaches anything.
 static void emitStackAllocPush(MachineBasicBlock &MBB,
-                               MachineBasicBlock::iterator I, const DebugLoc &DL,
-                               const TargetInstrInfo &TII) {
+                               MachineBasicBlock::iterator I,
+                               const DebugLoc &DL, const TargetInstrInfo &TII) {
   MachineInstrBuilder MIB = BuildMI(MBB, I, DL, TII.get(Z80::PUSH_AF));
   for (MachineOperand &MO : MIB->operands())
     if (MO.isReg() && MO.isUse())

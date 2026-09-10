@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 #
 # SM83 reloads a 16-bit frame slot through HL, which doubles as the address
 # register. When the value was wanted in another pair, the copy out of HL

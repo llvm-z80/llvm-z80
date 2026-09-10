@@ -106,8 +106,8 @@ static std::optional<uint16_t> getConstantAddr(Register AddrReg,
     Def = MRI.getVRegDef(Def->getOperand(1).getReg());
   if (!Def || Def->getOpcode() != TargetOpcode::G_CONSTANT)
     return std::nullopt;
-  return static_cast<uint16_t>(
-      Def->getOperand(1).getCImm()->getZExtValue() & 0xFFFF);
+  return static_cast<uint16_t>(Def->getOperand(1).getCImm()->getZExtValue() &
+                               0xFFFF);
 }
 
 Z80InstructionSelector::Z80InstructionSelector(const Z80TargetMachine &TM,
@@ -823,8 +823,7 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
         if (RHSIsZero) {
           if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI))
             return false;
-          BuildMI(MBB, MI, DL, TII.get(Z80::SM83_CMP_ZERO16))
-              .addReg(LHS);
+          BuildMI(MBB, MI, DL, TII.get(Z80::SM83_CMP_ZERO16)).addReg(LHS);
         } else {
           // SM83: XOR-based comparison sets Z flag correctly for 16-bit EQ/NE.
           if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
@@ -2069,8 +2068,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       // uses as undef directly — processImplicitDefs only propagates undef
       // to the first user instruction, missing subsequent sub-register uses.
       MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
-      bool IsUndef = SrcDef &&
-                     SrcDef->getOpcode() == TargetOpcode::G_IMPLICIT_DEF;
+      bool IsUndef =
+          SrcDef && SrcDef->getOpcode() == TargetOpcode::G_IMPLICIT_DEF;
 
       if (!IsUndef)
         BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE)
@@ -3385,13 +3384,14 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SM83_CMP_ZERO16))
                 .addReg(LHS);
           } else {
-          // SM83: XOR-based comparison sets Z flag correctly for 16-bit EQ/NE.
-          if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
-              !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
-            return false;
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SM83_CMP_Z16))
-              .addReg(LHS)
-              .addReg(RHS);
+            // SM83: XOR-based comparison sets Z flag correctly for 16-bit
+            // EQ/NE.
+            if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
+                !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
+              return false;
+            BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SM83_CMP_Z16))
+                .addReg(LHS)
+                .addReg(RHS);
           }
         } else {
           // Z80: AND A; SBC HL,rr sets Z flag correctly for 16-bit EQ/NE.
@@ -4373,7 +4373,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHSReg);
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(RHSReg);
       BuildMI(MBB, MI, DL, TII.get(DivOpc));
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), QuotReg).addReg(Z80::DE);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), QuotReg)
+          .addReg(Z80::DE);
 
       // Remainder
       BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHSReg);

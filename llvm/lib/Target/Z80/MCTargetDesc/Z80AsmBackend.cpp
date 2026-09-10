@@ -177,7 +177,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   case Z80::Addr24_Segment_High:
   case Z80::PCRel8:
   case Z80::Disp8: // 8-bit signed displacement for indexed addressing
-  case Z80::LDH8: // SM83 LDH operand: 8-bit offset from 0xFF00
+  case Z80::LDH8:  // SM83 LDH operand: 8-bit offset from 0xFF00
     NumBytes = 1;
     break;
   case FK_Data_2:
@@ -236,23 +236,25 @@ void Z80AsmBackend::relaxInstruction(MCInst &Inst,
   // but this fallback catches edge cases (inline asm, late expansions).
   unsigned NewOpcode;
   switch (Inst.getOpcode()) {
-  case Z80::JR_e:    NewOpcode = Z80::JP_nn; break;
-  case Z80::JR_Z_e:  NewOpcode = Z80::JP_Z_nn; break;
-  case Z80::JR_NZ_e: NewOpcode = Z80::JP_NZ_nn; break;
-  case Z80::JR_C_e:  NewOpcode = Z80::JP_C_nn; break;
-  case Z80::JR_NC_e: NewOpcode = Z80::JP_NC_nn; break;
+  case Z80::JR_e:
+    NewOpcode = Z80::JP_nn;
+    break;
+  case Z80::JR_Z_e:
+    NewOpcode = Z80::JP_Z_nn;
+    break;
+  case Z80::JR_NZ_e:
+    NewOpcode = Z80::JP_NZ_nn;
+    break;
+  case Z80::JR_C_e:
+    NewOpcode = Z80::JP_C_nn;
+    break;
+  case Z80::JR_NC_e:
+    NewOpcode = Z80::JP_NC_nn;
+    break;
   default:
     llvm_unreachable("Unexpected instruction to relax");
   }
   Inst.setOpcode(NewOpcode);
-}
-
-unsigned Z80AsmBackend::relaxInstructionTo(unsigned Opcode,
-                                           const MCSubtargetInfo &STI,
-                                           bool &BankRelax) {
-  // Z80 doesn't have the same relaxation model as the original architecture
-  BankRelax = false;
-  return 0;
 }
 
 void Z80AsmBackend::translateOpcodeToSubtarget(MCInst &Inst,

@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 #
 # A value stored to a frame slot can answer a later load from it, but only
 # when the program did not ask for the access to happen. The memory operand

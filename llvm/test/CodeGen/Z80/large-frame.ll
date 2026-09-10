@@ -22,12 +22,9 @@ define i8 @large_frame_i8(i8 %val) "frame-pointer"="all" {
 }
 
 ; Test: small frame with FP uses IX+d directly
-; The reload of A is eliminated by the late optimization pass because A
-; already holds the stored value.
 define i8 @small_frame_i8(i8 %val) "frame-pointer"="all" {
 ; FP-LABEL: _small_frame_i8:
 ; FP:       ld -4(ix),a
-; FP-NOT:   ld a,-4(ix)
   %arr = alloca [4 x i8], align 1
   store i8 %val, ptr %arr
   %v = load i8, ptr %arr

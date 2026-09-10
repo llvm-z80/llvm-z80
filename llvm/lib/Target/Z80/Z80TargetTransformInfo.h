@@ -74,7 +74,6 @@ public:
       return true;
     return false;
   }
-
 };
 
 } // end namespace llvm

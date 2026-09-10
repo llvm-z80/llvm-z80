@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 #
 # A pair saved across a stretch that never writes it is saved for nothing.
 # What the stack accesses in between were addressed with is the two bytes the

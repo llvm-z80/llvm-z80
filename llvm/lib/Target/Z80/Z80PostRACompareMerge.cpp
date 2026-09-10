@@ -1,4 +1,4 @@
-//===-- Z80PostRACompareMerge.cpp - Remove redundant flag-setting ops ------===//
+//===-- Z80PostRACompareMerge.cpp - Remove redundant flag-setting ops -----===//
 //
 // Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -25,6 +25,7 @@
 #include "Z80InstrInfo.h"
 #include "Z80Subtarget.h"
 
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -36,6 +37,9 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "z80-post-ra-compare-merge"
+
+STATISTIC(NumFlagSetsRemoved,
+          "Number of redundant flag-setting instructions removed");
 
 class Z80PostRACompareMerge : public MachineFunctionPass {
 public:
@@ -219,8 +223,8 @@ bool Z80PostRACompareMerge::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
 
-      if (MI.isCall() || MI.isReturn() || MI.isInlineAsm() ||
-          MI.isBranch() || MI.isPseudo()) {
+      if (MI.isCall() || MI.isReturn() || MI.isInlineAsm() || MI.isBranch() ||
+          MI.isPseudo()) {
         ZSource = nullptr;
         continue;
       }
@@ -236,6 +240,7 @@ bool Z80PostRACompareMerge::runOnMachineFunction(MachineFunction &MF) {
 
     for (MachineInstr *MI : ToErase) {
       MI->eraseFromParent();
+      ++NumFlagSetsRemoved;
       Changed = true;
     }
   }

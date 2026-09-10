@@ -212,9 +212,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   //   SM83: __udivhi3: DE÷BC → BC=quot, HL=rem
   // Custom-lower i16 G_UDIVREM/G_SDIVREM to a single runtime call.
   // i8 and others fall back to separate div+rem.
-  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM})
-      .customFor({S16})
-      .lower();
+  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM}).customFor({S16}).lower();
 
   // Comparisons
   // G_ICMP produces a boolean result - we widen it to S8 since Z80 has
@@ -505,9 +503,9 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Fixed-point arithmetic: custom-lower to integer operations.
   // MULFIX: widen to double width, multiply, shift right by scale, truncate.
   // DIVFIX: widen, shift left by scale, divide, truncate.
-  getActionDefinitionsBuilder({G_SMULFIX, G_UMULFIX, G_SMULFIXSAT,
-                               G_UMULFIXSAT, G_SDIVFIX, G_UDIVFIX,
-                               G_SDIVFIXSAT, G_UDIVFIXSAT})
+  getActionDefinitionsBuilder({G_SMULFIX, G_UMULFIX, G_SMULFIXSAT, G_UMULFIXSAT,
+                               G_SDIVFIX, G_UDIVFIX, G_SDIVFIXSAT,
+                               G_UDIVFIXSAT})
       .custom();
 
   getActionDefinitionsBuilder({G_FMINNUM, G_FMAXNUM}).libcallFor({S32, S64});
@@ -594,9 +592,9 @@ bool Z80LegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
       MFI.setReturnAddressIsTaken(true);
       int FI = MFI.CreateFixedObject(2, 0, /*IsImmutable=*/true);
       auto Addr = MIRBuilder.buildFrameIndex(P0, FI);
-      auto *MMO = MF.getMachineMemOperand(
-          MachinePointerInfo::getFixedStack(MF, FI),
-          MachineMemOperand::MOLoad, P0, Align(1));
+      auto *MMO =
+          MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
+                                  MachineMemOperand::MOLoad, P0, Align(1));
       MIRBuilder.buildLoad(Dst, Addr, *MMO);
     }
     MI.eraseFromParent();
@@ -656,15 +654,14 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     LLVMContext &Ctx = MF.getFunction().getContext();
     bool IsF64 = Ty == LLT::scalar(64);
     Type *FltTy = IsF64 ? Type::getDoubleTy(Ctx) : Type::getFloatTy(Ctx);
-    int FI =
-        MF.getFrameInfo().CreateStackObject(Ty.getSizeInBytes(), Align(1),
-                                            /*isSpillSlot=*/false);
+    int FI = MF.getFrameInfo().CreateStackObject(Ty.getSizeInBytes(), Align(1),
+                                                 /*isSpillSlot=*/false);
     auto Slot = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
     RTLIB::Libcall LC = IsF64 ? RTLIB::MODF_F64 : RTLIB::MODF_F32;
-    if (Helper.createLibcall(LC, {DstFrac, FltTy, 0},
-                             {{Src, FltTy, 0},
-                              {Slot.getReg(0), PointerType::get(Ctx, 0), 1}},
-                             LocObserver, &MI) != LegalizerHelper::Legalized)
+    if (Helper.createLibcall(
+            LC, {DstFrac, FltTy, 0},
+            {{Src, FltTy, 0}, {Slot.getReg(0), PointerType::get(Ctx, 0), 1}},
+            LocObserver, &MI) != LegalizerHelper::Legalized)
       return false;
     auto *MMO = MF.getMachineMemOperand(
         MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOLoad,
@@ -1595,14 +1592,19 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
 
     if (Scale == 0) {
       if (Saturating) {
-        unsigned MulOpc = Signed ? TargetOpcode::G_SMULO : TargetOpcode::G_UMULO;
-        auto Prod = MIRBuilder.buildInstr(MulOpc, {Ty, LLT::scalar(1)}, {LHS, RHS});
+        unsigned MulOpc =
+            Signed ? TargetOpcode::G_SMULO : TargetOpcode::G_UMULO;
+        auto Prod =
+            MIRBuilder.buildInstr(MulOpc, {Ty, LLT::scalar(1)}, {LHS, RHS});
         if (Signed) {
-          auto Min = MIRBuilder.buildConstant(Ty, APInt::getSignedMinValue(Width));
-          auto Max = MIRBuilder.buildConstant(Ty, APInt::getSignedMaxValue(Width));
+          auto Min =
+              MIRBuilder.buildConstant(Ty, APInt::getSignedMinValue(Width));
+          auto Max =
+              MIRBuilder.buildConstant(Ty, APInt::getSignedMaxValue(Width));
           auto Xor = MIRBuilder.buildXor(Ty, LHS, RHS);
           auto Zero = MIRBuilder.buildConstant(Ty, 0);
-          auto Neg = MIRBuilder.buildICmp(CmpInst::ICMP_SLT, LLT::scalar(1), Xor, Zero);
+          auto Neg = MIRBuilder.buildICmp(CmpInst::ICMP_SLT, LLT::scalar(1),
+                                          Xor, Zero);
           auto Sat = MIRBuilder.buildSelect(Ty, Neg, Min, Max);
           MIRBuilder.buildSelect(Dst, Prod.getReg(1), Sat, Prod.getReg(0));
         } else {
@@ -1627,13 +1629,13 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     auto WideProd = MIRBuilder.buildMul(WideTy, WideLHS, WideRHS);
     auto ShiftAmt = MIRBuilder.buildConstant(WideTy, Scale);
     auto ShiftOpc = Signed ? TargetOpcode::G_ASHR : TargetOpcode::G_LSHR;
-    auto Shifted = MIRBuilder.buildInstr(ShiftOpc, {WideTy}, {WideProd, ShiftAmt});
+    auto Shifted =
+        MIRBuilder.buildInstr(ShiftOpc, {WideTy}, {WideProd, ShiftAmt});
 
     if (Saturating) {
-      APInt MaxVal = Signed ? APInt::getSignedMaxValue(Width)
-                            : APInt::getMaxValue(Width);
-      APInt MinVal = Signed ? APInt::getSignedMinValue(Width)
-                            : APInt(Width, 0);
+      APInt MaxVal =
+          Signed ? APInt::getSignedMaxValue(Width) : APInt::getMaxValue(Width);
+      APInt MinVal = Signed ? APInt::getSignedMinValue(Width) : APInt(Width, 0);
       auto WideMax = MIRBuilder.buildConstant(WideTy, MaxVal.sext(Width * 2));
       auto WideMin = MIRBuilder.buildConstant(WideTy, MinVal.sext(Width * 2));
       auto CmpHi = Signed ? CmpInst::ICMP_SGT : CmpInst::ICMP_UGT;
@@ -1677,14 +1679,13 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     auto Quotient = MIRBuilder.buildInstr(DivOpc, {WideTy}, {Shifted, WideRHS});
 
     if (Saturating) {
-      APInt MaxVal = Signed ? APInt::getSignedMaxValue(Width)
-                            : APInt::getMaxValue(Width);
-      APInt MinVal = Signed ? APInt::getSignedMinValue(Width)
-                            : APInt(Width, 0);
+      APInt MaxVal =
+          Signed ? APInt::getSignedMaxValue(Width) : APInt::getMaxValue(Width);
+      APInt MinVal = Signed ? APInt::getSignedMinValue(Width) : APInt(Width, 0);
       auto WideMax = MIRBuilder.buildConstant(WideTy, MaxVal.sext(Width * 2));
-      auto Over = MIRBuilder.buildICmp(
-          Signed ? CmpInst::ICMP_SGT : CmpInst::ICMP_UGT,
-          LLT::scalar(1), Quotient, WideMax);
+      auto Over =
+          MIRBuilder.buildICmp(Signed ? CmpInst::ICMP_SGT : CmpInst::ICMP_UGT,
+                               LLT::scalar(1), Quotient, WideMax);
       auto Clamped = MIRBuilder.buildSelect(WideTy, Over, WideMax, Quotient);
       if (Signed) {
         auto WideMin = MIRBuilder.buildConstant(WideTy, MinVal.sext(Width * 2));

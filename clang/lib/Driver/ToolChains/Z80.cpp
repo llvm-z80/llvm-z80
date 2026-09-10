@@ -188,7 +188,7 @@ void z80::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
     SmallString<256> Crt0Path(TC.getDriver().Dir);
     llvm::sys::path::append(Crt0Path, "..", "lib", SubDir,
-                             IsSM83 ? "sm83_crt0.o" : "z80_crt0.o");
+                            IsSM83 ? "sm83_crt0.o" : "z80_crt0.o");
     if (llvm::sys::fs::exists(Crt0Path))
       CmdArgs.push_back(Args.MakeArgString(Crt0Path));
   }
@@ -203,7 +203,7 @@ void z80::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     SmallString<256> RtLib(TC.getDriver().Dir);
     llvm::sys::path::append(RtLib, "..", "lib", SubDir,
-                             IsSM83 ? "sm83_rt.a" : "z80_rt.a");
+                            IsSM83 ? "sm83_rt.a" : "z80_rt.a");
     if (llvm::sys::fs::exists(RtLib))
       CmdArgs.push_back(Args.MakeArgString(RtLib));
   }

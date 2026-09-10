@@ -34,8 +34,7 @@ public:
 /// Used when -fno-integrated-as is specified (SDCC .rel object format).
 class LLVM_LIBRARY_VISIBILITY SDCCLinker final : public Tool {
 public:
-  SDCCLinker(const ToolChain &TC)
-      : Tool("z80::SDCCLinker", "sdldz80", TC) {}
+  SDCCLinker(const ToolChain &TC) : Tool("z80::SDCCLinker", "sdldz80", TC) {}
 
   bool hasIntegratedCPP() const override { return false; }
   bool isLinkJob() const override { return true; }

@@ -28,8 +28,10 @@ add_llvm_target(Z80CodeGen
   Z80BranchCleanup.cpp
   Z80CallLowering.cpp
   Z80CallingConv.cpp
+  Z80CheckUnsupported.cpp
   Z80PreLegalizerCombiner.cpp
   Z80PostLegalizerCombiner.cpp
+  Z80DanglingDebugCleanup.cpp
   Z80ExpandPseudo.cpp
   Z80FixupImplicitDefs.cpp
   Z80FrameLowering.cpp
@@ -38,13 +40,13 @@ add_llvm_target(Z80CodeGen
   Z80InlineAsmLowering.cpp
   Z80InstrInfo.cpp
   Z80InstructionSelector.cpp
-  Z80LateOptimization.cpp
   Z80LegalizerInfo.cpp
   Z80LowerSelect.cpp
   Z80MCInstLower.cpp
   Z80NonReentrant.cpp
   Z80PostRACompareMerge.cpp
   Z80PostRAScavenging.cpp
+  Z80PreEmitPeephole.cpp
   Z80RegisterBankInfo.cpp
   Z80RegisterInfo.cpp
   Z80ShiftRotateChain.cpp

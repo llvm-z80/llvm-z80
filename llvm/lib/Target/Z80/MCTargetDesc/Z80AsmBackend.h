@@ -67,19 +67,6 @@ public:
   void relaxInstruction(MCInst &Inst,
                         const MCSubtargetInfo &STI) const override;
 
-  /// If the instruction can be relaxed, return the opcode of the instruction
-  /// that this instruction can be relaxed to. If the instruction cannot be
-  /// relaxed, return zero. When applicable and the instruction
-  /// is relaxed to Addr24, BankRelax is set to true.
-  static unsigned relaxInstructionTo(unsigned Opcode,
-                                     const MCSubtargetInfo &STI,
-                                     bool &BankRelax);
-  static unsigned relaxInstructionTo(unsigned Opcode,
-                                     const MCSubtargetInfo &STI) {
-    bool BankRelax = false;
-    return relaxInstructionTo(Opcode, STI, BankRelax);
-  }
-
   /// If the provided subtarget uses a custom set of machine instructions,
   /// translate the provided Z80 machine instruction to the subtarget's.
   static void translateOpcodeToSubtarget(MCInst &Inst,

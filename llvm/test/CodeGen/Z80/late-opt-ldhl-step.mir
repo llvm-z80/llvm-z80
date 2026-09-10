@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 #
 # Stepping the address the previous LDHL SP produced, instead of loading the
 # adjacent one, reads HL past the point where it was free to die.

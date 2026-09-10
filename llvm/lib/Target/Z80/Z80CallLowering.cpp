@@ -744,8 +744,8 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
 
     Register VReg = ArgVRegs[0];
     if (LLT VRegTy = MRI.getType(VReg); VRegTy.isVector()) {
-      Register IntReg = MRI.createGenericVirtualRegister(
-          LLT::scalar(VRegTy.getSizeInBits()));
+      Register IntReg =
+          MRI.createGenericVirtualRegister(LLT::scalar(VRegTy.getSizeInBits()));
       VecArgCasts.push_back({VReg, IntReg});
       VReg = IntReg;
     }
@@ -1338,8 +1338,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
             MIRBuilder.buildCopy(Info.OrigRet.Regs[0], Register(Regs.Ret_I16));
             Unpacked = true;
           } else {
-            Register RetReg =
-                MRI.createGenericVirtualRegister(LLT::scalar(16));
+            Register RetReg = MRI.createGenericVirtualRegister(LLT::scalar(16));
             MIRBuilder.buildCopy(RetReg, Register(Regs.Ret_I16));
             SmallVector<unsigned, 2> Indices;
             for (unsigned I = 0; I < SplitVTs.size(); ++I)
@@ -1414,18 +1413,16 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
           if (Offsets[I] == 0) {
             Addr = FIAddr.getReg(0);
           } else {
-            Addr =
-                MIRBuilder
-                    .buildPtrAdd(LLT::pointer(0, 16), FIAddr,
-                                 MIRBuilder.buildConstant(LLT::scalar(16),
-                                                          Offsets[I]))
-                    .getReg(0);
+            Addr = MIRBuilder
+                       .buildPtrAdd(LLT::pointer(0, 16), FIAddr,
+                                    MIRBuilder.buildConstant(LLT::scalar(16),
+                                                             Offsets[I]))
+                       .getReg(0);
           }
           unsigned FieldBits = SplitVTs[I].getSizeInBits();
           LLT LoadTy = FieldBits < 8 ? LLT::scalar(8) : LLT::scalar(FieldBits);
           if (FieldBits < 8) {
-            Register LoadReg =
-                MRI.createGenericVirtualRegister(LLT::scalar(8));
+            Register LoadReg = MRI.createGenericVirtualRegister(LLT::scalar(8));
             auto *MMO = MF.getMachineMemOperand(
                 MachinePointerInfo::getStack(MF, 0), MachineMemOperand::MOLoad,
                 LoadTy, Align(1));

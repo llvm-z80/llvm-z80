@@ -38,11 +38,15 @@
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
 #define DEBUG_TYPE "z80-lower-select"
+
+STATISTIC(NumSelectsLowered,
+          "Number of G_SELECT instructions lowered to branches");
 
 using namespace llvm;
 
@@ -87,6 +91,7 @@ bool Z80LowerSelect::runOnMachineFunction(MachineFunction &MF) {
     for (MachineInstr &MBBI : mbb_reverse(*I)) {
       if (auto *S = dyn_cast<GSelect>(&MBBI)) {
         LLVM_DEBUG(dbgs() << "Lowering: " << *S);
+        ++NumSelectsLowered;
         Changed = true;
         I = lowerSelect(*S);
         break;
