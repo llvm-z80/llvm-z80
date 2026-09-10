@@ -667,6 +667,24 @@ def STORE8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
   let mayStore = true;
 }
 
+// Direct access to an address the linker settles: a global, or a global plus a
+// constant. Z80 reaches one in a single instruction per pair, against putting
+// the address in a pointer register and reading the two bytes through it. The
+// pair is left to the register allocator, since every member of GR16 has a
+// direct form for expandPostRAPseudo to pick:
+//   HL → LD HL,(nn) / LD (nn),HL     (3 bytes)
+//   BC → LD BC,(nn) / LD (nn),BC     (4 bytes, ED prefix)
+//   DE → LD DE,(nn) / LD (nn),DE     (4 bytes, ED prefix)
+// SM83 has none of these, so it never selects them.
+def LOAD16_ABS : Z80Pseudo<(outs GR16:$dst), (ins i16imm:$addr)> {
+  let mayLoad = true;
+  let mayStore = false;
+}
+def STORE16_ABS : Z80Pseudo<(outs), (ins i16imm:$addr, GR16:$src)> {
+  let mayLoad = false;
+  let mayStore = true;
+}
+
 // SUB_HL_xx: 16-bit subtraction pseudo instructions.
 // Generalized 16-bit arithmetic pseudo instructions.
 // The second operand (rr) is a GR16_BCDE virtual register — the register

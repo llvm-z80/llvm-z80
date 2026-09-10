@@ -5,10 +5,7 @@
 ; Test: load from global variable
 define i16 @load_global() {
 ; CHECK-LABEL: _load_global:
-; CHECK:       ld hl,#_global_var
-; CHECK:       ld e,(hl)
-; CHECK-NEXT:  inc hl
-; CHECK-NEXT:  ld d,(hl)
+; CHECK:       ld de,(_global_var)
 ; CHECK-NEXT:  ret
   %v = load i16, ptr @global_var
   ret i16 %v
@@ -17,10 +14,8 @@ define i16 @load_global() {
 ; Test: store to global variable
 define void @store_global(i16 %v) {
 ; CHECK-LABEL: _store_global:
-; CHECK:       ld hl,#_global_var
-; CHECK:       ld (hl),e
-; CHECK-NEXT:  inc hl
-; CHECK-NEXT:  ld (hl),d
+; CHECK:       ld (_global_var),hl
+; CHECK-NEXT:  ret
   store i16 %v, ptr @global_var
   ret void
 }

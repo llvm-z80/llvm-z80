@@ -592,6 +592,33 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
+  case Z80::LOAD16_ABS: {
+    // Expand to LD HL,(nn), LD BC,(nn), or LD DE,(nn) based on the pair the
+    // allocator picked. GR16 holds exactly those three, so one always fits.
+    Register Dst = MI.getOperand(0).getReg();
+    assert((Dst == Z80::HL || Dst == Z80::BC || Dst == Z80::DE) &&
+           "Invalid register for LOAD16_ABS");
+    unsigned Opc = Dst == Z80::HL   ? Z80::LD_HL_nnind
+                   : Dst == Z80::BC ? Z80::LD_BC_nnind
+                                    : Z80::LD_DE_nnind;
+    BuildMI(MBB, MI, DL, get(Opc)).add(MI.getOperand(1));
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case Z80::STORE16_ABS: {
+    // Expand to LD (nn),HL, LD (nn),BC, or LD (nn),DE.
+    Register Src = MI.getOperand(1).getReg();
+    assert((Src == Z80::HL || Src == Z80::BC || Src == Z80::DE) &&
+           "Invalid register for STORE16_ABS");
+    unsigned Opc = Src == Z80::HL   ? Z80::LD_nnind_HL
+                   : Src == Z80::BC ? Z80::LD_nnind_BC
+                                    : Z80::LD_nnind_DE;
+    BuildMI(MBB, MI, DL, get(Opc)).add(MI.getOperand(0));
+    MI.eraseFromParent();
+    return true;
+  }
+
   case Z80::ZEXT_GR8_GR16: {
     // Zero extend 8-bit to 16-bit: LD lo,src; LD hi,0
     Register DstReg = MI.getOperand(0).getReg();

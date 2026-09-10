@@ -110,6 +110,46 @@ static std::optional<uint16_t> getConstantAddr(Register AddrReg,
                                0xFFFF);
 }
 
+/// Recognize an address the linker settles: a global, or a global displaced by
+/// a constant. The direct forms take such an address as an immediate, so
+/// nothing has to reach a pointer register first.
+static bool getGlobalAddr(Register AddrReg, MachineRegisterInfo &MRI,
+                          const GlobalValue *&GV, int64_t &Offset) {
+  Offset = 0;
+  MachineInstr *Def = MRI.getVRegDef(AddrReg);
+  while (Def) {
+    switch (Def->getOpcode()) {
+    case TargetOpcode::G_INTTOPTR:
+    case TargetOpcode::G_PTRTOINT:
+    case TargetOpcode::COPY:
+      if (!Def->getOperand(1).isReg() ||
+          !Def->getOperand(1).getReg().isVirtual())
+        return false;
+      Def = MRI.getVRegDef(Def->getOperand(1).getReg());
+      continue;
+    case TargetOpcode::G_PTR_ADD: {
+      std::optional<int64_t> Disp =
+          getIConstantVRegSExtVal(Def->getOperand(2).getReg(), MRI);
+      if (!Disp)
+        return false;
+      Offset += *Disp;
+      Def = MRI.getVRegDef(Def->getOperand(1).getReg());
+      continue;
+    }
+    case TargetOpcode::G_GLOBAL_VALUE:
+      GV = Def->getOperand(1).getGlobal();
+      Offset += Def->getOperand(1).getOffset();
+      // Pointer arithmetic wraps at the width of a pointer; a chain that sums
+      // past it would leave an out-of-range addend in the relocation.
+      Offset = static_cast<int16_t>(Offset);
+      return true;
+    default:
+      return false;
+    }
+  }
+  return false;
+}
+
 Z80InstructionSelector::Z80InstructionSelector(const Z80TargetMachine &TM,
                                                Z80Subtarget &STI,
                                                Z80RegisterBankInfo &RBI)
@@ -1761,6 +1801,24 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       }
     }
 
+    // A pair read from an address the linker settles takes one instruction,
+    // against putting the address in a pointer register and reading the two
+    // bytes through it. SM83 has no such instruction.
+    if (DstTy.getSizeInBits() == 16 && MI.hasOneMemOperand() &&
+        !MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
+      const GlobalValue *GV = nullptr;
+      int64_t Offset = 0;
+      if (getGlobalAddr(AddrReg, MRI, GV, Offset)) {
+        if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
+          return false;
+        BuildMI(MBB, MI, DL, TII.get(Z80::LOAD16_ABS), DstReg)
+            .addGlobalAddress(GV, Offset)
+            .cloneMemRefs(MI);
+        MI.eraseFromParent();
+        return true;
+      }
+    }
+
     // Try IX-indexed addressing: match G_PTR_ADD(COPY $ix, G_CONSTANT d)
     // This produces LD r,(IX+d) instead of the multi-instruction HL-indirect
     // sequence, which is much more efficient for stack argument access.
@@ -1951,6 +2009,23 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(SrcReg);
         BuildMI(MBB, MI, DL, TII.get(Opc))
             .addImm(HighPage ? (*Addr & 0xFF) : *Addr)
+            .cloneMemRefs(MI);
+        MI.eraseFromParent();
+        return true;
+      }
+    }
+
+    // See the matching fold in G_LOAD.
+    if (SrcTy.getSizeInBits() == 16 && MI.hasOneMemOperand() &&
+        !MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
+      const GlobalValue *GV = nullptr;
+      int64_t Offset = 0;
+      if (getGlobalAddr(AddrReg, MRI, GV, Offset)) {
+        if (!RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
+          return false;
+        BuildMI(MBB, MI, DL, TII.get(Z80::STORE16_ABS))
+            .addGlobalAddress(GV, Offset)
+            .addReg(SrcReg)
             .cloneMemRefs(MI);
         MI.eraseFromParent();
         return true;
