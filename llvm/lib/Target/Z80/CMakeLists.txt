@@ -45,7 +45,6 @@ add_llvm_target(Z80CodeGen
   Z80MCInstLower.cpp
   Z80NonReentrant.cpp
   Z80PostRACompareMerge.cpp
-  Z80PostRAScavenging.cpp
   Z80PreEmitPeephole.cpp
   Z80RegisterBankInfo.cpp
   Z80RegisterInfo.cpp

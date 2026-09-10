@@ -48,7 +48,6 @@
 #include "Z80MachineFunctionInfo.h"
 #include "Z80NonReentrant.h"
 #include "Z80PostRACompareMerge.h"
-#include "Z80PostRAScavenging.h"
 #include "Z80PreEmitPeephole.h"
 #include "Z80ShiftRotateChain.h"
 #include "Z80StaticFrameAlloc.h"
@@ -72,7 +71,6 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80FixupImplicitDefsPass(PR);
   initializeZ80PreEmitPeepholePass(PR);
   initializeZ80LowerSelectPass(PR);
-  initializeZ80PostRAScavengingPass(PR);
   initializeZ80ShiftRotateChainPass(PR);
   initializeZ80PostRACompareMergePass(PR);
   initializeZ80NonReentrantPass(PR);
@@ -330,7 +328,6 @@ void Z80PassConfig::addPreSched2() {
   // Copy lowering leaves the halves of a pair copy declared on the wrong one
   // of the two byte moves. See Z80FixupImplicitDefs.cpp.
   addPass(createZ80FixupImplicitDefsPass());
-  addPass(createZ80PostRAScavengingPass());
 
   // Every function's frame is final past PEI, so the static frames can be
   // laid out module-wide and the placeholder operands resolved. Must run

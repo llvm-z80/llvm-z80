@@ -29,7 +29,6 @@ void initializeZ80FixupImplicitDefsPass(PassRegistry &);
 void initializeZ80IndexIVPass(PassRegistry &);
 void initializeZ80PreEmitPeepholePass(PassRegistry &);
 void initializeZ80LowerSelectPass(PassRegistry &);
-void initializeZ80PostRAScavengingPass(PassRegistry &);
 void initializeZ80ShiftRotateChainPass(PassRegistry &);
 
 // The behind-by-one property of the std::reverse_iterator adaptor applied by
