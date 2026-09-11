@@ -1024,14 +1024,6 @@ public:
   /// by referencing its sub-register AX.
   LLVM_ABI bool isTruncateFree(Type *Ty1, Type *Ty2) const;
 
-  /// Return true if it's free to zero extend a value of type Ty1 to type
-  /// Ty2.
-  bool isZExtFree(Type *Ty1, Type *Ty2) const;
-
-  /// Return true if a operations on narrow types are generally cheaper than
-  /// operations on wide types.
-  bool preferNarrowTypes() const;
-
   /// Return true if it is profitable to hoist instruction in the
   /// then/else to before if.
   LLVM_ABI bool isProfitableToHoist(Instruction *I) const;

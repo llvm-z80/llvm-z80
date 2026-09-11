@@ -3275,11 +3275,6 @@ public:
     return false;
   }
 
-  /// Return true if narrow types are generally cheaper than wide types.
-  virtual bool preferNarrowTypes() const {
-    return false;
-  }
-
   /// Return true if this constant should be sign extended when promoting to
   /// a larger type.
   virtual bool signExtendConstant(const ConstantInt *C) const { return false; }

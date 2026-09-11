@@ -58,8 +58,6 @@ public:
                                          CallingConv::ID CC,
                                          EVT VT) const override;
 
-  bool preferNarrowTypes() const override { return true; }
-
   std::pair<unsigned, const TargetRegisterClass *>
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                StringRef Constraint, MVT VT) const override;
