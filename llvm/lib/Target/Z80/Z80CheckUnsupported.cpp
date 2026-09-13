@@ -13,20 +13,33 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/PassRegistry.h"
+#include "llvm/Support/CommandLine.h"
 
 #include "Z80.h"
 
 #define DEBUG_TYPE "z80-check-unsupported"
 
 using namespace llvm;
+
+// The rounding masks the low byte of the address, so that is as far as an
+// alignment can reach.
+static constexpr uint64_t MaxStackAlign = 128;
+
+static cl::opt<unsigned> WarnStackAlignPadding(
+    "z80-warn-stack-align-padding",
+    cl::desc("Warn about an over-aligned stack object once its padding "
+             "reaches this many bytes (0 disables the warning)"),
+    cl::init(1), cl::Hidden);
 
 namespace {
 
@@ -240,6 +253,71 @@ static bool hasWideDirectOperand(const CallBase &CB, const DataLayout &DL) {
   return false;
 }
 
+// SP is at an arbitrary address when a function is entered and there is no
+// callee-saved register to hold it across a realignment, so the stack itself
+// stays byte-aligned. An object that wants more gets its alignment minus one
+// in extra bytes, and its address is rounded up inside that room.
+static bool lowerOverAlignedAllocas(Function &F, const DataLayout &DL) {
+  SmallVector<AllocaInst *, 4> Worklist;
+  for (BasicBlock &BB : F)
+    for (Instruction &I : BB)
+      if (auto *AI = dyn_cast<AllocaInst>(&I))
+        if (AI->getAlign() > Align(1))
+          Worklist.push_back(AI);
+
+  bool Changed = false;
+  for (AllocaInst *AI : Worklist) {
+    const uint64_t A = AI->getAlign().value();
+    if (A > MaxStackAlign) {
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F,
+          "cannot align a stack object to " + Twine(A) + ", the maximum is " +
+              Twine(MaxStackAlign) + "; use a static object for aligned data",
+          AI->getDebugLoc()));
+      // Drop the request so the frame layout check does not repeat the error.
+      AI->setAlignment(Align(1));
+      Changed = true;
+      continue;
+    }
+
+    // A dynamically sized object would have to size its own padding; SM83
+    // refuses those in the legalizer anyway.
+    if (!AI->isStaticAlloca())
+      continue;
+
+    const uint64_t Extra = A - 1;
+    const uint64_t Size =
+        DL.getTypeAllocSize(AI->getAllocatedType()).getFixedValue() *
+        cast<ConstantInt>(AI->getArraySize())->getZExtValue();
+
+    if (WarnStackAlignPadding && Extra >= WarnStackAlignPadding)
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F,
+          "aligning a stack object to " + Twine(A) + " costs " + Twine(Extra) +
+              (Extra == 1 ? " byte" : " bytes") +
+              " of padding; use a static object for aligned data",
+          AI->getDebugLoc(), DS_Warning));
+
+    IRBuilder<> B(AI);
+    Type *I8 = Type::getInt8Ty(F.getContext());
+    auto *Raw = B.CreateAlloca(ArrayType::get(I8, Size + Extra), nullptr,
+                               AI->getName() + ".raw");
+    Raw->setAlignment(Align(1));
+
+    Type *IntPtrTy = DL.getIntPtrType(AI->getType());
+    const unsigned Bits = IntPtrTy->getIntegerBitWidth();
+    Value *Addr = B.CreatePtrToInt(Raw, IntPtrTy);
+    Addr = B.CreateAdd(Addr, ConstantInt::get(IntPtrTy, Extra));
+    Addr = B.CreateAnd(Addr, ConstantInt::get(IntPtrTy, ~APInt(Bits, Extra)));
+    Value *Aligned = B.CreateIntToPtr(Addr, AI->getType(), AI->getName());
+
+    AI->replaceAllUsesWith(Aligned);
+    AI->eraseFromParent();
+    Changed = true;
+  }
+  return Changed;
+}
+
 class Z80CheckUnsupported : public FunctionPass {
 public:
   static char ID;
@@ -297,6 +375,8 @@ public:
     Changed |= rewriteIndirectAsmOutputs(F);
 
     const DataLayout &DL = F.getParent()->getDataLayout();
+    Changed |= lowerOverAlignedAllocas(F, DL);
+
     SmallVector<CallInst *, 2> WideAsm;
     for (BasicBlock &BB : F)
       for (Instruction &I : BB)
