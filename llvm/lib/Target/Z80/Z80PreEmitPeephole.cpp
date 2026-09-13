@@ -47,6 +47,7 @@ STATISTIC(NumPopPushElided, "Number of POP/PUSH pairs elided");
 STATISTIC(NumPushPopElided, "Number of PUSH/POP pairs elided");
 STATISTIC(NumPostIncFused, "Number of accesses fused into post-increment form");
 STATISTIC(NumConstStores, "Number of constant stores materialized through A");
+STATISTIC(NumSingleBitMasks, "Number of single-bit masks folded to RES");
 STATISTIC(NumIXConstStores,
           "Number of constant stores materialized through IX");
 STATISTIC(NumPopPushPairs, "Number of POP/PUSH pairs on the same pair removed");
@@ -586,6 +587,51 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
   }
   if (Changed)
     recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+// LD A,r; AND n; LD r,A is four bytes for what RES does in two, when the
+// mask clears a single bit. RES writes no flags, so the ones the AND wrote
+// have to be dead.
+static bool foldSingleBitMask(MachineBasicBlock &MBB,
+                              const TargetInstrInfo *TII,
+                              const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+  for (auto MII = MBB.begin(); MII != MBB.end();) {
+    auto And = MII++;
+    if (And->getOpcode() != Z80::AND_n || !And->getOperand(0).isImm())
+      continue;
+    const unsigned Cleared = ~And->getOperand(0).getImm() & 0xFF;
+    if (!isPowerOf2_32(Cleared))
+      continue;
+    if (And == MBB.begin())
+      continue;
+
+    auto In = std::prev(And);
+    auto Out = std::next(And);
+    if (Out == MBB.end() || !isLD8(*In) || !isLD8(*Out))
+      continue;
+    Register Reg = In->getOperand(1).getReg();
+    if (In->getOperand(0).getReg() != Z80::A || Reg == Z80::A ||
+        Out->getOperand(0).getReg() != Reg ||
+        Out->getOperand(1).getReg() != Z80::A)
+      continue;
+
+    auto After = std::next(Out);
+    if (!isRegDeadAfter(After, MBB, TRI, Z80::FLAGS) ||
+        !isRegDeadAfter(After, MBB, TRI, Z80::A))
+      continue;
+
+    LLVM_DEBUG(dbgs() << "  Single-bit mask through A: " << *And);
+    BuildMI(MBB, In, And->getDebugLoc(), TII->get(Z80::RES_b_r), Reg)
+        .addImm(Log2_32(Cleared))
+        .addReg(Reg);
+    MBB.erase(In);
+    MBB.erase(And);
+    MII = MBB.erase(Out);
+    ++NumSingleBitMasks;
+    Changed = true;
+  }
   return Changed;
 }
 
@@ -2442,6 +2488,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // which is the level that takes those.
     if (!STI.hasSM83() && MF.getFunction().hasMinSize())
       Changed |= materializeIXConstantStores(MBB, TII, TRI);
+    Changed |= foldSingleBitMask(MBB, TII, TRI);
     Changed |= directIncDec(MBB, TII, TRI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
     Changed |= elidePushPopAcrossStretch(MBB, TII, TRI);

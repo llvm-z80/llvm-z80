@@ -1,0 +1,83 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
+#
+# Clearing one bit of a register is what RES does, in half the bytes the
+# accumulator-only AND needs once the copies in and out are counted. RES
+# writes no flags, so the ones the AND wrote have to be dead, and so does
+# the copy of the value the round trip leaves in A.
+
+--- |
+  define void @single_bit() { ret void }
+  define void @flags_live() { ret void }
+  define void @accumulator_live() { ret void }
+  define void @two_bits() { ret void }
+...
+---
+name:            single_bit
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $c, $ix
+    $a = LD_r_r $c
+    AND_n 254, implicit-def $a, implicit-def $flags, implicit killed $a
+    $c = LD_r_r killed $a
+    LD_IXd_r -2, killed $c, implicit $ix
+    RET
+
+# CHECK-LABEL: name: single_bit
+# CHECK:      $c = RES_b_r 0, $c
+# CHECK-NEXT: LD_IXd_r -2, killed $c
+# CHECK-NOT:  AND_n
+
+...
+---
+name:            flags_live
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $c
+    $a = LD_r_r $c
+    AND_n 254, implicit-def $a, implicit-def $flags, implicit killed $a
+    $c = LD_r_r killed $a
+    JP_Z_nn %bb.1, implicit $flags
+  bb.1:
+    RET
+
+# The zero the AND reports is read, and RES would not report it.
+# CHECK-LABEL: name: flags_live
+# CHECK:      AND_n 254
+
+...
+---
+name:            accumulator_live
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $c, $ix
+    $a = LD_r_r $c
+    AND_n 254, implicit-def $a, implicit-def $flags, implicit killed $a
+    $c = LD_r_r $a
+    LD_IXd_r -2, killed $a, implicit $ix
+    RET
+
+# The round trip left the masked value in A and it is read there.
+# CHECK-LABEL: name: accumulator_live
+# CHECK:      AND_n 254
+
+...
+---
+name:            two_bits
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $c, $ix
+    $a = LD_r_r $c
+    AND_n 252, implicit-def $a, implicit-def $flags, implicit killed $a
+    $c = LD_r_r killed $a
+    LD_IXd_r -2, killed $c, implicit $ix
+    RET
+
+# Two bits are two RES, which buys nothing.
+# CHECK-LABEL: name: two_bits
+# CHECK:      AND_n 252
+
+...
