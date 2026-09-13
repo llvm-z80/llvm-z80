@@ -42,6 +42,18 @@ Z80AsmBackend::createObjectTargetWriter() const {
   return createZ80ELFObjectWriter(ELF::ELFOSABI_NONE);
 }
 
+// MC measures a fixup to the byte it patches; a JR displacement is measured
+// from the end of the instruction and an SM83 LDH offset from 0xFF00. The
+// relaxation decision and the encoding both start here so they cannot drift
+// apart. lld::Z80::relocate makes the same adjustments.
+static uint64_t encodedValue(const MCFixup &Fixup, uint64_t Value) {
+  if (Fixup.isPCRel())
+    Value -= 1;
+  if (Fixup.getKind() == Z80::LDH8)
+    Value -= 0xFF00;
+  return Value;
+}
+
 bool Z80AsmBackend::fixupNeedsRelaxationAdvanced(const MCFragment &F,
                                                  const MCFixup &Fixup,
                                                  const MCValue &Target,
@@ -53,10 +65,8 @@ bool Z80AsmBackend::fixupNeedsRelaxationAdvanced(const MCFragment &F,
   if (!Resolved)
     return true;
 
-  if (Fixup.getKind() == (MCFixupKind)Z80::PCRel8) {
-    int64_t SignedValue = static_cast<int64_t>(Value);
-    return SignedValue < -128 || SignedValue > 127;
-  }
+  if (Fixup.getKind() == (MCFixupKind)Z80::PCRel8)
+    return !isInt<8>(static_cast<int64_t>(encodedValue(Fixup, Value)));
 
   return false;
 }
@@ -96,17 +106,7 @@ MCFixupKindInfo Z80AsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
 void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
                                const MCValue &Target, uint8_t *Data,
                                uint64_t Value, bool IsResolved) {
-  // For PC-relative fixups, LLVM computes Value = target - fixup_byte_addr.
-  // Z80 JR displacement is relative to the end of the instruction (PC+2),
-  // but the fixup byte is at PC+1, so we need to subtract 1.
-  // Note: lld applies the same -1 adjustment in Z80::relocate() for
-  // link-time relocations; this adjustment handles resolved (internal) fixups.
-  if (Fixup.isPCRel())
-    Value -= 1;
-
-  // SM83 LDH: subtract 0xFF00 base to get the 8-bit offset
-  if (Fixup.getKind() == Z80::LDH8)
-    Value -= 0xFF00;
+  Value = encodedValue(Fixup, Value);
 
   // A resolved fixup is encoded directly and emits no relocation, so the
   // linker's range checks never see it; an out-of-range value would be
@@ -177,7 +177,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   case Z80::Addr24_Segment_High:
   case Z80::PCRel8:
   case Z80::Disp8: // 8-bit signed displacement for indexed addressing
-  case Z80::LDH8: // SM83 LDH operand: 8-bit offset from 0xFF00
+  case Z80::LDH8:  // SM83 LDH operand: 8-bit offset from 0xFF00
     NumBytes = 1;
     break;
   case FK_Data_2:
@@ -236,23 +236,25 @@ void Z80AsmBackend::relaxInstruction(MCInst &Inst,
   // but this fallback catches edge cases (inline asm, late expansions).
   unsigned NewOpcode;
   switch (Inst.getOpcode()) {
-  case Z80::JR_e:    NewOpcode = Z80::JP_nn; break;
-  case Z80::JR_Z_e:  NewOpcode = Z80::JP_Z_nn; break;
-  case Z80::JR_NZ_e: NewOpcode = Z80::JP_NZ_nn; break;
-  case Z80::JR_C_e:  NewOpcode = Z80::JP_C_nn; break;
-  case Z80::JR_NC_e: NewOpcode = Z80::JP_NC_nn; break;
+  case Z80::JR_e:
+    NewOpcode = Z80::JP_nn;
+    break;
+  case Z80::JR_Z_e:
+    NewOpcode = Z80::JP_Z_nn;
+    break;
+  case Z80::JR_NZ_e:
+    NewOpcode = Z80::JP_NZ_nn;
+    break;
+  case Z80::JR_C_e:
+    NewOpcode = Z80::JP_C_nn;
+    break;
+  case Z80::JR_NC_e:
+    NewOpcode = Z80::JP_NC_nn;
+    break;
   default:
     llvm_unreachable("Unexpected instruction to relax");
   }
   Inst.setOpcode(NewOpcode);
-}
-
-unsigned Z80AsmBackend::relaxInstructionTo(unsigned Opcode,
-                                           const MCSubtargetInfo &STI,
-                                           bool &BankRelax) {
-  // Z80 doesn't have the same relaxation model as the original architecture
-  BankRelax = false;
-  return 0;
 }
 
 void Z80AsmBackend::translateOpcodeToSubtarget(MCInst &Inst,

@@ -1,4 +1,4 @@
-//===-- Z80PostRAScavenging.h - Z80 Post RA Register Scavenging -*- C++ -*-===//
+//===-- Z80PreEmitPeephole.h - Z80 pre-emit peephole ------------*- C++ -*-===//
 //
 // Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,19 +6,19 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file declares the Z80 post-register-allocation register scavenging pass.
+// This file declares the Z80 pre-emit peephole optimization pass.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TARGET_Z80_Z80POSTRASCAVENGING_H
-#define LLVM_LIB_TARGET_Z80_Z80POSTRASCAVENGING_H
+#ifndef LLVM_LIB_TARGET_Z80_Z80PREEMITPEEPHOLE_H
+#define LLVM_LIB_TARGET_Z80_Z80PREEMITPEEPHOLE_H
 
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
 namespace llvm {
 
-MachineFunctionPass *createZ80PostRAScavengingPass();
+MachineFunctionPass *createZ80PreEmitPeepholePass();
 
 } // namespace llvm
 
-#endif // not LLVM_LIB_TARGET_Z80_Z80POSTRASCAVENGING_H
+#endif // not LLVM_LIB_TARGET_Z80_Z80PREEMITPEEPHOLE_H

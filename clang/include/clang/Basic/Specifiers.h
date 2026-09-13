@@ -313,7 +313,16 @@ namespace clang {
     CC_RISCVVLSCall_16384, // __attribute__((riscv_vls_cc(16384)))
     CC_RISCVVLSCall_32768, // __attribute__((riscv_vls_cc(32768)))
     CC_RISCVVLSCall_65536, // __attribute__((riscv_vls_cc(65536)))
+    // The Z80 SDCC/z88dk conventions.  Each is an argument-passing base plus
+    // the orthogonal z88dk_callee modifier, so the combinations below have no
+    // single attribute spelling their name.  See composeZ80CallingConvs in
+    // SemaType.cpp.
     CC_Z80SDCCCall0,       // __attribute__((sdcccall(0)))
+    CC_Z80SmallC,          // __attribute__((smallc))
+    CC_Z80Z88dkFastCall,   // __attribute__((z88dk_fastcall))
+    CC_Z80Z88dkCallee,     // __attribute__((z88dk_callee)), base sdcccall(1)
+    CC_Z80SDCCCall0Callee, // sdcccall(0) + z88dk_callee
+    CC_Z80SmallCCallee,    // smallc + z88dk_callee
   };
 
   /// Checks whether the given calling convention supports variadic
@@ -331,6 +340,14 @@ namespace clang {
     case CC_Swift:
     case CC_SwiftAsync:
     case CC_M68kRTD:
+    // SDCC's __smallc pushes arguments left-to-right, which leaves a variadic
+    // callee no way to find where the fixed arguments end.
+    case CC_Z80SmallC:
+    case CC_Z80SmallCCallee:
+    // A callee that pops its own arguments cannot pop a count only the caller
+    // knows, so __z88dk_callee rules out varargs whatever its base.
+    case CC_Z80Z88dkCallee:
+    case CC_Z80SDCCCall0Callee:
       return false;
     default:
       return true;

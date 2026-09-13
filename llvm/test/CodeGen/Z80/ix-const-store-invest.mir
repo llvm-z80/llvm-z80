@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 #
 # The IX-indexed store of an immediate is one byte longer than the store of
 # A, so putting the value in A once pays for itself from the second store of

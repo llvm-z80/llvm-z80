@@ -732,6 +732,12 @@ CXCallingConv clang_getFunctionTypeCallingConv(CXType X) {
       TCALLINGCONV(RISCVVLSCall_65536);
     case CC_SpirFunction: return CXCallingConv_Unexposed;
     case CC_DeviceKernel:
+    case CC_Z80SDCCCall0:
+    case CC_Z80SmallC:
+    case CC_Z80Z88dkFastCall:
+    case CC_Z80Z88dkCallee:
+    case CC_Z80SDCCCall0Callee:
+    case CC_Z80SmallCCallee:
       return CXCallingConv_Unexposed;
       break;
     }

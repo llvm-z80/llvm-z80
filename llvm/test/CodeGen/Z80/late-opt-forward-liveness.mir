@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 #
 # A reload served from the register that still holds the slot's value reads that
 # register later than allocation expected, so the kill that ended the value at

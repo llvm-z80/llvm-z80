@@ -1,5 +1,5 @@
 ; RUN: llc -mtriple=z80 -O2 -verify-machineinstrs < %s | FileCheck %s
-; RUN: llc -mtriple=z80 -O2 -stop-after=z80-late-opt < %s | FileCheck %s --check-prefix=MIR
+; RUN: llc -mtriple=z80 -O2 -stop-after=z80-pre-emit-peephole < %s | FileCheck %s --check-prefix=MIR
 
 ; XOR A zeroes the accumulator whatever it held, so it must not be described
 ; as reading it: the zeroing lands wherever a zero is wanted, including on an

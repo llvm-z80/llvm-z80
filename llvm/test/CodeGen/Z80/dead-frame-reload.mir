@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 #
 # A pair reloaded because one of its bytes is needed leaves the other one
 # dead once the halves become separate instructions.

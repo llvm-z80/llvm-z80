@@ -1,4 +1,4 @@
-# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-late-opt %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
 
 --- |
   define void @alu_from_slot() { ret void }

@@ -1,4 +1,4 @@
-//===-- Z80LateOptimization.cpp - Z80 Late Optimization -------------------===//
+//===-- Z80PreEmitPeephole.cpp - Z80 pre-emit peephole --------------------===//
 //
 // Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -15,7 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Z80LateOptimization.h"
+#include "Z80PreEmitPeephole.h"
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80.h"
@@ -23,6 +23,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -34,7 +35,39 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
-#define DEBUG_TYPE "z80-late-opt"
+#define DEBUG_TYPE "z80-pre-emit-peephole"
+
+STATISTIC(NumLDHLReused, "Number of HL frame addresses reused");
+STATISTIC(NumZeroLogicElided, "Number of no-op logic operations removed");
+STATISTIC(NumCopiesFolded, "Number of copies folded into frame accesses");
+STATISTIC(NumDeadReloads, "Number of dead frame reloads erased");
+STATISTIC(NumPairReloads, "Number of reloads redirected into a register pair");
+STATISTIC(NumIncDec, "Number of increments/decrements applied in place");
+STATISTIC(NumPopPushElided, "Number of POP/PUSH pairs elided");
+STATISTIC(NumPushPopElided, "Number of PUSH/POP pairs elided");
+STATISTIC(NumPostIncFused, "Number of accesses fused into post-increment form");
+STATISTIC(NumConstStores, "Number of constant stores materialized through A");
+STATISTIC(NumSingleBitMasks, "Number of single-bit masks folded to RES");
+STATISTIC(NumIXConstStores,
+          "Number of constant stores materialized through IX");
+STATISTIC(NumPopPushPairs, "Number of POP/PUSH pairs on the same pair removed");
+STATISTIC(NumDecInPlace,
+          "Number of load/decrement/store sequences done in place");
+STATISTIC(NumCplFolds, "Number of XOR 0xFF folded to CPL");
+STATISTIC(NumZeroAFolds, "Number of LD A,0 folded to XOR A");
+STATISTIC(NumAluImmMerges, "Number of consecutive ALU immediates merged");
+STATISTIC(NumImm16Stores,
+          "Number of 16-bit immediate stores routed through the slot");
+STATISTIC(NumLDHLStepped,
+          "Number of consecutive LDHL SP addresses stepped with INC/DEC");
+STATISTIC(NumCmpImmFolds,
+          "Number of constants folded into a 16-bit XOR compare");
+STATISTIC(NumPostIncLoads,
+          "Number of loads rewritten to the post-increment form");
+STATISTIC(NumHLPostIncLoads, "Number of 16-bit HL loads rewritten through HL+");
+STATISTIC(NumSlotForwarded,
+          "Number of SM83 SP-relative slot accesses forwarded");
+STATISTIC(NumStoreForwarded, "Number of stores forwarded to a following load");
 
 using namespace llvm;
 
@@ -237,12 +270,12 @@ static void invalidateReg(DenseMap<int, MCPhysReg, IXOffsetInfo> &AvailValues,
 
 namespace {
 
-class Z80LateOptimization : public MachineFunctionPass {
+class Z80PreEmitPeephole : public MachineFunctionPass {
 public:
   static char ID;
 
-  Z80LateOptimization() : MachineFunctionPass(ID) {
-    llvm::initializeZ80LateOptimizationPass(*PassRegistry::getPassRegistry());
+  Z80PreEmitPeephole() : MachineFunctionPass(ID) {
+    llvm::initializeZ80PreEmitPeepholePass(*PassRegistry::getPassRegistry());
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
@@ -260,8 +293,7 @@ public:
 // shifts it; a call ends tracking, since callee cleanup leaves SP
 // unknowable here (the same reason the push ix/pop hl rewrite was
 // abandoned). LDHL also defines FLAGS, so a rewrite needs FLAGS dead.
-static bool reuseLDHLAddress(MachineBasicBlock &MBB,
-                             const TargetInstrInfo *TII,
+static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
                              const TargetRegisterInfo *TRI);
 
 // Whether nothing at or below \p After wants the value in \p Reg, which is
@@ -295,6 +327,7 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
         isRegDeadAfter(std::next(MII), MBB, TRI, Z80::FLAGS)) {
       LLVM_DEBUG(dbgs() << "  Zero operand, no effect: " << MI);
       MII = MBB.erase(MII);
+      ++NumZeroLogicElided;
       Changed = true;
       continue;
     }
@@ -309,6 +342,7 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
       Z80::buildLD8(MBB, MII, MI.getDebugLoc(), *TII, Z80::A, Src);
       MII = MBB.erase(MII);
       Zero.erase(Z80::A);
+      ++NumZeroLogicElided;
       Changed = true;
       continue;
     }
@@ -430,6 +464,7 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
         }
         MBB.erase(Use);
         MII = MBB.erase(MII);
+        ++NumCopiesFolded;
         Changed = true;
         continue;
       }
@@ -445,6 +480,7 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
           .cloneMemRefs(*Next);
       MII = MBB.erase(MII);
       MII = MBB.erase(MII);
+      ++NumCopiesFolded;
       Changed = true;
       continue;
     }
@@ -479,6 +515,7 @@ static bool eraseDeadFrameReloads(MachineBasicBlock &MBB,
     }
     LLVM_DEBUG(dbgs() << "  Removing dead def: " << *MII);
     MII = MBB.erase(MII);
+    ++NumDeadReloads;
     Changed = true;
   }
   if (Changed)
@@ -545,10 +582,56 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
     Z80::buildLD8(MBB, LoadHi, LoadHi->getDebugLoc(), *TII, P->Lo, Z80::A);
     MII = std::next(SetHi);
     MBB.erase(LoadHi, MII);
+    ++NumPairReloads;
     Changed = true;
   }
   if (Changed)
     recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+// LD A,r; AND n; LD r,A is four bytes for what RES does in two, when the
+// mask clears a single bit. RES writes no flags, so the ones the AND wrote
+// have to be dead.
+static bool foldSingleBitMask(MachineBasicBlock &MBB,
+                              const TargetInstrInfo *TII,
+                              const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+  for (auto MII = MBB.begin(); MII != MBB.end();) {
+    auto And = MII++;
+    if (And->getOpcode() != Z80::AND_n || !And->getOperand(0).isImm())
+      continue;
+    const unsigned Cleared = ~And->getOperand(0).getImm() & 0xFF;
+    if (!isPowerOf2_32(Cleared))
+      continue;
+    if (And == MBB.begin())
+      continue;
+
+    auto In = std::prev(And);
+    auto Out = std::next(And);
+    if (Out == MBB.end() || !isLD8(*In) || !isLD8(*Out))
+      continue;
+    Register Reg = In->getOperand(1).getReg();
+    if (In->getOperand(0).getReg() != Z80::A || Reg == Z80::A ||
+        Out->getOperand(0).getReg() != Reg ||
+        Out->getOperand(1).getReg() != Z80::A)
+      continue;
+
+    auto After = std::next(Out);
+    if (!isRegDeadAfter(After, MBB, TRI, Z80::FLAGS) ||
+        !isRegDeadAfter(After, MBB, TRI, Z80::A))
+      continue;
+
+    LLVM_DEBUG(dbgs() << "  Single-bit mask through A: " << *And);
+    BuildMI(MBB, In, And->getDebugLoc(), TII->get(Z80::RES_b_r), Reg)
+        .addImm(Log2_32(Cleared))
+        .addReg(Reg);
+    MBB.erase(In);
+    MBB.erase(And);
+    MII = MBB.erase(Out);
+    ++NumSingleBitMasks;
+    Changed = true;
+  }
   return Changed;
 }
 
@@ -597,6 +680,7 @@ static bool directIncDec(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
     MBB.erase(Next);
     MBB.erase(Third);
     MII = After;
+    ++NumIncDec;
     Changed = true;
   }
   if (Changed)
@@ -640,6 +724,7 @@ static bool elidePopPushAcrossStretch(MachineBasicBlock &MBB,
           LLVM_DEBUG(dbgs() << "  Pop/push elision across stretch: " << *MII);
           MBB.erase(J);
           Next = MBB.erase(MII);
+          ++NumPopPushElided;
           Changed = true;
           break;
         }
@@ -649,8 +734,7 @@ static bool elidePopPushAcrossStretch(MachineBasicBlock &MBB,
         if (J->isCall() || J->isBranch() || J->isTerminator() ||
             J->isInlineAsm() || J->readsRegister(P.Reg, TRI) ||
             J->modifiesRegister(P.Reg, TRI) || TII->getSPAdjust(*J) != 0 ||
-            J->readsRegister(Z80::SP, TRI) ||
-            J->modifiesRegister(Z80::SP, TRI))
+            J->readsRegister(Z80::SP, TRI) || J->modifiesRegister(Z80::SP, TRI))
           break;
       }
       break;
@@ -709,6 +793,7 @@ static bool elidePushPopAcrossStretch(MachineBasicBlock &MBB,
           LLVM_DEBUG(dbgs() << "  Push/pop elision across stretch: " << *MII);
           MBB.erase(J);
           Next = MBB.erase(MII);
+          ++NumPushPopElided;
           Changed = true;
           break;
         }
@@ -783,6 +868,7 @@ static bool fusePostIncAccess(MachineBasicBlock &MBB,
     MBB.erase(MII);
     MBB.erase(Next);
     MII = After;
+    ++NumPostIncFused;
     Changed = true;
   }
   if (Changed)
@@ -879,6 +965,7 @@ static bool materializeConstantStores(MachineBasicBlock &MBB,
           MBB.erase(It);
         }
       }
+      ++NumConstStores;
       Changed = true;
       LLVM_DEBUG(dbgs() << "  A invest: constant " << Value << " saves "
                         << (Saving - Cost) << "B\n");
@@ -903,7 +990,8 @@ static bool materializeIXConstantStores(MachineBasicBlock &MBB,
   while (WindowEnd != MBB.end()) {
     auto Touches = [&](MachineBasicBlock::iterator It) {
       return It->isCall() || It->isInlineAsm() ||
-             It->readsRegister(Z80::A, TRI) || It->modifiesRegister(Z80::A, TRI);
+             It->readsRegister(Z80::A, TRI) ||
+             It->modifiesRegister(Z80::A, TRI);
     };
     auto WindowBegin = WindowEnd;
     while (WindowBegin != MBB.end() && Touches(WindowBegin))
@@ -957,6 +1045,7 @@ static bool materializeIXConstantStores(MachineBasicBlock &MBB,
                          It->getOperand(0).getImm(), Z80::A);
       MBB.erase(It);
     }
+    ++NumIXConstStores;
     Changed = true;
     LLVM_DEBUG(dbgs() << "  A invest (IX): constant " << Value << " saves "
                       << (Saving - Cost) << "B\n");
@@ -967,8 +1056,7 @@ static bool materializeIXConstantStores(MachineBasicBlock &MBB,
   return Changed;
 }
 
-static bool reuseLDHLAddress(MachineBasicBlock &MBB,
-                             const TargetInstrInfo *TII,
+static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
                              const TargetRegisterInfo *TRI) {
   bool Changed = false;
   bool Known = false;  // Whether HL = SP + Off holds here.
@@ -995,12 +1083,14 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
         MBB.erase(Next);
         MII = AfterInc;
         Off += 1; // LD (HL+),A moved HL exactly as the INC HL did.
+        ++NumLDHLReused;
         Changed = true;
         continue;
       }
       LLVM_DEBUG(dbgs() << "  A reuse: store via A " << MI);
       Z80::buildStoreHL(MBB, MII, MI.getDebugLoc(), *TII, Z80::A);
       MII = MBB.erase(MII);
+      ++NumLDHLReused;
       Changed = true;
       continue;
     }
@@ -1009,6 +1099,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
       // LD A,n leaves flags alone, so the reload can simply go.
       LLVM_DEBUG(dbgs() << "  A reuse: erasing reload " << MI);
       MII = MBB.erase(MII);
+      ++NumLDHLReused;
       Changed = true;
       continue;
     }
@@ -1016,6 +1107,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
         isRegDeadAfter(Next, MBB, TRI, Z80::FLAGS)) {
       LLVM_DEBUG(dbgs() << "  A reuse: erasing xor a " << MI);
       MII = MBB.erase(MII);
+      ++NumLDHLReused;
       Changed = true;
       continue;
     }
@@ -1042,6 +1134,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
         if (D == 0) {
           LLVM_DEBUG(dbgs() << "  LDHL reuse: erasing " << MI);
           MII = MBB.erase(MII);
+          ++NumLDHLReused;
           Changed = true;
           continue;
         }
@@ -1051,6 +1144,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
                              D == 1 ? Z80::INC_rr : Z80::DEC_rr, Z80::HL);
           MII = MBB.erase(MII);
           Off = N;
+          ++NumLDHLReused;
           Changed = true;
           continue;
         }
@@ -1123,7 +1217,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB,
   return Changed;
 }
 
-bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
+bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
   const auto *TII = STI.getInstrInfo();
   const auto *TRI = STI.getRegisterInfo();
@@ -1177,6 +1271,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         LLVM_DEBUG(dbgs() << "  Removing redundant POP+PUSH: " << *MII);
         NextIt->eraseFromParent();
         MII = MBB.erase(MII);
+        ++NumPopPushPairs;
         Changed = BlockChanged = true;
         Matched = true;
         break;
@@ -1248,6 +1343,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
       MII = MBB.erase(I1);
       Z80::buildIncDec8(MBB, MII, DL, *TII, Z80::DEC_r, CounterReg);
       BuildMI(MBB, MII, DL, TII->get(Z80::JR_NZ_e)).addMBB(TargetMBB);
+      ++NumDecInPlace;
       Changed = BlockChanged = true;
     }
 
@@ -1264,6 +1360,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           LLVM_DEBUG(dbgs() << "  XOR #0xFF → CPL: " << MI);
           BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(Z80::CPL));
           MII = MBB.erase(MII);
+          ++NumCplFolds;
           Changed = BlockChanged = true;
           continue;
         }
@@ -1284,6 +1381,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           LLVM_DEBUG(dbgs() << "  LD A,#0 → XOR A: " << MI);
           Z80::buildZeroA(MBB, MI, MI.getDebugLoc(), *TII);
           MII = MBB.erase(MII);
+          ++NumZeroAFolds;
           Changed = BlockChanged = true;
           continue;
         }
@@ -1304,6 +1402,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           MI.getOperand(0).getImm() == NextIt->getOperand(0).getImm()) {
         LLVM_DEBUG(dbgs() << "  Removing redundant: " << *NextIt);
         NextIt->eraseFromParent();
+        ++NumAluImmMerges;
         Changed = BlockChanged = true;
         continue;
       }
@@ -1384,6 +1483,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
 
         // Remove LD rr,#imm
         MII = MBB.erase(MII);
+        ++NumImm16Stores;
         Changed = BlockChanged = true;
       }
     }
@@ -1463,6 +1563,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         Z80::buildIncDec16(MBB, *It, It->getDebugLoc(), *TII,
                            Diff == 1 ? Z80::INC_rr : Z80::DEC_rr, Z80::HL);
         It->eraseFromParent();
+        ++NumLDHLStepped;
         Changed = BlockChanged = true;
       }
     }
@@ -1612,6 +1713,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
 
         // Remove LD rr,#imm
         MII = MBB.erase(MII);
+        ++NumCmpImmFolds;
         Changed = BlockChanged = true;
       }
     }
@@ -1668,6 +1770,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
           Z80::markEmptyReads(newRange(), MII, TRI, Empty);
           NextIt->eraseFromParent();
           MII = MBB.erase(MII);
+          ++NumPostIncLoads;
           Changed = BlockChanged = true;
           continue;
         }
@@ -1726,6 +1829,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
               Z80::markEmptyReads(newRange(), MII, TRI, Empty);
               NextIt->eraseFromParent();
               MII = MBB.erase(MII);
+              ++NumPostIncLoads;
               Changed = BlockChanged = true;
               continue;
             }
@@ -1813,6 +1917,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
         I3->eraseFromParent();
         I2->eraseFromParent();
         MII = MBB.erase(MII);
+        ++NumHLPostIncLoads;
         Changed = BlockChanged = true;
       }
     }
@@ -1949,6 +2054,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
             Mid->eraseFromParent();
             S1->eraseFromParent();
             MII = MBB.erase(LDHL);
+            ++NumSlotForwarded;
             Changed = BlockChanged = true;
             return true;
           };
@@ -2129,6 +2235,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                           It2->eraseFromParent();
                           It1->eraseFromParent();
                           MII = MBB.erase(MII);
+                          ++NumSlotForwarded;
                           Changed = BlockChanged = true;
                           invalidateSlotReg(TRI, LoadDst1);
                           invalidateSlotReg(TRI, LoadDst2);
@@ -2177,6 +2284,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                       It2->eraseFromParent();
                       It1->eraseFromParent();
                       MII = MBB.erase(MII);
+                      ++NumSlotForwarded;
                       Changed = BlockChanged = true;
                       invalidateSlotReg(TRI, LoadDst1);
                       invalidateSlotReg(TRI, LoadDst2);
@@ -2217,6 +2325,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                   Z80::buildLD8n(MBB, MI, DL, *TII, LoadDst1).addImm(S.Imm);
                   It1->eraseFromParent();
                   MII = MBB.erase(MII);
+                  ++NumSlotForwarded;
                   Changed = BlockChanged = true;
                   Done = true;
                 }
@@ -2230,6 +2339,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
                     Z80::buildLD8(MBB, MI, DL, *TII, LoadDst1, S.Reg);
                   It1->eraseFromParent();
                   MII = MBB.erase(MII);
+                  ++NumSlotForwarded;
                   Changed = BlockChanged = true;
                   Done = true;
                 }
@@ -2304,6 +2414,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
               // Don't invalidate anything: R's value doesn't change.
               LLVM_DEBUG(dbgs() << "  Eliminating redundant reload: " << MI);
               MI.eraseFromParent();
+              ++NumStoreForwarded;
               Changed = BlockChanged = true;
               continue;
             }
@@ -2316,6 +2427,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
               invalidateReg(AvailValues, TRI, LoadDst);
               Z80::buildLD8(MBB, MI, MI.getDebugLoc(), *TII, LoadDst, SrcReg);
               MI.eraseFromParent();
+              ++NumStoreForwarded;
               Changed = BlockChanged = true;
               AvailValues[Offset] = LoadDst;
               continue;
@@ -2376,6 +2488,7 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
     // which is the level that takes those.
     if (!STI.hasSM83() && MF.getFunction().hasMinSize())
       Changed |= materializeIXConstantStores(MBB, TII, TRI);
+    Changed |= foldSingleBitMask(MBB, TII, TRI);
     Changed |= directIncDec(MBB, TII, TRI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
     Changed |= elidePushPopAcrossStretch(MBB, TII, TRI);
@@ -2386,11 +2499,11 @@ bool Z80LateOptimization::runOnMachineFunction(MachineFunction &MF) {
 
 } // namespace
 
-char Z80LateOptimization::ID = 0;
+char Z80PreEmitPeephole::ID = 0;
 
-INITIALIZE_PASS(Z80LateOptimization, DEBUG_TYPE, "Z80 Late Optimizations",
-                false, false)
+INITIALIZE_PASS(Z80PreEmitPeephole, DEBUG_TYPE,
+                "Z80 pre-emit peephole optimization", false, false)
 
-MachineFunctionPass *llvm::createZ80LateOptimizationPass() {
-  return new Z80LateOptimization;
+MachineFunctionPass *llvm::createZ80PreEmitPeepholePass() {
+  return new Z80PreEmitPeephole;
 }

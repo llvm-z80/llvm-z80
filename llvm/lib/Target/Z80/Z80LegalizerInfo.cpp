@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerHelper.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
@@ -211,9 +212,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   //   SM83: __udivhi3: DE÷BC → BC=quot, HL=rem
   // Custom-lower i16 G_UDIVREM/G_SDIVREM to a single runtime call.
   // i8 and others fall back to separate div+rem.
-  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM})
-      .customFor({S16})
-      .lower();
+  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM}).customFor({S16}).lower();
 
   // Comparisons
   // G_ICMP produces a boolean result - we widen it to S8 since Z80 has
@@ -410,8 +409,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   getActionDefinitionsBuilder(G_ABS).lower();
 
-  // Memory intrinsics - lower to runtime library calls
-  getActionDefinitionsBuilder({G_MEMCPY, G_MEMMOVE}).libcall();
+  // Memory intrinsics use the custom Z80 LDIR/LDDR and memmove lowering below.
+  getActionDefinitionsBuilder({G_MEMCPY, G_MEMMOVE}).custom();
 
   // G_MEMSET needs custom handling: promote i8 val to i16 (C 'int')
   // before lowering to libcall, so calling convention assigns it correctly
@@ -504,9 +503,9 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Fixed-point arithmetic: custom-lower to integer operations.
   // MULFIX: widen to double width, multiply, shift right by scale, truncate.
   // DIVFIX: widen, shift left by scale, divide, truncate.
-  getActionDefinitionsBuilder({G_SMULFIX, G_UMULFIX, G_SMULFIXSAT,
-                               G_UMULFIXSAT, G_SDIVFIX, G_UDIVFIX,
-                               G_SDIVFIXSAT, G_UDIVFIXSAT})
+  getActionDefinitionsBuilder({G_SMULFIX, G_UMULFIX, G_SMULFIXSAT, G_UMULFIXSAT,
+                               G_SDIVFIX, G_UDIVFIX, G_SDIVFIXSAT,
+                               G_UDIVFIXSAT})
       .custom();
 
   getActionDefinitionsBuilder({G_FMINNUM, G_FMAXNUM}).libcallFor({S32, S64});
@@ -593,9 +592,9 @@ bool Z80LegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
       MFI.setReturnAddressIsTaken(true);
       int FI = MFI.CreateFixedObject(2, 0, /*IsImmutable=*/true);
       auto Addr = MIRBuilder.buildFrameIndex(P0, FI);
-      auto *MMO = MF.getMachineMemOperand(
-          MachinePointerInfo::getFixedStack(MF, FI),
-          MachineMemOperand::MOLoad, P0, Align(1));
+      auto *MMO =
+          MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
+                                  MachineMemOperand::MOLoad, P0, Align(1));
       MIRBuilder.buildLoad(Dst, Addr, *MMO);
     }
     MI.eraseFromParent();
@@ -655,15 +654,14 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     LLVMContext &Ctx = MF.getFunction().getContext();
     bool IsF64 = Ty == LLT::scalar(64);
     Type *FltTy = IsF64 ? Type::getDoubleTy(Ctx) : Type::getFloatTy(Ctx);
-    int FI =
-        MF.getFrameInfo().CreateStackObject(Ty.getSizeInBytes(), Align(1),
-                                            /*isSpillSlot=*/false);
+    int FI = MF.getFrameInfo().CreateStackObject(Ty.getSizeInBytes(), Align(1),
+                                                 /*isSpillSlot=*/false);
     auto Slot = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
     RTLIB::Libcall LC = IsF64 ? RTLIB::MODF_F64 : RTLIB::MODF_F32;
-    if (Helper.createLibcall(LC, {DstFrac, FltTy, 0},
-                             {{Src, FltTy, 0},
-                              {Slot.getReg(0), PointerType::get(Ctx, 0), 1}},
-                             LocObserver, &MI) != LegalizerHelper::Legalized)
+    if (Helper.createLibcall(
+            LC, {DstFrac, FltTy, 0},
+            {{Src, FltTy, 0}, {Slot.getReg(0), PointerType::get(Ctx, 0), 1}},
+            LocObserver, &MI) != LegalizerHelper::Legalized)
       return false;
     auto *MMO = MF.getMachineMemOperand(
         MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOLoad,
@@ -1273,6 +1271,200 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     return true;
   }
 
+  case TargetOpcode::G_MEMCPY: {
+    // Z80 copies a block with LDIR: HL = source, DE = destination, BC = count,
+    // copying (HL)->(DE) and stepping both up until BC reaches zero.  Note
+    // that LDIR's source is HL and its destination DE, the opposite of the C
+    // argument order.  G_MEMCPY operands: 0=dst, 1=src, 2=size, 3=tailcall.
+    Register DstPtr = MI.getOperand(0).getReg();
+    Register SrcPtr = MI.getOperand(1).getReg();
+    Register Size = MI.getOperand(2).getReg();
+
+    const auto &STI = MIRBuilder.getMF().getSubtarget<Z80Subtarget>();
+    if (!STI.hasZ80()) {
+      // SM83 has no block-move instruction.
+      auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
+      if (Result != LegalizerHelper::Legalized)
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // LDIR decrements BC before testing it, so BC == 0 copies 65536 bytes.  A
+    // constant zero drops out here; a runtime length goes through the guarded
+    // pseudo, which branches around the LDIR.
+    auto SizeC = getIConstantVRegSExtVal(Size, MRI);
+    if (SizeC && *SizeC == 0) {
+      MI.eraseFromParent();
+      return true;
+    }
+
+    MIRBuilder.setInsertPt(*MI.getParent(), MI.getIterator());
+    MIRBuilder.buildCopy(Register(Z80::HL), SrcPtr);
+    MIRBuilder.buildCopy(Register(Z80::DE), DstPtr);
+    MIRBuilder.buildCopy(Register(Z80::BC), Size);
+    MIRBuilder.buildInstr(SizeC ? Z80::LDIR : Z80::LDIR_GUARDED)
+        .cloneMemRefs(MI);
+
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case TargetOpcode::G_MEMMOVE: {
+    // memmove must also handle overlap.  When the direction is statically
+    // known we pick LDIR (dst below src) or LDDR (dst above src) inline;
+    // otherwise the runtime comparison costs more inline than it saves, so the
+    // memmove libcall stays.  Operands: 0=dst, 1=src, 2=size, 3=tailcall.
+    Register DstPtr = MI.getOperand(0).getReg();
+    Register SrcPtr = MI.getOperand(1).getReg();
+    Register Size = MI.getOperand(2).getReg();
+
+    const auto &STI = MIRBuilder.getMF().getSubtarget<Z80Subtarget>();
+    if (!STI.hasZ80()) {
+      auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
+      if (Result != LegalizerHelper::Legalized)
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    auto SizeC = getIConstantVRegSExtVal(Size, MRI);
+    if (SizeC && *SizeC == 0) {
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // Determine the dst-src direction.
+    // - Same register: copy is a no-op.
+    // - DstPtr = G_PTR_ADD(SrcPtr, c): direction = sign(c).
+    // - SrcPtr = G_PTR_ADD(DstPtr, c): direction = sign(-c).
+    // - Both = G_PTR_ADD(commonBase, ci): direction = sign(c_dst - c_src).
+    // - Otherwise: unknown.
+    enum class Direction { LDIR, LDDR, NoOp, Unknown };
+    Direction Dir = Direction::Unknown;
+    if (DstPtr == SrcPtr) {
+      Dir = Direction::NoOp;
+    } else {
+      auto getPtrAddOff = [&](Register Ptr,
+                              Register &Base) -> std::optional<int64_t> {
+        MachineInstr *Def = MRI.getVRegDef(Ptr);
+        if (!Def || Def->getOpcode() != TargetOpcode::G_PTR_ADD)
+          return std::nullopt;
+        Base = Def->getOperand(1).getReg();
+        Register OffReg = Def->getOperand(2).getReg();
+        return getIConstantVRegSExtVal(OffReg, MRI);
+      };
+      Register DstBase, SrcBase;
+      auto DstOff = getPtrAddOff(DstPtr, DstBase);
+      auto SrcOff = getPtrAddOff(SrcPtr, SrcBase);
+
+      auto setFromDelta = [&](int64_t Delta) {
+        // Pointers are 16 bits and wrap, so the sign that matters is the one
+        // the target sees: +60000 puts the destination below the source, not
+        // above it.
+        int16_t D = static_cast<int16_t>(Delta);
+        if (D == 0)
+          Dir = Direction::NoOp;
+        else if (D < 0)
+          Dir = Direction::LDIR;
+        else
+          Dir = Direction::LDDR;
+      };
+
+      if (DstOff && SrcBase == Register() && SrcPtr == DstBase) {
+        // DstPtr = SrcPtr + DstOff
+        setFromDelta(*DstOff);
+      } else if (SrcOff && DstBase == Register() && DstPtr == SrcBase) {
+        // SrcPtr = DstPtr + SrcOff -> DstPtr = SrcPtr - SrcOff
+        setFromDelta(-*SrcOff);
+      } else if (DstOff && SrcOff && DstBase == SrcBase) {
+        // Both share a common base; direction is sign of DstOff-SrcOff.
+        setFromDelta(*DstOff - *SrcOff);
+      }
+    }
+
+    if (Dir == Direction::NoOp) {
+      // Same address in and out, so the copy moves nothing.  A volatile
+      // memmove still has to perform its accesses, so leave that one alone.
+      bool IsVolatile = false;
+      for (const MachineMemOperand *MMO : MI.memoperands())
+        IsVolatile |= MMO->isVolatile();
+      if (!IsVolatile) {
+        MI.eraseFromParent();
+        return true;
+      }
+      Dir = Direction::LDIR;
+    }
+    if (Dir == Direction::Unknown) {
+      auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
+      if (Result != LegalizerHelper::Legalized)
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    MIRBuilder.setInsertPt(*MI.getParent(), MI.getIterator());
+
+    if (Dir == Direction::LDIR) {
+      MIRBuilder.buildCopy(Register(Z80::HL), SrcPtr);
+      MIRBuilder.buildCopy(Register(Z80::DE), DstPtr);
+      MIRBuilder.buildCopy(Register(Z80::BC), Size);
+      MIRBuilder.buildInstr(SizeC ? Z80::LDIR : Z80::LDIR_GUARDED)
+          .cloneMemRefs(MI);
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // LDDR copies backward from the last byte: HL = src + size - 1,
+    // DE = dst + size - 1, BC = size.  A backward copy with a runtime length
+    // would need the end pointers computed before the zero test, so leave
+    // those to the libcall and only handle a constant length here.
+    if (!SizeC) {
+      auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
+      if (Result != LegalizerHelper::Legalized)
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    LLT S16 = LLT::scalar(16);
+    // Fold size-1 into the pointer and walk back through any chained constant
+    // G_PTR_ADDs, so the end pointer becomes a single G_PTR_ADD carrying the
+    // total offset rather than a chain of them.
+    auto buildEndPtr = [&](Register Ptr, int64_t ExtraOff) -> Register {
+      Register Base = Ptr;
+      int64_t Total = ExtraOff;
+      while (true) {
+        MachineInstr *Def = MRI.getVRegDef(Base);
+        if (!Def || Def->getOpcode() != TargetOpcode::G_PTR_ADD)
+          break;
+        auto OffC = getIConstantVRegSExtVal(Def->getOperand(2).getReg(), MRI);
+        if (!OffC)
+          break;
+        Total += *OffC;
+        Base = Def->getOperand(1).getReg();
+      }
+      if (Total == 0)
+        return Base;
+      auto Off = MIRBuilder.buildConstant(S16, Total);
+      return MIRBuilder.buildPtrAdd(MRI.getType(Ptr), Base, Off).getReg(0);
+    };
+
+    // Both end pointers have to be materialised before either lands in a
+    // physical register: computing one emits an `LD HL, base` + `ADD HL, rr`
+    // pair, which would overwrite the other if it were already sitting in HL.
+    int64_t Off = *SizeC - 1;
+    Register SrcEnd = buildEndPtr(SrcPtr, Off);
+    Register DstEnd = buildEndPtr(DstPtr, Off);
+    MIRBuilder.buildCopy(Register(Z80::HL), SrcEnd);
+    MIRBuilder.buildCopy(Register(Z80::DE), DstEnd);
+    MIRBuilder.buildCopy(Register(Z80::BC), Size);
+    MIRBuilder.buildInstr(Z80::LDDR).cloneMemRefs(MI);
+
+    MI.eraseFromParent();
+    return true;
+  }
+
   case TargetOpcode::G_MEMSET: {
     // C memset takes (void*, int, size_t). On Z80, int = i16.
     // G_MEMSET has i8 val operand which must be promoted to i16
@@ -1400,14 +1592,19 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
 
     if (Scale == 0) {
       if (Saturating) {
-        unsigned MulOpc = Signed ? TargetOpcode::G_SMULO : TargetOpcode::G_UMULO;
-        auto Prod = MIRBuilder.buildInstr(MulOpc, {Ty, LLT::scalar(1)}, {LHS, RHS});
+        unsigned MulOpc =
+            Signed ? TargetOpcode::G_SMULO : TargetOpcode::G_UMULO;
+        auto Prod =
+            MIRBuilder.buildInstr(MulOpc, {Ty, LLT::scalar(1)}, {LHS, RHS});
         if (Signed) {
-          auto Min = MIRBuilder.buildConstant(Ty, APInt::getSignedMinValue(Width));
-          auto Max = MIRBuilder.buildConstant(Ty, APInt::getSignedMaxValue(Width));
+          auto Min =
+              MIRBuilder.buildConstant(Ty, APInt::getSignedMinValue(Width));
+          auto Max =
+              MIRBuilder.buildConstant(Ty, APInt::getSignedMaxValue(Width));
           auto Xor = MIRBuilder.buildXor(Ty, LHS, RHS);
           auto Zero = MIRBuilder.buildConstant(Ty, 0);
-          auto Neg = MIRBuilder.buildICmp(CmpInst::ICMP_SLT, LLT::scalar(1), Xor, Zero);
+          auto Neg = MIRBuilder.buildICmp(CmpInst::ICMP_SLT, LLT::scalar(1),
+                                          Xor, Zero);
           auto Sat = MIRBuilder.buildSelect(Ty, Neg, Min, Max);
           MIRBuilder.buildSelect(Dst, Prod.getReg(1), Sat, Prod.getReg(0));
         } else {
@@ -1432,13 +1629,13 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     auto WideProd = MIRBuilder.buildMul(WideTy, WideLHS, WideRHS);
     auto ShiftAmt = MIRBuilder.buildConstant(WideTy, Scale);
     auto ShiftOpc = Signed ? TargetOpcode::G_ASHR : TargetOpcode::G_LSHR;
-    auto Shifted = MIRBuilder.buildInstr(ShiftOpc, {WideTy}, {WideProd, ShiftAmt});
+    auto Shifted =
+        MIRBuilder.buildInstr(ShiftOpc, {WideTy}, {WideProd, ShiftAmt});
 
     if (Saturating) {
-      APInt MaxVal = Signed ? APInt::getSignedMaxValue(Width)
-                            : APInt::getMaxValue(Width);
-      APInt MinVal = Signed ? APInt::getSignedMinValue(Width)
-                            : APInt(Width, 0);
+      APInt MaxVal =
+          Signed ? APInt::getSignedMaxValue(Width) : APInt::getMaxValue(Width);
+      APInt MinVal = Signed ? APInt::getSignedMinValue(Width) : APInt(Width, 0);
       auto WideMax = MIRBuilder.buildConstant(WideTy, MaxVal.sext(Width * 2));
       auto WideMin = MIRBuilder.buildConstant(WideTy, MinVal.sext(Width * 2));
       auto CmpHi = Signed ? CmpInst::ICMP_SGT : CmpInst::ICMP_UGT;
@@ -1482,14 +1679,13 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     auto Quotient = MIRBuilder.buildInstr(DivOpc, {WideTy}, {Shifted, WideRHS});
 
     if (Saturating) {
-      APInt MaxVal = Signed ? APInt::getSignedMaxValue(Width)
-                            : APInt::getMaxValue(Width);
-      APInt MinVal = Signed ? APInt::getSignedMinValue(Width)
-                            : APInt(Width, 0);
+      APInt MaxVal =
+          Signed ? APInt::getSignedMaxValue(Width) : APInt::getMaxValue(Width);
+      APInt MinVal = Signed ? APInt::getSignedMinValue(Width) : APInt(Width, 0);
       auto WideMax = MIRBuilder.buildConstant(WideTy, MaxVal.sext(Width * 2));
-      auto Over = MIRBuilder.buildICmp(
-          Signed ? CmpInst::ICMP_SGT : CmpInst::ICMP_UGT,
-          LLT::scalar(1), Quotient, WideMax);
+      auto Over =
+          MIRBuilder.buildICmp(Signed ? CmpInst::ICMP_SGT : CmpInst::ICMP_UGT,
+                               LLT::scalar(1), Quotient, WideMax);
       auto Clamped = MIRBuilder.buildSelect(WideTy, Over, WideMax, Quotient);
       if (Signed) {
         auto WideMin = MIRBuilder.buildConstant(WideTy, MinVal.sext(Width * 2));

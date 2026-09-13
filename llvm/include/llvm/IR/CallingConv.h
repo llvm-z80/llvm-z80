@@ -297,9 +297,26 @@ namespace CallingConv {
     /// stateless compartment.
     CHERIoT_LibraryCall = 127,
 
-    /// Z80 SDCC __sdcccall(0) - all parameters on stack, caller cleanup.
-    /// Return: Z80 i8->L, i16->HL, i32->DEHL; SM83 i8->E, i16->DE, i32->HLDE.
+    /// Z80 SDCC __sdcccall(0): every parameter on the stack, pushed
+    /// right-to-left, caller cleanup.  Returns i8->L, i16->HL, i32->DE:HL on
+    /// Z80, and i8->E, i16->DE, i32->HL:DE on SM83.
     Z80_SDCCCall0 = 128,
+    /// Z80 SDCC __smallc: __sdcccall(0) pushed left-to-right instead.
+    Z80_SmallC = 129,
+    /// Z80 z88dk __z88dk_fastcall: one argument, passed in L/HL/DE:HL.
+    Z80_Z88dkFastCall = 130,
+    /// Z80 z88dk __z88dk_callee: __sdcccall(1), but the callee pops the stack
+    /// arguments whatever the return size.
+    Z80_Z88dkCallee = 131,
+    /// Z80 SDCC __sdcccall(0) __z88dk_callee.
+    Z80_SDCCCall0Callee = 132,
+    /// Z80 SDCC __smallc __z88dk_callee, used by the z88dk classic C library.
+    Z80_SmallCCallee = 133,
+    /// Z80 rtlib helpers, which put in registers what __sdcccall(1) would have
+    /// spilled: a pair-wide argument takes the next free one of HL, DE, BC,
+    /// and a narrower one takes A if free, else that pair's low half.  There
+    /// is no stack fallback.  Returns as __sdcccall(1).  Backend-internal.
+    Z80_Builtin = 134,
 
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023

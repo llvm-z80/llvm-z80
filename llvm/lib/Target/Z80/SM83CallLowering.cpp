@@ -34,8 +34,16 @@ SM83CallLowering::SM83CallLowering(const TargetLowering *TL)
                                 /*Ret_I32_Lo=*/Z80::BC,
                                 /*IndirectCallReg=*/Z80::HL,
                                 /*IndirectCallOpc=*/Z80::CALL_HL,
+                                /*First_I8=*/Register(),
+                                /*Third_I16=*/Z80::HL,
+                                /*Half_1=*/Z80::E,
+                                /*Half_2=*/Z80::C,
+                                /*Half_3=*/Z80::L,
                             },
-                            // sdcccall(0) registers
+                            // z88dk/SDCC block registers.  The First_* fields
+                            // stay invalid: __z88dk_fastcall's SM83 ABI has
+                            // not been specified, and both the frontend and
+                            // Z80CallLoweringCommon reject it there.
                             CallingConvRegs{
                                 /*First_I16=*/Register(),
                                 /*First_I32_Hi=*/Register(),

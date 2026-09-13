@@ -33,6 +33,7 @@
 #include "Z80.h"
 #include "Z80Subtarget.h"
 
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -40,6 +41,9 @@
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "z80-branch-cleanup"
+
+STATISTIC(NumTrampolinesCollapsed,
+          "Number of JR_CC/JP trampolines collapsed into JP_CC");
 
 using namespace llvm;
 
@@ -149,6 +153,7 @@ bool Z80BranchCleanup::runOnMachineFunction(MachineFunction &MF) {
     // Remove the JP instruction and mark trampoline for removal.
     TI->eraseFromParent();
     ToRemove.push_back(&TrampolineMBB);
+    ++NumTrampolinesCollapsed;
     Changed = true;
   }
 

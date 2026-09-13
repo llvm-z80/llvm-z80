@@ -38,6 +38,10 @@ class raw_pwrite_stream;
 Target &getTheZ80Target();
 Target &getTheSM83Target();
 
+/// Maps an empty or "generic" CPU name to the triple's default. Code
+/// generation and the assembler both go through here so they cannot differ.
+StringRef selectZ80CPU(StringRef CPU, const Triple &TT);
+
 MCInstrInfo *createZ80MCInstrInfo();
 
 /// Creates a machine code emitter for Z80.

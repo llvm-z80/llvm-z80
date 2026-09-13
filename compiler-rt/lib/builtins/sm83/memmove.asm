@@ -1,73 +1,89 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl _memmove
+	.globl ___z80_memmove_builtin
 
 ;===------------------------------------------------------------------------===;
-; _memmove - Copy memory block (handles overlapping regions)
+; ___z80_memmove_builtin - Copy memory block (CallingConv::Z80_Builtin)
 ;
-; Input:  DE = dest, BC = src, stack = size (i16)
-; Output: BC = dest (original)
-; If dest < src: forward copy using LDI A,(HL)
-; If dest >= src: backward copy using LDD A,(HL)
+; Input:  DE = dest, BC = src, HL = size
+; Output: none
+;
+;   dest < src : forward copy, ascending
+;   dest > src : backward copy from the last byte of each region
+;   dest == src or size == 0 : nothing to do
+;
+; SM83 has no 16-bit compare, so the direction test subtracts the low halves
+; and borrows through the high ones; only the carry it leaves is used.
 ;===------------------------------------------------------------------------===;
-
-_memmove:
-	push	de		; save dest for return
-	; Load size
-	ldhl	sp, #4
-	ld	a, (hl+)
-	ld	h, (hl)
-	ld	l, a		; HL = size
+___z80_memmove_builtin:
 	ld	a, h
 	or	l
-	jr	z, _memmove_done	; size == 0
-	; Direction check: dest(DE) vs src(BC), unsigned
+	ret	z		; size == 0
+	; Compare dest (DE) against src (BC).
 	ld	a, e
 	sub	c
 	ld	a, d
-	sbc	a, b		; carry if dest < src
-	jr	c, _memmove_fwd
-	; === Backward copy: dest >= src ===
-	; HL=size, DE=dest, BC=src
-	; Compute end pointers: dest_end = DE+HL-1, src_end = BC+HL-1
-	dec	hl		; HL = size - 1
-	push	hl		; [1] save size-1
-	add	hl, de		; HL = dest + size - 1 = dest_end
-	ld	d, h
-	ld	e, l		; DE = dest_end
-	pop	hl		; [1] HL = size-1
-	push	de		; [2] save dest_end
-	push	hl		; [3] save size-1 (for counter)
-	add	hl, bc		; HL = src + size - 1 = src_end
-	pop	bc		; [3] BC = size-1
-	inc	bc		; BC = size (counter)
-	pop	de		; [2] DE = dest_end
-	; HL=src_end, DE=dest_end, BC=size
-_memmove_bwd_loop:
-	ld	a, (hl-)		; A = *src_end, HL--
-	ld	(de), a
+	sbc	a, b		; carry set when dest < src
+	jr	c, ___z80_memmove_fwd
+	; dest >= src.  Equal pointers have nothing to move.
+	ld	a, e
+	sub	c
+	jr	nz, ___z80_memmove_back
+	ld	a, d
+	sub	b
+	ret	z		; dest == src
+___z80_memmove_back:
+	; Walk down from the last byte of each region.
+	push	hl		; hold size
+	ld	h, b
+	ld	l, c		; HL = src
+	pop	bc		; BC = size
+	add	hl, bc
+	dec	hl		; HL = src + size - 1
+	push	hl		; hold src_end
+	ld	h, d
+	ld	l, e		; HL = dest
+	add	hl, bc
+	dec	hl		; HL = dest + size - 1
+	pop	de		; DE = src_end
+___z80_memmove_back_loop:
+	ld	a, (de)
 	dec	de
+	ld	(hl-), a
 	dec	bc
 	ld	a, b
 	or	c
-	jr	nz, _memmove_bwd_loop
-	jr	_memmove_done
-_memmove_fwd:
-	; === Forward copy: dest < src ===
-	; HL=size, DE=dest, BC=src
-	push	bc		; save src
+	jr	nz, ___z80_memmove_back_loop
+	ret
+___z80_memmove_fwd:
+	push	bc		; hold src
 	ld	b, h
 	ld	c, l		; BC = size
 	pop	hl		; HL = src
-_memmove_fwd_loop:
-	ld	a, (hl+)		; A = *src, HL++
+___z80_memmove_fwd_loop:
+	ld	a, (hl+)
 	ld	(de), a
 	inc	de
 	dec	bc
 	ld	a, b
 	or	c
-	jr	nz, _memmove_fwd_loop
-_memmove_done:
+	jr	nz, ___z80_memmove_fwd_loop
+	ret
+
+;===------------------------------------------------------------------------===;
+; _memmove - Copy memory block, C entry point
+;
+; Input:  DE = dest, BC = src, stack = size (i16)
+; Output: BC = dest (original)
+;===------------------------------------------------------------------------===;
+_memmove:
+	push	de		; save dest for return value
+	ldhl	sp, #4		; [saved DE(2), ret addr(2), size]
+	ld	a, (hl+)
+	ld	h, (hl)
+	ld	l, a		; HL = size; DE and BC are already in place
+	call	___z80_memmove_builtin
 	pop	bc		; BC = original dest (return value)
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args

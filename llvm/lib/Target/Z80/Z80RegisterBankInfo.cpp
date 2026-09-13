@@ -8,13 +8,10 @@
 //
 // This file defines the targeting of the RegisterBankInfo class for Z80.
 //
-// The Z80 doesn't really have register banks. A distinction could be made
-// between the real and imaginary registers, but the Register Bank Selector
-// doesn't take register pressure into account when allocating banks. Since the
-// hardware registers are extremely tight, we have the bank selector allocate
-// everything to the same "Any" register bank. The register allocator proper
-// will later select real registers for each value, taking register pressure
-// fully into account.
+// The Z80 doesn't have register banks. Since the hardware registers are
+// extremely tight, the bank selector allocates everything to the same "Any"
+// register bank. The register allocator proper will later select real
+// registers for each value, taking register pressure fully into account.
 //
 //===----------------------------------------------------------------------===//
 

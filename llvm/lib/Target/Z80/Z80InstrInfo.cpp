@@ -377,9 +377,8 @@ void Z80InstrInfo::storeRegToStackSlot(
         Z80::IR16RegClass.hasSubClassEq(RC)) {
       // Whatever doesn't fit the GR16 operand goes through the Anyi16 twin;
       // see the definitions in Z80InstrInfo.td.
-      bool InGR16 = SrcReg.isPhysical()
-                        ? Z80::GR16RegClass.contains(SrcReg)
-                        : Z80::GR16RegClass.hasSubClassEq(RC);
+      bool InGR16 = SrcReg.isPhysical() ? Z80::GR16RegClass.contains(SrcReg)
+                                        : Z80::GR16RegClass.hasSubClassEq(RC);
       BuildMI(MBB, MI, DL, get(InGR16 ? Z80::SPILL_GR16 : Z80::SPILL_ANY16))
           .addReg(SrcReg, getKillRegState(isKill))
           .addFrameIndex(FrameIndex)
@@ -426,9 +425,8 @@ void Z80InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
     if (RC->hasSuperClassEq(&Z80::GR16RegClass) ||
         TRI->getCommonSubClass(RC, &Z80::GR16RegClass) ||
         Z80::IR16RegClass.hasSubClassEq(RC)) {
-      bool InGR16 = DestReg.isPhysical()
-                        ? Z80::GR16RegClass.contains(DestReg)
-                        : Z80::GR16RegClass.hasSubClassEq(RC);
+      bool InGR16 = DestReg.isPhysical() ? Z80::GR16RegClass.contains(DestReg)
+                                         : Z80::GR16RegClass.hasSubClassEq(RC);
       BuildMI(MBB, MI, DL, get(InGR16 ? Z80::RELOAD_GR16 : Z80::RELOAD_ANY16))
           .addReg(DestReg, RegState::Define)
           .addFrameIndex(FrameIndex)
@@ -590,6 +588,33 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       BuildMI(MBB, MI, DL,
               get(Addr == Z80::BC ? Z80::LD_BCind_A : Z80::LD_DEind_A));
     }
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case Z80::LOAD16_ABS: {
+    // Expand to LD HL,(nn), LD BC,(nn), or LD DE,(nn) based on the pair the
+    // allocator picked. GR16 holds exactly those three, so one always fits.
+    Register Dst = MI.getOperand(0).getReg();
+    assert((Dst == Z80::HL || Dst == Z80::BC || Dst == Z80::DE) &&
+           "Invalid register for LOAD16_ABS");
+    unsigned Opc = Dst == Z80::HL   ? Z80::LD_HL_nnind
+                   : Dst == Z80::BC ? Z80::LD_BC_nnind
+                                    : Z80::LD_DE_nnind;
+    BuildMI(MBB, MI, DL, get(Opc)).add(MI.getOperand(1));
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case Z80::STORE16_ABS: {
+    // Expand to LD (nn),HL, LD (nn),BC, or LD (nn),DE.
+    Register Src = MI.getOperand(1).getReg();
+    assert((Src == Z80::HL || Src == Z80::BC || Src == Z80::DE) &&
+           "Invalid register for STORE16_ABS");
+    unsigned Opc = Src == Z80::HL   ? Z80::LD_nnind_HL
+                   : Src == Z80::BC ? Z80::LD_nnind_BC
+                                    : Z80::LD_nnind_DE;
+    BuildMI(MBB, MI, DL, get(Opc)).add(MI.getOperand(0));
     MI.eraseFromParent();
     return true;
   }
@@ -1236,13 +1261,32 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     // Callee-cleanup return: pop return address, skip N bytes of stack args,
     // then return via indirect jump.
     unsigned Amount = MI.getOperand(0).getImm();
+    // SM83's ADD SP,e takes a signed 8-bit displacement, so a cleanup of more
+    // than 127 bytes has to be split across several adds.
+    auto addToSP = [&](unsigned Bytes) {
+      while (Bytes) {
+        unsigned Step = std::min(Bytes, 127u);
+        BuildMI(MBB, MI, DL, get(Z80::ADD_SP_e)).addImm(Step);
+        Bytes -= Step;
+      }
+    };
     MachineInstrBuilder Term;
     if (Amount == 0) {
+      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
+    } else if (STI->hasSM83() && MI.readsRegister(Z80::HL, TRI)) {
+      // SM83 with an i32/float return: the z88dk classic conventions bring it
+      // back in HLDE, and SM83's only indirect jump goes through HL, so the
+      // usual scratch would destroy the high word.  Return through the stack
+      // instead, on BC, which is not part of a return in that family.
+      // POP BC; ADD SP,e; PUSH BC; RET
+      BuildMI(MBB, MI, DL, get(Z80::POP_BC));
+      addToSP(Amount);
+      BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
       Term = BuildMI(MBB, MI, DL, get(Z80::RET));
     } else if (STI->hasSM83()) {
       // SM83: POP HL; ADD SP,e; JP (HL)
       BuildMI(MBB, MI, DL, get(Z80::POP_HL));
-      BuildMI(MBB, MI, DL, get(Z80::ADD_SP_e)).addImm(Amount & 0xFF);
+      addToSP(Amount);
       Term = BuildMI(MBB, MI, DL, get(Z80::JP_HLind));
     } else if (Amount <= 8) {
       // Z80 small: POP BC; INC SP × N; PUSH BC; RET
@@ -1457,10 +1501,11 @@ unsigned Z80InstrInfo::removeBranch(MachineBasicBlock &MBB,
 
 // An 8-bit ALU operation can read its register operand out of a frame slot
 // instead, so a value spilled only to be read there does not need reloading.
-MachineInstr *Z80InstrInfo::foldMemoryOperandImpl(
-    MachineFunction &MF, MachineInstr &MI, ArrayRef<unsigned> Ops,
-    int FrameIndex, MachineInstr *&CopyMI, LiveIntervals *LIS,
-    VirtRegMap *VRM) const {
+MachineInstr *
+Z80InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
+                                    ArrayRef<unsigned> Ops, int FrameIndex,
+                                    MachineInstr *&CopyMI, LiveIntervals *LIS,
+                                    VirtRegMap *VRM) const {
   // The slot is read, so only the one register operand may be folded.
   if (Ops.size() != 1 || Ops[0] != 0 || MI.getOperand(0).isDef())
     return nullptr;
@@ -1513,9 +1558,9 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   // SM83 expansions are larger due to lacking ADC HL,HL / SBC HL,DE / EX DE,HL
   // / DJNZ and requiring byte-wise emulation + PUSH/POP AF for counter.
   {
-    const auto &STI =
-        MI.getParent()->getParent()->getSubtarget<Z80Subtarget>();
+    const auto &STI = MI.getParent()->getParent()->getSubtarget<Z80Subtarget>();
     bool IsSM83 = STI.hasSM83();
+    // clang-format off
     switch (Opcode) {
     case Z80::MUL16:  return IsSM83 ? 24 : 20;
     case Z80::UDIV16: return IsSM83 ? 45 : 32;
@@ -1535,12 +1580,29 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::SHL16_VAR: return IsSM83 ? 8 : 7;
     case Z80::LSHR16_VAR:
     case Z80::ASHR16_VAR: return IsSM83 ? 11 : 10;
+    // LD A,B; OR C; JR Z,e; LDIR
+    case Z80::LDIR_GUARDED: return 6;
+    // Callee-cleanup return.  The sequences are in expandPostRAPseudoImpl;
+    // SM83 needs one ADD SP,e per 127 bytes because the displacement is
+    // signed 8-bit.
+    case Z80::RET_CLEANUP: {
+      unsigned Amount = MI.getOperand(0).getImm();
+      if (Amount == 0)
+        return 1;
+      bool ReadsHL = MI.readsRegister(Z80::HL, STI.getRegisterInfo());
+      if (IsSM83)
+        return (ReadsHL ? 3 : 2) + 2 * ((Amount + 126) / 127);
+      if (Amount <= 8)
+        return 3 + Amount;
+      return ReadsHL ? 11 : 8;
+    }
     case Z80::UADDSAT8: return 5;
     case Z80::USUBSAT8: return 4;
     case Z80::SADDSAT8:
     case Z80::SSUBSAT8: return 8;
     default: break;
     }
+    // clang-format on
   }
 
   // Handle pseudo-instructions that have no encoding
@@ -1843,8 +1905,7 @@ Z80InstrInfo::getOutliningTypeImpl(const MachineModuleInfo &MMI,
                                    MachineBasicBlock::iterator &MIT,
                                    unsigned Flags) const {
   MachineInstr &MI = *MIT;
-  const TargetRegisterInfo *TRI =
-      MI.getMF()->getSubtarget().getRegisterInfo();
+  const TargetRegisterInfo *TRI = MI.getMF()->getSubtarget().getRegisterInfo();
 
   // Control flow has to stay where it is: a branch inside the outlined body
   // would leave it, and a call or return there would fight over the return

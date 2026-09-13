@@ -24,25 +24,25 @@ _strncmp:
 _strncmp_loop:
 	ld	a, b
 	or	c
-	jr	z, _strncmp_eq	; n exhausted
+	jr	z, _strncmp_eq	; n exhausted, strings equal so far
 	ld	a, (de)		; A = *str1
-	sub	(hl)		; A = *str1 - *str2
-	jr	nz, _strncmp_done
-	; Equal. Check null.
-	or	(hl)		; A = 0 | *str2 (which == *str1)
+	cp	(hl)		; zero if equal, carry if *str1 < *str2
+	jr	nz, _strncmp_diff
+	or	a		; A is still *str1; zero means both ended
 	jr	z, _strncmp_eq
 	inc	de
 	inc	hl
 	dec	bc
 	jr	_strncmp_loop
 _strncmp_eq:
-	xor	a
-_strncmp_done:
-	ld	c, a		; sign-extend A into BC
-	ld	b, #0
-	bit	7, a
-	jr	z, _strncmp_ret
-	ld	b, #0xFF
+	ld	bc, #0
+	jr	_strncmp_ret
+_strncmp_diff:
+	jr	c, _strncmp_less
+	ld	bc, #1
+	jr	_strncmp_ret
+_strncmp_less:
+	ld	bc, #0xFFFF
 _strncmp_ret:
 	pop	hl		; return address
 	add	sp, #2		; callee-cleanup: skip 2 bytes of stack args

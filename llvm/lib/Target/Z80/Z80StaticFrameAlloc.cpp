@@ -28,6 +28,7 @@
 #include "Z80Subtarget.h"
 
 #include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -39,6 +40,9 @@
 #include "llvm/Pass.h"
 
 #define DEBUG_TYPE "z80-static-frame-alloc"
+
+STATISTIC(NumFrameIndicesResolved,
+          "Number of static frame target indices resolved");
 
 using namespace llvm;
 
@@ -120,8 +124,7 @@ bool Z80StaticFrameAlloc::runOnModule(Module &M) {
     MachineFunction *MF = MMI.getMachineFunction(*F);
     if (!MF)
       return 0;
-    const auto &TFL =
-        *MF->getSubtarget<Z80Subtarget>().getFrameLowering();
+    const auto &TFL = *MF->getSubtarget<Z80Subtarget>().getFrameLowering();
     return TFL.staticFrameSize(MF->getFrameInfo());
   };
 
@@ -250,6 +253,7 @@ bool Z80StaticFrameAlloc::runOnModule(Module &M) {
           for (MachineOperand &MO : MI.operands())
             if (MO.isTargetIndex()) {
               MO.ChangeToGA(Alias, MO.getOffset(), MO.getTargetFlags());
+              ++NumFrameIndicesResolved;
               Changed = true;
             }
     }

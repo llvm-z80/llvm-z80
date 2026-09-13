@@ -3608,6 +3608,21 @@ def SDCCCall : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
   let Documentation = [SDCCCallDocs];
 }
 
+def Z88dkFastCall : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [Clang<"z88dk_fastcall">];
+  let Documentation = [Z88dkFastCallDocs];
+}
+
+def Z88dkCallee : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [Clang<"z88dk_callee">];
+  let Documentation = [Z88dkCalleeDocs];
+}
+
+def SmallC : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [Clang<"smallc">];
+  let Documentation = [SmallCDocs];
+}
+
 def Target : InheritableAttr {
   let Spellings = [GCC<"target">];
   let Args = [StringArgument<"featuresStr">];

@@ -5,9 +5,9 @@
 ; The static frame machinery must stay sound at its edges:
 ;
 ; * A function that codegen calls behind the IR's back (a block copy becomes
-;   a memcpy call during selection) can be entered from every context, so a
-;   module-local definition of it must keep its stack frame whenever a
-;   second context exists.
+;   a call to the block-copy runtime during selection) can be entered from
+;   every context, so a module-local definition of it must keep its stack
+;   frame whenever a second context exists.
 ; * A function the module analysis cannot reach (internal, never called,
 ;   address never taken) must keep its stack frame even when the input IR
 ;   already calls it norecurse, since the layout pass walks the same
@@ -21,9 +21,11 @@
 @dst2 = global [32 x i8] zeroinitializer
 
 ; Both the interrupt context and the external one perform a block copy, so
-; two activations of the module's own memcpy can be live at once.
-; ON-NOT: memcpy.frame
-define ptr @memcpy(ptr %d, ptr %s, i16 %n) norecurse {
+; two activations of the module's own copy of the block-copy runtime can be
+; live at once.  The name is the one the libcall table gives that routine:
+; the register-argument form, since that is what selection actually calls.
+; ON-NOT: __z80_memcpy_builtin.frame
+define ptr @__z80_memcpy_builtin(ptr %d, ptr %s, i16 %n) norecurse {
 entry:
   %saved = alloca ptr
   store volatile ptr %d, ptr %saved
@@ -82,5 +84,5 @@ attributes #0 = { norecurse "nonreentrant" }
 
 ; The frame aliases are defined after the last function, so check the
 ; excluded functions again past the positive match above.
-; ON-NOT: memcpy.frame
+; ON-NOT: __z80_memcpy_builtin.frame
 ; ON-NOT: dead.frame

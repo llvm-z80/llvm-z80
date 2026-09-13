@@ -667,6 +667,24 @@ def STORE8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
   let mayStore = true;
 }
 
+// Direct access to an address the linker settles: a global, or a global plus a
+// constant. Z80 reaches one in a single instruction per pair, against putting
+// the address in a pointer register and reading the two bytes through it. The
+// pair is left to the register allocator, since every member of GR16 has a
+// direct form for expandPostRAPseudo to pick:
+//   HL → LD HL,(nn) / LD (nn),HL     (3 bytes)
+//   BC → LD BC,(nn) / LD (nn),BC     (4 bytes, ED prefix)
+//   DE → LD DE,(nn) / LD (nn),DE     (4 bytes, ED prefix)
+// SM83 has none of these, so it never selects them.
+def LOAD16_ABS : Z80Pseudo<(outs GR16:$dst), (ins i16imm:$addr)> {
+  let mayLoad = true;
+  let mayStore = false;
+}
+def STORE16_ABS : Z80Pseudo<(outs), (ins i16imm:$addr, GR16:$src)> {
+  let mayLoad = false;
+  let mayStore = true;
+}
+
 // SUB_HL_xx: 16-bit subtraction pseudo instructions.
 // Generalized 16-bit arithmetic pseudo instructions.
 // The second operand (rr) is a GR16_BCDE virtual register — the register
@@ -931,6 +949,18 @@ def SMOD16 : Z80Pseudo<(outs), (ins)> {
   let Uses = [HL, DE];
   let Defs = [A, B, C, DE, HL, FLAGS];
 }
+// Block move for a length that is not a known non-zero constant.
+// LD A,B; OR C; JR Z,.done; LDIR; .done:
+// LDIR decrements BC before testing it, so BC == 0 would copy 65536 bytes.
+def LDIR_GUARDED : Z80Pseudo<(outs), (ins)> {
+  let Uses = [HL, DE, BC];
+  let Defs = [HL, DE, BC, A, FLAGS];
+  let mayLoad = true;
+  let mayStore = true;
+  // As on LDIR itself: passes that track memory invalidate on this.
+  let hasSideEffects = 1;
+}
+
 // 8-bit unsigned saturating add pseudo.
 // ADD A,src; JR NC,.done; LD A,#0xFF; .done:
 def UADDSAT8 : Z80Pseudo<(outs), (ins GR8:$src)> {

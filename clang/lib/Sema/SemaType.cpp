@@ -144,7 +144,10 @@ static void diagnoseBadTypeAttribute(Sema &S, const ParsedAttr &attr,
   case ParsedAttr::AT_PreserveNone:                                            \
   case ParsedAttr::AT_RISCVVectorCC:                                           \
   case ParsedAttr::AT_RISCVVLSCC:                                             \
-  case ParsedAttr::AT_SDCCCall
+  case ParsedAttr::AT_SDCCCall:                                                \
+  case ParsedAttr::AT_Z88dkFastCall:                                           \
+  case ParsedAttr::AT_Z88dkCallee:                                             \
+  case ParsedAttr::AT_SmallC
 
 // Function type attributes.
 #define FUNCTION_TYPE_ATTRS_CASELIST                                           \
@@ -7829,6 +7832,12 @@ static Attr *getCCTypeAttr(ASTContext &Ctx, ParsedAttr &Attr) {
     }
     return ::new (Ctx) SDCCCallAttr(Ctx, Attr, ABI);
   }
+  case ParsedAttr::AT_Z88dkFastCall:
+    return ::new (Ctx) Z88dkFastCallAttr(Ctx, Attr);
+  case ParsedAttr::AT_Z88dkCallee:
+    return ::new (Ctx) Z88dkCalleeAttr(Ctx, Attr);
+  case ParsedAttr::AT_SmallC:
+    return ::new (Ctx) SmallCAttr(Ctx, Attr);
   }
   llvm_unreachable("unexpected attribute kind!");
 }
@@ -8042,6 +8051,106 @@ static bool handleArmStateAttribute(Sema &S,
         (FunctionType::AArch64SMETypeAttributes)((State << Shift)));
   }
   return false;
+}
+
+/// The argument-passing base a Z80 calling convention is built on.  SDCC
+/// spells these as mutually exclusive keywords, and resolves a clash rather
+/// than rejecting it: __smallc overrides whichever __sdcccall level is in
+/// effect, and __z88dk_fastcall overrides everything.
+enum class Z80CCBase { SDCCCall1, SDCCCall0, SmallC, Z88dkFastCall };
+
+/// Split \p CC into its base and whether __z88dk_callee is applied.  The base
+/// is nullopt for a convention that only carries the modifier, since
+/// __z88dk_callee on its own inherits whatever base is in effect.  Returns
+/// false for a convention that is not one of the Z80 family.
+static bool splitZ80CC(CallingConv CC, std::optional<Z80CCBase> &Base,
+                       bool &Callee) {
+  Base = std::nullopt;
+  Callee = false;
+  switch (CC) {
+  case CC_C: // SDCC __sdcccall(1), the default.
+    Base = Z80CCBase::SDCCCall1;
+    return true;
+  case CC_Z80SDCCCall0:
+    Base = Z80CCBase::SDCCCall0;
+    return true;
+  case CC_Z80SmallC:
+    Base = Z80CCBase::SmallC;
+    return true;
+  case CC_Z80Z88dkFastCall:
+    Base = Z80CCBase::Z88dkFastCall;
+    return true;
+  case CC_Z80Z88dkCallee:
+    Callee = true;
+    return true;
+  case CC_Z80SDCCCall0Callee:
+    Base = Z80CCBase::SDCCCall0;
+    Callee = true;
+    return true;
+  case CC_Z80SmallCCallee:
+    Base = Z80CCBase::SmallC;
+    Callee = true;
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// The convention built from \p Base (defaulting to __sdcccall(1)) and the
+/// __z88dk_callee modifier.  __z88dk_fastcall passes nothing on the stack, so
+/// it absorbs the modifier.
+static CallingConv joinZ80CC(std::optional<Z80CCBase> Base, bool Callee) {
+  switch (Base.value_or(Z80CCBase::SDCCCall1)) {
+  case Z80CCBase::SDCCCall1:
+    return Callee ? CC_Z80Z88dkCallee : CC_C;
+  case Z80CCBase::SDCCCall0:
+    return Callee ? CC_Z80SDCCCall0Callee : CC_Z80SDCCCall0;
+  case Z80CCBase::SmallC:
+    return Callee ? CC_Z80SmallCCallee : CC_Z80SmallC;
+  case Z80CCBase::Z88dkFastCall:
+    return CC_Z80Z88dkFastCall;
+  }
+  llvm_unreachable("bad Z80 calling-convention base");
+}
+
+/// Merge two argument-passing bases the way SDCC does.  A convention carrying
+/// only the __z88dk_callee modifier has no base of its own and takes the
+/// other's.  Two different __sdcccall levels genuinely contradict each other
+/// and fail; SDCC rejects that pair too.
+static bool mergeZ80CCBases(std::optional<Z80CCBase> A,
+                            std::optional<Z80CCBase> B,
+                            std::optional<Z80CCBase> &Merged) {
+  if (!A || !B || *A == *B) {
+    Merged = A ? A : B;
+    return true;
+  }
+  // __z88dk_fastcall wins over any other base, then __smallc.
+  if (*A == Z80CCBase::Z88dkFastCall || *B == Z80CCBase::Z88dkFastCall)
+    Merged = Z80CCBase::Z88dkFastCall;
+  else if (*A == Z80CCBase::SmallC || *B == Z80CCBase::SmallC)
+    Merged = Z80CCBase::SmallC;
+  else
+    return false; // __sdcccall(0) against __sdcccall(1).
+  return true;
+}
+
+/// Compose two Z80 calling-convention attributes written on one function,
+/// resolving a clash between bases the way SDCC does instead of rejecting it.
+/// Returns true and sets \p Composed on success.
+///
+/// Acceptance is order-independent; rejection is not, since attributes fold
+/// pairwise: a contradiction with an overriding base written between its two
+/// halves goes undiagnosed.  The composed ABI is the same either way.
+static bool composeZ80CallingConvs(CallingConv A, CallingConv B,
+                                   CallingConv &Composed) {
+  std::optional<Z80CCBase> BaseA, BaseB, Merged;
+  bool CalleeA, CalleeB;
+  if (!splitZ80CC(A, BaseA, CalleeA) || !splitZ80CC(B, BaseB, CalleeB))
+    return false;
+  if (!mergeZ80CCBases(BaseA, BaseB, Merged))
+    return false;
+  Composed = joinZ80CC(Merged, CalleeA || CalleeB);
+  return true;
 }
 
 /// Process an individual function attribute.  Returns true to
@@ -8367,15 +8476,47 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
   Attr *CCAttr = getCCTypeAttr(S.Context, attr);
 
   if (CCOld != CC) {
-    // Error out on when there's already an attribute on the type
-    // and the CCs don't match.
+    // There's already a calling-convention attribute on the type and the CCs
+    // don't match.  A Z80 base and modifier compose; anything else conflicts.
     if (S.getCallingConvAttributedType(type)) {
-      S.Diag(attr.getLoc(), diag::err_attributes_are_not_compatible)
-          << FunctionType::getNameForCallConv(CC)
-          << FunctionType::getNameForCallConv(CCOld)
-          << attr.isRegularKeywordAttribute();
+      CallingConv Composed;
+      if (composeZ80CallingConvs(CCOld, CC, Composed)) {
+        CC = Composed;
+      } else {
+        S.Diag(attr.getLoc(), diag::err_attributes_are_not_compatible)
+            << FunctionType::getNameForCallConv(CC)
+            << FunctionType::getNameForCallConv(CCOld)
+            << attr.isRegularKeywordAttribute();
+        attr.setInvalid();
+        return true;
+      }
+    }
+  }
+
+  if (CC == CC_Z80Z88dkFastCall) {
+    // A later prototyped redeclaration inherits the convention through decl
+    // merging without returning here, so without a prototype now the
+    // one-argument rule could never be checked at all.
+    const auto *FnP = dyn_cast<FunctionProtoType>(fn);
+    if (!FnP || FnP->isVariadic() || FnP->getNumParams() != 1) {
       attr.setInvalid();
-      return true;
+      return S.Diag(attr.getLoc(), diag::err_z88dk_fastcall_params);
+    }
+    // The convention has no stack at all, so anything that does not reach
+    // L, HL or DE:HL has nowhere to go.  An aggregate return is the subtler
+    // half: it becomes a hidden pointer, which is a second argument.
+    auto NeedsStack = [&](QualType T) {
+      if (T->isVoidType() || T->isDependentType() || T->isIncompleteType())
+        return false;
+      return !T->isScalarType() || S.Context.getTypeSize(T) > 32;
+    };
+    if (NeedsStack(FnP->getParamType(0))) {
+      attr.setInvalid();
+      return S.Diag(attr.getLoc(), diag::err_z88dk_fastcall_type) << 0;
+    }
+    if (NeedsStack(FnP->getReturnType())) {
+      attr.setInvalid();
+      return S.Diag(attr.getLoc(), diag::err_z88dk_fastcall_type) << 1;
     }
   }
 

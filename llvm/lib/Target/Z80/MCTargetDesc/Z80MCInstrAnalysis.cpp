@@ -51,11 +51,9 @@ std::optional<uint64_t> Z80MCInstrAnalysis::evaluateMemoryOperandAddress(
     const auto &Op = Info->get(Inst.getOpcode()).operands()[OpIdx];
     switch (Op.OperandType) {
     case Z80Op::OPERAND_ADDR8: {
-      // 8-bit address (I/O port or zero page)
       return Inst.getOperand(OpIdx).getImm() & 0xFF;
     }
     case Z80Op::OPERAND_ADDR16: {
-      // 16-bit address
       return Inst.getOperand(OpIdx).getImm() & 0xFFFF;
     }
     }

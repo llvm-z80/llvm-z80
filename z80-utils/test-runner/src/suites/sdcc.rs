@@ -43,8 +43,29 @@ pub fn run(paths: &Paths, config: &SdccConfig, on_result: &mut OnResult) -> Suit
             }
         }
 
+        // A pair is skipped from either half, since a convention SDCC does not
+        // accept for the target cannot be exercised from either side.
+        let skip_src = [
+            std::fs::read_to_string(test_dir.join(format!("{test_name}_clang.c")))
+                .unwrap_or_default(),
+            std::fs::read_to_string(test_dir.join(format!("{test_name}_sdcc.c")))
+                .unwrap_or_default(),
+        ]
+        .concat();
+        let active: Vec<&str> = if config.omit_fp {
+            vec!["-fomit-frame-pointer"]
+        } else {
+            Vec::new()
+        };
+
         for &opt in &config.opt_levels {
             let tag = format!("{test_name}_{opt}");
+            if let Some(reason) =
+                check_skip_c(&skip_src, config.target, &active, opt.clang_flag())
+            {
+                result.add(TestResult::skip(&tag, reason), on_result, reg_name);
+                continue;
+            }
             let r = run_single(
                 &clang,
                 &test_dir,

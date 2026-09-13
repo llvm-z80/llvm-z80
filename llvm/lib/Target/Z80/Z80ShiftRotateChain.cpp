@@ -47,6 +47,7 @@
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80.h"
 #include "llvm/ADT/IndexedMap.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -56,6 +57,9 @@
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 
 #define DEBUG_TYPE "z80-shift-rotate-chain"
+
+STATISTIC(NumShiftsChained,
+          "Number of shifts rewritten to chain off a shorter one");
 
 using namespace llvm;
 
@@ -172,6 +176,7 @@ bool Z80ShiftRotateChain::runOnMachineFunction(MachineFunction &MF) {
 
       ensureDominates(*MRI.getUniqueVRegDef(R), PrevMI, MI);
 
+      ++NumShiftsChained;
       Changed = true;
       MI.getOperand(1).setReg(PrevMI.getOperand(0).getReg());
       MachineIRBuilder B(MI);

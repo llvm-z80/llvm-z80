@@ -18,6 +18,7 @@
 #include "Z80IndexIV.h"
 #include "Z80InstrInfo.h"
 
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
@@ -27,6 +28,8 @@
 #include "llvm/Transforms/Utils/ScalarEvolutionExpander.h"
 
 #define DEBUG_TYPE "z80-indexiv"
+
+STATISTIC(NumIndexIVs, "Number of GEPs rewritten to use an 8-bit index IV");
 
 using namespace llvm;
 
@@ -96,6 +99,7 @@ PreservedAnalyses Z80IndexIV::run(Loop &L, LoopAnalysisManager &AM,
       // Once the step and index are both known to fit in 8 bits, we can
       // always rewrite to a 16-bit base + 8-bit index.
       LLVM_DEBUG(dbgs() << "Rewriting to 8-bit index.\n");
+      ++NumIndexIVs;
       Changed = true;
 
       SCEVExpander Rewriter(SE, "z80-indexiv");

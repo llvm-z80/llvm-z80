@@ -720,6 +720,15 @@ fn test_rel_roundtrip(
 
 // ── Group 3: elf2rel crosslink ──────────────────────────────────────────────
 
+// A cross test needs both halves to build. Either source can rule the pair
+// out for a target: SDCC's SM83 port has no __z88dk_fastcall, for one.
+fn crosslink_skip(clang_src: &Path, sdcc_src: &Path, target: Target) -> Option<String> {
+    [clang_src, sdcc_src].into_iter().find_map(|p| {
+        let src = std::fs::read_to_string(p).unwrap_or_default();
+        check_skip_c(&src, target, &[], "")
+    })
+}
+
 fn run_group_elf_crosslink(
     paths: &Paths, target: Target, opt: OptLevel, pattern: Option<&str>,
     cb: &mut OnResult,
@@ -740,6 +749,11 @@ fn run_group_elf_crosslink(
         if !clang_src.exists() || !sdcc_src.exists() { continue; }
 
         let tag = format!("{test_name}_elf_cross");
+        if let Some(reason) = crosslink_skip(&clang_src, &sdcc_src, target) {
+            result.add(TestResult::skip(&tag, &reason), cb, reg_name);
+            continue;
+        }
+
         let r = test_elf_crosslink(
             &clang, &clang_src, &sdcc_src, &tag, test_name,
             target, opt, &test_dir, paths,
@@ -823,6 +837,11 @@ fn run_group_rel_crosslink(
         if !clang_src.exists() || !sdcc_src.exists() { continue; }
 
         let tag = format!("{test_name}_rel_cross");
+        if let Some(reason) = crosslink_skip(&clang_src, &sdcc_src, target) {
+            result.add(TestResult::skip(&tag, &reason), cb, reg_name);
+            continue;
+        }
+
         let r = test_rel_crosslink(
             &harness_crt0, &clang, &clang_src, &sdcc_src, &tag, test_name,
             target, opt, &test_dir,
