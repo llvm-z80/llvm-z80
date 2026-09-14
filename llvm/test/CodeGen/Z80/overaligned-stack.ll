@@ -30,3 +30,14 @@ define void @plain() {
   call void @use(ptr %b)
   ret void
 }
+
+; llvm.lifetime.* only takes an alloca, so those uses have to stay on the
+; object rather than follow the rounded address into it.
+; CHECK: warning: {{.*}}in function lifetime{{.*}}: aligning a stack object to 2
+define void @lifetime() {
+  %w = alloca i16, align 2
+  call void @llvm.lifetime.start.p0(ptr nonnull %w)
+  call void @use(ptr %w)
+  call void @llvm.lifetime.end.p0(ptr nonnull %w)
+  ret void
+}

@@ -19,6 +19,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
@@ -311,7 +312,19 @@ static bool lowerOverAlignedAllocas(Function &F, const DataLayout &DL) {
     Addr = B.CreateAnd(Addr, ConstantInt::get(IntPtrTy, ~APInt(Bits, Extra)));
     Value *Aligned = B.CreateIntToPtr(Addr, AI->getType(), AI->getName());
 
+    // llvm.lifetime.* takes an alloca and nothing else, and the range it
+    // marks is the whole allocation, so those uses move to the raw object
+    // rather than to the rounded address inside it.
+    SmallVector<IntrinsicInst *, 2> Lifetimes;
+    for (User *U : AI->users())
+      if (auto *II = dyn_cast<IntrinsicInst>(U))
+        if (II->getIntrinsicID() == Intrinsic::lifetime_start ||
+            II->getIntrinsicID() == Intrinsic::lifetime_end)
+          Lifetimes.push_back(II);
+
     AI->replaceAllUsesWith(Aligned);
+    for (IntrinsicInst *II : Lifetimes)
+      II->replaceUsesOfWith(Aligned, Raw);
     AI->eraseFromParent();
     Changed = true;
   }
