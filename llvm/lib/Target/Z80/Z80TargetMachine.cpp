@@ -88,13 +88,6 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
 static const char *Z80DataLayout =
     "e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-ve-n8:16";
 
-/// Processes a CPU name.
-static StringRef getCPU(StringRef CPU, const Triple &TT) {
-  if (CPU.empty() || CPU == "generic")
-    return TT.getArch() == Triple::sm83 ? "sm83" : "z80";
-  return CPU;
-}
-
 // On by default for both targets. On SM83 a wide slot costs a byte more in
 // static memory than on the stack, so frame lowering keeps a size build's
 // wide slots on the stack; an eight-bit slot is a win either way. Explicit
@@ -129,10 +122,10 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
                                    std::optional<Reloc::Model> RM,
                                    std::optional<CodeModel::Model> CM,
                                    CodeGenOptLevel OL, bool JIT)
-    : CodeGenTargetMachineImpl(T, Z80DataLayout, TT, getCPU(CPU, TT), FS,
+    : CodeGenTargetMachineImpl(T, Z80DataLayout, TT, selectZ80CPU(CPU, TT), FS,
                                Options, getEffectiveRelocModel(RM),
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
-      SubTarget(TT, getCPU(CPU, TT).str(), FS.str(), *this) {
+      SubTarget(TT, selectZ80CPU(CPU, TT).str(), FS.str(), *this) {
   this->TLOF = std::make_unique<Z80TargetObjectFile>();
 
   initAsmInfo();
@@ -153,9 +146,9 @@ Z80TargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
   Attribute FSAttr = F.getFnAttribute("target-features");
 
-  auto CPU = getCPU(CPUAttr.isValid() ? CPUAttr.getValueAsString()
-                                      : StringRef(TargetCPU),
-                    TargetTriple)
+  auto CPU = selectZ80CPU(CPUAttr.isValid() ? CPUAttr.getValueAsString()
+                                            : StringRef(TargetCPU),
+                          TargetTriple)
                  .str();
   auto FS = FSAttr.isValid() ? FSAttr.getValueAsString().str() : TargetFS;
 

@@ -53,10 +53,15 @@ static MCRegisterInfo *createZ80MCRegisterInfo(const Triple &TT) {
   return X;
 }
 
+StringRef llvm::selectZ80CPU(StringRef CPU, const Triple &TT) {
+  if (CPU.empty() || CPU == "generic")
+    return TT.getArch() == Triple::sm83 ? "sm83" : "z80";
+  return CPU;
+}
+
 static MCSubtargetInfo *createZ80MCSubtargetInfo(const Triple &TT,
                                                  StringRef CPU, StringRef FS) {
-  if (CPU.empty())
-    CPU = (TT.getArch() == Triple::sm83) ? "sm83" : "z80";
+  CPU = selectZ80CPU(CPU, TT);
   return createZ80MCSubtargetInfoImpl(TT, CPU, /*TuneCPU*/ CPU, FS);
 }
 
