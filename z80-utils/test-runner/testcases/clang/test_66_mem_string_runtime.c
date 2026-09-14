@@ -8,9 +8,12 @@
  * The comparison routines must return the sign of an UNSIGNED byte compare.
  * Subtracting the two bytes and sign-extending the difference gets this wrong
  * whenever they differ by 128 or more, so memcmp("\x00", "\xFF") must be
- * negative. */
+ * negative.  bcmp answers only whether they are equal, so it must agree with
+ * memcmp on zero and non-zero without the sign work. */
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
+
+int bcmp(const void *, const void *, uint16_t);
 
 static uint8_t src[300];
 static uint8_t dst[300];
@@ -184,5 +187,25 @@ int main(void) {
             status |= (1 << 6);
     }
 
-    return status; /* expect 0x007F */
+    /* Bit 7: bcmp agrees with memcmp on equal and not equal, and takes a zero
+     * length as equal. */
+    {
+        static uint8_t a[8], b[8];
+        volatile uint16_t n0 = 0, n7 = 7, n8 = 8;
+        int ok = 1;
+        for (i = 0; i < 8; i++) { a[i] = (uint8_t)(i + 1); b[i] = a[i]; }
+        if (bcmp(a, b, n8) != 0) ok = 0;
+        if (bcmp(a, b, n0) != 0) ok = 0;
+        b[7] = 9;                       /* differs at the last byte */
+        if (bcmp(a, b, n8) == 0) ok = 0;
+        if (bcmp(a, b, n7) != 0) ok = 0;
+        if ((bcmp(a, b, n8) == 0) != (__builtin_memcmp(a, b, 8) == 0)) ok = 0;
+        b[7] = 8; b[0] = 9;             /* differs at the first byte */
+        if (bcmp(a, b, n8) == 0) ok = 0;
+        if (bcmp(a, b, (uint16_t)1) == 0) ok = 0;
+        if (ok)
+            status |= (1 << 7);
+    }
+
+    return status; /* expect 0x00FF */
 }
