@@ -1,0 +1,40 @@
+# RUN: llc -mtriple=z80 \
+# RUN:     -run-pass=postrapseudos -verify-machineinstrs %s -o - \
+# RUN:     | FileCheck %s
+#
+# Test copyPhysReg GR8 -> IXH/IXL/IYH/IYL (src not H/L) without +undocumented.
+# The lowering saves HL before PUSH IX; POP HL; LD H/L, src; PUSH HL; POP IX; POP HL.
+# When HL is partially undef ($h live, $l undef), the save PUSH_HL must not read
+# an undefined register. An IMPLICIT_DEF for the dead half ($l) must be emitted
+# before PUSH_HL to satisfy -verify-machineinstrs.
+#
+# Fixture: COPY $ixh = $e.  $h live, $l undef.
+
+--- |
+  target triple = "z80"
+  define void @copy_e_to_ixh_h_live_l_undef() { ret void }
+...
+---
+name:            copy_e_to_ixh_h_live_l_undef
+alignment:       1
+tracksRegLiveness: true
+noVRegs:         true
+body:             |
+  bb.0:
+    liveins: $a, $e, $h, $ix
+    ; COPY $ixh = $e without +undocumented.  $h live, $l undef.
+    ; An IMPLICIT_DEF is emitted for $l before PUSH_HL.
+    $ixh = COPY $e
+    AND_r killed $h, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $a
+...
+
+# CHECK-LABEL: name: copy_e_to_ixh_h_live_l_undef
+# CHECK:      $l = IMPLICIT_DEF
+# CHECK-NEXT: PUSH_HL
+# CHECK:      PUSH_IX
+# CHECK:      POP_HL
+# CHECK:      $h = LD_r_r $e
+# CHECK:      PUSH_HL
+# CHECK:      POP_IX
+# CHECK:      POP_HL

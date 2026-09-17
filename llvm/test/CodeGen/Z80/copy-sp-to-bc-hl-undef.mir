@@ -1,0 +1,66 @@
+# RUN: llc -mtriple=z80 -run-pass=postrapseudos -verify-machineinstrs %s -o - \
+# RUN:     | FileCheck %s
+#
+# Test copyPhysReg SP -> BC|DE.
+# Lowering routes through HL:
+#   [PUSH HL;] LD HL,N; ADD HL,SP; LD r,H; LD r,L [;POP HL]
+#
+# When HL is dead at the COPY point, the PUSH_HL/POP_HL bracket is skipped entirely,
+# avoiding an invalid read of undefined HL under -verify-machineinstrs.
+# When HL is partially live ($h live, $l undef), SaveHL is true and the dead half
+# ($l) is IMPLICIT_DEF'd before PUSH_HL to satisfy -verify-machineinstrs.
+
+--- |
+  target triple = "z80"
+  define void @copy_sp_to_bc_hl_undef() { ret void }
+  define void @copy_sp_to_bc_h_live_l_undef() { ret void }
+...
+---
+name:            copy_sp_to_bc_hl_undef
+alignment:       1
+tracksRegLiveness: true
+noVRegs:         true
+body:             |
+  bb.0:
+    ; No live-ins -- HL is undef coming into the COPY.
+    ; The SP -> BC|DE path skips the PUSH_HL/POP_HL bracket entirely.
+    $bc = COPY $sp
+    RET implicit $bc
+...
+---
+name:            copy_sp_to_bc_h_live_l_undef
+alignment:       1
+tracksRegLiveness: true
+noVRegs:         true
+body:             |
+  bb.0:
+    liveins: $a, $h, $sp
+    ; COPY $bc = $sp with $h live and $l undef.
+    ; SaveHL is true because $h is live. $l is IMPLICIT_DEF'd before PUSH_HL.
+    $bc = COPY $sp
+    AND_r killed $h, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $bc, implicit $a
+...
+
+# HL is undef, so no PUSH_HL is emitted. The lowering reduces to
+# LD HL,0; ADD HL,SP; LD B,H; LD C,L.
+#
+# CHECK-LABEL: name: copy_sp_to_bc_hl_undef
+# CHECK-NOT:  PUSH_HL
+# CHECK:      $hl = LD_rr_nn 0
+# CHECK:      ADD_HL_SP
+# CHECK:      $b = LD_r_r $h
+# CHECK:      $c = LD_r_r $l
+# CHECK-NOT:  POP_HL
+
+# HL is partially live ($h live), so SaveHL is true.
+# $l is IMPLICIT_DEF'd, followed by PUSH_HL, LD HL,2, ADD HL,SP, LD B,H, LD C,L, POP_HL.
+#
+# CHECK-LABEL: name: copy_sp_to_bc_h_live_l_undef
+# CHECK:      $l = IMPLICIT_DEF
+# CHECK-NEXT: PUSH_HL
+# CHECK:      $hl = LD_rr_nn 2
+# CHECK:      ADD_HL_SP
+# CHECK:      $b = LD_r_r $h
+# CHECK:      $c = LD_r_r $l
+# CHECK:      POP_HL
