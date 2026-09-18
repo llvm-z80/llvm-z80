@@ -3,7 +3,7 @@
 ; Test: loop counter placed in B is folded to DJNZ.
 
 ; CHECK-LABEL: _delay:
-; CHECK:      	ld	b, a
+; CHECK:      	ld	b,{{ *}}a
 ; CHECK:      	djnz	.LBB0_1
 ; CHECK:      	ret
 define void @delay(i8 %n) {
