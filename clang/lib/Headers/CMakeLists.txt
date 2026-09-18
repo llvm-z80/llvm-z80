@@ -165,6 +165,10 @@ set(webassembly_files
   wasm_simd128.h
   )
 
+set(z80_files
+  intrinsic.h
+  )
+
 set(x86_files
 # Intrinsics
   adcintrin.h
@@ -349,6 +353,7 @@ set(files
   ${x86_files}
   ${gpu_files}
   ${webassembly_files}
+  ${z80_files}
   ${windows_only_files}
   ${utility_files}
   )
@@ -608,6 +613,7 @@ add_header_target("systemz-resource-headers" "${systemz_files};${zos_wrapper_fil
 add_header_target("ve-resource-headers" "${ve_files}")
 add_header_target("webassembly-resource-headers" "${webassembly_files}")
 add_header_target("x86-resource-headers" "${x86_files}")
+add_header_target("z80-resource-headers" "${z80_files}")
 add_header_target("gpu-resource-headers" "${gpu_files};${gpu_hip_wrapper_files}")
 
 # Other header groupings
@@ -811,6 +817,12 @@ install(
   DESTINATION ${header_install_dir}
   EXCLUDE_FROM_ALL
   COMPONENT x86-resource-headers)
+
+install(
+  FILES ${z80_files}
+  DESTINATION ${header_install_dir}
+  EXCLUDE_FROM_ALL
+  COMPONENT z80-resource-headers)
 
 install(
   FILES ${gpu_files}

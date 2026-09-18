@@ -563,6 +563,8 @@ bool Z80LegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
   case Intrinsic::z80_di:
   case Intrinsic::z80_ei:
   case Intrinsic::z80_nop:
+  case Intrinsic::z80_im2:
+  case Intrinsic::z80_set_i:
     // These intrinsics are legal and will be selected directly
     return true;
 
