@@ -73,6 +73,11 @@ STATISTIC(NumDjnz,
 
 using namespace llvm;
 
+static cl::opt<bool> EnableDjnzPeephole(
+    "z80-djnz-peephole",
+    cl::desc("Fold decrement-and-branch sequences to DJNZ"),
+    cl::init(true), cl::Hidden);
+
 // Custom DenseMapInfo for IX offsets.  The default DenseMapInfo<int8_t> uses
 // -1 and -2 as sentinel values, which collide with valid IX offsets.
 // Using int as the key type with out-of-range sentinels avoids this.
@@ -1241,7 +1246,7 @@ static bool optimizeDJNZ(MachineBasicBlock &MBB,
                          const TargetInstrInfo *TII,
                          const TargetRegisterInfo *TRI,
                          const Z80Subtarget &STI) {
-  if (!STI.hasZ80())
+  if (!EnableDjnzPeephole || !STI.hasZ80())
     return false;
 
   bool Changed = false;
