@@ -73,7 +73,7 @@ exit:
 ; Under optsize / minsize, live-range splitting is disabled so code size is minimized
 ; (avoiding the extra preheader copy, and emitting djnz on the outer loop).
 ; CHECK-LABEL: _nested_djnz_optsize:
-; CHECK:      	ld	b, a
+; CHECK:      	ld	b,{{ *}}a
 ; CHECK:      	dec	c
 ; CHECK-NEXT: 	jr	nz,
 ; CHECK:      	djnz

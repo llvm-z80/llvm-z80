@@ -60,6 +60,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
@@ -233,6 +234,25 @@ static bool splitCounterAt(MachineBasicBlock &MBB, Register Counter,
 bool Z80SplitDjnzCounters::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableSplitDjnzCounters)
     return false;
+
+  // Skip live-range splitting when optimizing for code size (-Os / -Oz).
+  //
+  // WHAT: Avoid splitting DJNZ counter live ranges if the function has the
+  // `optsize` or `minsize` attribute.
+  //
+  // WHY: Splitting inserts a preheader copy (e.g. `ld b, l`) inside the outer
+  // loop body. In nested loops this trades code size for execution speed:
+  //   - Without splitting (size-optimized): outer loop gets B (DJNZ, 2 B) and
+  //     inner gets C (DEC C; JR NZ, 3 B). Total binary size = 78 bytes.
+  //   - With splitting (speed-optimized): preheader copy `ld b, l` is inserted,
+  //     inner gets B (DJNZ, 2 B) and outer gets C. Total binary size = 82 bytes.
+  // For -Os and -Oz, every byte counts, so we prefer the 78-byte layout.
+  //
+  // GOTCHA: Do not check CodeGenOptLevel here because -Os, -Oz, and -O2 all
+  // share CodeGenOptLevel::Default; the function-level `hasOptSize()` attribute
+  // is the canonical discriminator.
+  if (MF.getFunction().hasOptSize())
+    return false; // do not insert preheader copies under -Os / -Oz
 
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
   if (!STI.hasZ80())
