@@ -1416,17 +1416,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     }
 
     // LDDR copies backward from the last byte: HL = src + size - 1,
-    // DE = dst + size - 1, BC = size.  A backward copy with a runtime length
-    // would need the end pointers computed before the zero test, so leave
-    // those to the libcall and only handle a constant length here.
-    if (!SizeC) {
-      auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
-      if (Result != LegalizerHelper::Legalized)
-        return false;
-      MI.eraseFromParent();
-      return true;
-    }
-
+    // DE = dst + size - 1, BC = size.
     LLT S16 = LLT::scalar(16);
     // Fold size-1 into the pointer and walk back through any chained constant
     // G_PTR_ADDs, so the end pointer becomes a single G_PTR_ADD carrying the
@@ -1450,17 +1440,23 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       return MIRBuilder.buildPtrAdd(MRI.getType(Ptr), Base, Off).getReg(0);
     };
 
-    // Both end pointers have to be materialised before either lands in a
-    // physical register: computing one emits an `LD HL, base` + `ADD HL, rr`
-    // pair, which would overwrite the other if it were already sitting in HL.
-    int64_t Off = *SizeC - 1;
-    Register SrcEnd = buildEndPtr(SrcPtr, Off);
-    Register DstEnd = buildEndPtr(DstPtr, Off);
+    Register SrcEnd, DstEnd;
+    if (SizeC) {
+      int64_t Off = *SizeC - 1;
+      SrcEnd = buildEndPtr(SrcPtr, Off);
+      DstEnd = buildEndPtr(DstPtr, Off);
+    } else {
+      auto One = MIRBuilder.buildConstant(S16, 1);
+      auto SizeM1 = MIRBuilder.buildSub(S16, Size, One);
+      SrcEnd = MIRBuilder.buildPtrAdd(MRI.getType(SrcPtr), SrcPtr, SizeM1)
+                   .getReg(0);
+      DstEnd = MIRBuilder.buildPtrAdd(MRI.getType(DstPtr), DstPtr, SizeM1)
+                   .getReg(0);
+    }
     MIRBuilder.buildCopy(Register(Z80::HL), SrcEnd);
     MIRBuilder.buildCopy(Register(Z80::DE), DstEnd);
     MIRBuilder.buildCopy(Register(Z80::BC), Size);
-    MIRBuilder.buildInstr(Z80::LDDR).cloneMemRefs(MI);
-
+    MIRBuilder.buildInstr(SizeC ? Z80::LDDR : Z80::LDDR_GUARDED);
     MI.eraseFromParent();
     return true;
   }
