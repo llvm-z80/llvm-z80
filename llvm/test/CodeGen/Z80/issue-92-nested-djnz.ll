@@ -69,3 +69,36 @@ loop2:
 exit:
   ret void
 }
+
+; Under optsize / minsize, live-range splitting is disabled so code size is minimized
+; (avoiding the extra preheader copy, and emitting djnz on the outer loop).
+; CHECK-LABEL: _nested_djnz_optsize:
+; CHECK:      	ld	b, a
+; CHECK:      	dec	c
+; CHECK-NEXT: 	jr	nz,
+; CHECK:      	djnz
+; CHECK:      	ret
+define void @nested_djnz_optsize(i8 zeroext %m, i8 zeroext %n) optsize {
+entry:
+  br label %outer
+
+outer:
+  %o = phi i8 [ %m, %entry ], [ %o.next, %outer.latch ]
+  br label %inner
+
+inner:
+  %i = phi i8 [ %n, %outer ], [ %i.next, %inner ]
+  %p = load volatile ptr, ptr @port, align 2
+  store volatile i8 0, ptr %p, align 1
+  %i.next = add i8 %i, -1
+  %i.cont = icmp ne i8 %i.next, 0
+  br i1 %i.cont, label %inner, label %outer.latch
+
+outer.latch:
+  %o.next = add i8 %o, -1
+  %o.cont = icmp ne i8 %o.next, 0
+  br i1 %o.cont, label %outer, label %exit
+
+exit:
+  ret void
+}
