@@ -6,47 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// In nested or sequential countdown loops, the register coalescer merges
-// entry-edge PHI COPYs into the loop-counter virtual registers. This extends
-// outer or earlier counter live ranges across subsequent loops, causing
-// greedy register allocation to allocate B to the outer loop or the first
-// loop only.
-//
-// Worked example (from djnz-nested.ll @nested_djnz):
-//
-//   outer:                     ; preheader for inner loop
-//     %0:gr8 = phi %m, %o.next
-//   inner:                     ; self-looping MBB
-//     %1:gr8 = phi %n, %inner
-//     $a = COPY %1:gr8
-//     DEC_r $a
-//     %1:gr8 = COPY $a
-//     JR_NZ_e %bb.inner
-//   outer.latch:
-//     DEC_r %0:gr8
-//     JR_NZ_e %bb.outer
-//
-// Without splitting: %0's live range spans from entry across the entire inner
-// loop down to outer.latch. Greedy regalloc allocates B to %0 first, leaving
-// the inner (hot) counter %1 with C or another register. The inner loop
-// executes N*M times emitting "DEC C; JR NZ" (16 T-states, 3 bytes), while
-// the outer loop executes M times emitting "DJNZ" (13 T-states, 2 bytes).
-//
-// With splitting: this pass recognizes %bb.inner as a self-loop NZ countdown
-// and introduces a preheader copy with a single-register class BReg:
-//
-//   outer:
-//     %2:breg = COPY %1:gr8   ; new virtual register in BReg
-//   inner:
-//     $a = COPY %2:breg
-//     DEC_r $a
-//     %2:breg = COPY $a
-//     JR_NZ_e %bb.inner
-//
-// Because %2 is constrained to BReg, greedy regalloc is forced to assign B
-// to the inner loop counter %2. The outer counter %0 is assigned C.
-// The inner loop emits DJNZ (13 T, 2 B), saving 3 T-states and 1 byte per
-// inner iteration.
+// Splits DJNZ-loop counter live ranges at the loop preheader with BReg/BCReg
+// constraints, ensuring greedy register allocation assigns B to hot inner
+// and sequential countdown loops rather than outer loops.
 //
 //===----------------------------------------------------------------------===//
 
@@ -235,24 +197,9 @@ bool Z80SplitDjnzCounters::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableSplitDjnzCounters)
     return false;
 
-  // Skip live-range splitting when optimizing for code size (-Os / -Oz).
-  //
-  // WHAT: Avoid splitting DJNZ counter live ranges if the function has the
-  // `optsize` or `minsize` attribute.
-  //
-  // WHY: Splitting inserts a preheader copy (e.g. `ld b, l`) inside the outer
-  // loop body. In nested loops this trades code size for execution speed:
-  //   - Without splitting (size-optimized): outer loop gets B (DJNZ, 2 B) and
-  //     inner gets C (DEC C; JR NZ, 3 B). Total binary size = 78 bytes.
-  //   - With splitting (speed-optimized): preheader copy `ld b, l` is inserted,
-  //     inner gets B (DJNZ, 2 B) and outer gets C. Total binary size = 82 bytes.
-  // For -Os and -Oz, every byte counts, so we prefer the 78-byte layout.
-  //
-  // GOTCHA: Do not check CodeGenOptLevel here because -Os, -Oz, and -O2 all
-  // share CodeGenOptLevel::Default; the function-level `hasOptSize()` attribute
-  // is the canonical discriminator.
+  // Disable splitting under -Os / -Oz to avoid inserting preheader copies.
   if (MF.getFunction().hasOptSize())
-    return false; // do not insert preheader copies under -Os / -Oz
+    return false;
 
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
   if (!STI.hasZ80())

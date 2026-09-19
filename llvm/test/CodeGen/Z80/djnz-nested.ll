@@ -1,12 +1,7 @@
 ; RUN: llc -mtriple=z80 < %s | FileCheck %s
 
-; In nested 8-bit countdown loops, the INNER loop counter must get
-; B (DJNZ-eligible). The outer counter should take non-B (e.g. C) so that
-; the hot inner loop benefits from DJNZ.
-;
-; Distinguishing signal: the inner counter's dec/jr_nz lives in a self-looping
-; MBB; the outer's dec/jr_nz lives in the latch MBB which branches to the
-; outer header (a different MBB).
+; Verify that the inner loop counter gets B (DJNZ) in nested countdown loops,
+; while the outer counter uses another register.
 
 @port = external global ptr
 
@@ -70,8 +65,7 @@ exit:
   ret void
 }
 
-; Under optsize / minsize, live-range splitting is disabled so code size is minimized
-; (avoiding the extra preheader copy, and emitting djnz on the outer loop).
+; Under optsize / minsize, live-range splitting is disabled to minimize size.
 ; CHECK-LABEL: _nested_djnz_optsize:
 ; CHECK:      	ld	b,{{ *}}a
 ; CHECK:      	dec	c

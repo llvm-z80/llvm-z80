@@ -1224,24 +1224,9 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
   return Changed;
 }
 
-// --- Peephole: DEC B; JR NZ → DJNZ (Z80 only) ---
-//
-// DJNZ (2 B, 13/8 T) is a hardware loop instruction that decrements B and
-// branches if B != 0. Replaces DEC B (1 B, 4 T) + JR NZ (2 B, 12/7 T) = 3 B, 16/11 T.
-// Also folds `LD A, B; DEC A; LD B, A; [OR A;] JR NZ → DJNZ` (saves 2-3 B).
-//
-// Worked example (from djnz.ll @delay):
-//   Input:
-//     $b = DEC_r $b
-//     JR_NZ_e %bb.1
-//   Output:
-//     DJNZ_e %bb.1
-//
-// Soundness guards:
-//   - Only valid on Z80 (SM83 lacks DJNZ).
-//   - FLAGS must be dead after JR NZ (DJNZ preserves flags; DEC sets them).
-//   - In the DEC A; LD B,A variant: A must be dead after branch, and B must not
-//     be modified in the body before DEC A (issue #185).
+// --- Peephole: DEC B; JR NZ -> DJNZ (Z80 only) ---
+// Folds 'DEC B; JR NZ' and 'LD A, B; DEC A; LD B, A; [OR A;] JR NZ' into DJNZ
+// when FLAGS is dead after the branch.
 static bool optimizeDJNZ(MachineBasicBlock &MBB,
                          const TargetInstrInfo *TII,
                          const TargetRegisterInfo *TRI,
@@ -1252,7 +1237,7 @@ static bool optimizeDJNZ(MachineBasicBlock &MBB,
   bool Changed = false;
   const auto MIE = MBB.end();
 
-  // Pattern 1: DEC B; JR NZ → DJNZ
+  // Pattern 1: DEC B; JR NZ -> DJNZ
   for (auto MII = MBB.begin(); MII != MIE;) {
     if (!isIncDec8(*MII, Z80::DEC_r, Z80::B)) {
       ++MII;
@@ -1263,12 +1248,12 @@ static bool optimizeDJNZ(MachineBasicBlock &MBB,
       ++MII;
       continue;
     }
-    // skip if branch target is not a valid MBB
+    // Skip if branch target is not a valid MBB.
     if (!NextIt->getOperand(0).isMBB()) {
       ++MII;
       continue;
     }
-    // skip if FLAGS is live after branch (DJNZ preserves flags, DEC B sets them)
+    // Skip if FLAGS is live after branch (DJNZ preserves flags, DEC B sets them).
     if (!isRegDeadAfter(std::next(NextIt), MBB, TRI, Z80::FLAGS)) {
       ++MII;
       continue;
@@ -1283,10 +1268,7 @@ static bool optimizeDJNZ(MachineBasicBlock &MBB,
     Changed = true;
   }
 
-  // Pattern 2: LD A, B; DEC A; LD B, A; [OR A;] JR NZ → DJNZ
-  // For DJNZ (which decrements B) to be equivalent to DEC A; LD B, A,
-  // B must hold the counter before DEC A. This requires that A was copied
-  // from B (LD A, B) immediately prior to DEC A.
+  // Pattern 2: LD A, B; DEC A; LD B, A; [OR A;] JR NZ -> DJNZ
   for (auto MII = MBB.begin(); MII != MIE;) {
     if (!isIncDec8(*MII, Z80::DEC_r, Z80::A)) {
       ++MII;
@@ -1328,17 +1310,17 @@ static bool optimizeDJNZ(MachineBasicBlock &MBB,
       ++MII;
       continue;
     }
-    // skip if A is live after branch (DJNZ doesn't update A)
+    // Skip if A is live after branch (DJNZ doesn't update A).
     if (!isRegDeadAfter(std::next(IBranch), MBB, TRI, Z80::A)) {
       ++MII;
       continue;
     }
-    // skip if FLAGS is live after branch (DJNZ preserves flags, DEC A sets them)
+    // Skip if FLAGS is live after branch (DJNZ preserves flags, DEC A sets them).
     if (!isRegDeadAfter(std::next(IBranch), MBB, TRI, Z80::FLAGS)) {
       ++MII;
       continue;
     }
-    // ravn/llvm-z80#185: skip if B is modified in body before I1 (LD B,A is essential reload)
+    // Skip if B is modified in body before I1 (LD B, A is an essential reload).
     bool BClobberedInBody = false;
     for (auto It = MBB.begin(); It != I0; ++It) {
       if (It->modifiesRegister(Z80::B, TRI)) {
