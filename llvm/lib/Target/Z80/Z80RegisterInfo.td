@@ -176,12 +176,6 @@ def BReg : Z80Reg8Class<(add B)>;
 // General 16-bit registers: BC, DE, HL
 def GR16 : Z80Reg16Class<(add BC, DE, HL)>;
 
-// Single-register class containing only BC.  Used by Z80SplitDjnzCounters
-// for the i16 self-loop counter case: the counter vreg constrained to BCReg
-// forces greedy past its copy-elimination heuristic and frees HL for the
-// loop's pointer.
-def BCReg : Z80Reg16Class<(add BC)>;
-
 // BC and DE only (for register scavenging temp in address computation)
 def GR16_BCDE : Z80Reg16Class<(add BC, DE)>;
 

@@ -300,7 +300,7 @@ void Z80PassConfig::addOptimizedRegAlloc() {
     // coalesce.
     insertPass(&llvm::TwoAddressInstructionPassID, &llvm::RegisterCoalescerID);
 
-    // Split counter live ranges of DJNZ loops to BReg/BCReg before greedy
+    // Split counter live ranges of DJNZ loops to BReg before greedy
     // regalloc so inner and sequential loop counters are assigned to B.
     insertPass(&llvm::MachineSchedulerID, createZ80SplitDjnzCountersPass());
 

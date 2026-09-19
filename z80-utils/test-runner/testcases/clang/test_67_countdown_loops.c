@@ -1,8 +1,7 @@
-/* Test 67: DJNZ countdown loops - single, nested (2- and 3-fold), and sequential.
+/* Test 67: Countdown loops - single, nested (2- and 3-fold), and sequential.
  *
- * Exercises DJNZ loop folding (DEC B; JR NZ -> DJNZ) and pre-RA counter
- * splitting (Z80SplitDjnzCounters) to ensure inner countdown loops receive
- * register B and execute correctly without data corruption.
+ * Verifies loop counter execution and termination behavior across
+ * single, nested, and sequential countdown loops.
  */
 
 typedef unsigned char uint8_t;

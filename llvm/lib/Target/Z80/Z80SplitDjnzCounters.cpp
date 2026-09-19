@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Splits DJNZ-loop counter live ranges at the loop preheader with BReg/BCReg
+// Splits DJNZ-loop counter live ranges at the loop preheader with BReg
 // constraints, ensuring greedy register allocation assigns B to hot inner
 // and sequential countdown loops rather than outer loops.
 //
@@ -57,25 +57,6 @@ char Z80SplitDjnzCounters::ID = 0;
 
 INITIALIZE_PASS(Z80SplitDjnzCounters, DEBUG_TYPE,
                 "Z80 Split DJNZ-loop counter live ranges", false, false)
-
-static Register findCounter16VReg(MachineBasicBlock &MBB,
-                                  const MachineRegisterInfo &MRI) {
-  for (auto It = MBB.begin(), E = MBB.end(); It != E; ++It) {
-    if (It->getOpcode() != Z80::DEC_rr)
-      continue;
-    if (It->getNumOperands() < 2)
-      continue;
-    if (!It->getOperand(0).isReg() || !It->getOperand(1).isReg())
-      continue;
-    Register Src = It->getOperand(1).getReg();
-    if (!Src.isVirtual())
-      continue;
-    if (!Z80::GR16RegClass.hasSubClassEq(MRI.getRegClass(Src)))
-      continue;
-    return Src;
-  }
-  return Register();
-}
 
 static Register findCounterVReg(MachineBasicBlock &MBB,
                                 const MachineRegisterInfo &MRI) {
@@ -214,17 +195,8 @@ bool Z80SplitDjnzCounters::runOnMachineFunction(MachineFunction &MF) {
       continue;
 
     if (Register Counter = findCounterVReg(MBB, MRI)) {
-      if (splitCounterAt(MBB, Counter, Z80::BRegRegClass, MRI, TII)) {
+      if (splitCounterAt(MBB, Counter, Z80::BRegRegClass, MRI, TII))
         Changed = true;
-        continue;
-      }
-    }
-
-    if (Register Counter16 = findCounter16VReg(MBB, MRI)) {
-      if (splitCounterAt(MBB, Counter16, Z80::BCRegRegClass, MRI, TII)) {
-        Changed = true;
-        continue;
-      }
     }
   }
 
