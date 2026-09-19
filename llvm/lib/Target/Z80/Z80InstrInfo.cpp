@@ -1668,6 +1668,12 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     return 1;
 
   // Two-byte instructions (with immediate or CB prefix)
+  case Z80::JR_e:
+  case Z80::JR_Z_e:
+  case Z80::JR_NZ_e:
+  case Z80::JR_C_e:
+  case Z80::JR_NC_e:
+  case Z80::DJNZ_e:
   case Z80::LD_r_n:
   case Z80::ADD_A_n:
   case Z80::SUB_n:
@@ -1774,7 +1780,8 @@ bool Z80InstrInfo::isBranchOffsetInRange(unsigned BranchOpc,
   case Z80::JR_NZ_e:
   case Z80::JR_C_e:
   case Z80::JR_NC_e:
-    // JR uses a signed 8-bit offset from PC after the 2-byte instruction.
+  case Z80::DJNZ_e:
+    // JR and DJNZ use a signed 8-bit offset from PC after the 2-byte instruction.
     // BrOffset is from the start of the instruction, so adjust by +2.
     return (BrOffset - 2) >= -128 && (BrOffset - 2) <= 127;
   default:
@@ -1795,6 +1802,7 @@ Z80InstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
   case Z80::JR_NZ_e:
   case Z80::JR_C_e:
   case Z80::JR_NC_e:
+  case Z80::DJNZ_e:
     return MI.getOperand(0).getMBB();
   default:
     llvm_unreachable("unexpected opcode in getBranchDestBlock");
