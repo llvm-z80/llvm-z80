@@ -12,7 +12,7 @@
 // greedy register allocation to allocate B to the outer loop or the first
 // loop only.
 //
-// Worked example (from issue-92-nested-djnz.ll @nested_djnz):
+// Worked example (from djnz-nested.ll @nested_djnz):
 //
 //   outer:                     ; preheader for inner loop
 //     %0:gr8 = phi %m, %o.next
