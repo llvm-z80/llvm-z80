@@ -48,8 +48,8 @@ add_llvm_target(Z80CodeGen
   Z80PreEmitPeephole.cpp
   Z80RegisterBankInfo.cpp
   Z80RegisterInfo.cpp
-  Z80SplitDjnzCounters.cpp
   Z80ShiftRotateChain.cpp
+  Z80SplitDjnzCounters.cpp
   Z80StaticFrameAlloc.cpp
   Z80Subtarget.cpp
   Z80TargetMachine.cpp
