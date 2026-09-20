@@ -30,7 +30,7 @@ using namespace llvm;
 #define DEBUG_TYPE "z80-split-djnz-counters"
 
 static cl::opt<bool> EnableSplitDjnzCounters(
-    "z80-split-djnz-counters",
+    "z80-split-djnz",
     cl::desc("Split DJNZ loop counter live ranges to prefer B in nested/sequential loops"),
     cl::init(true), cl::Hidden);
 
