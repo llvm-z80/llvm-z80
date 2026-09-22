@@ -1,9 +1,12 @@
 // RUN: %clang_cc1 -triple z80  -emit-llvm -o - %s | FileCheck --check-prefix=CHECK-64 %s
 // RUN: %clang_cc1 -triple z80  -mdouble=64 -emit-llvm -o - %s | FileCheck --check-prefix=CHECK-64 %s
 // RUN: %clang_cc1 -triple z80  -mdouble=32 -emit-llvm -o - %s | FileCheck --check-prefix=CHECK-32 %s
+// RUN: %clang_cc1 -triple sm83 -emit-llvm -o - %s | FileCheck --check-prefix=CHECK-64 %s
+// RUN: %clang_cc1 -triple sm83 -mdouble=64 -emit-llvm -o - %s | FileCheck --check-prefix=CHECK-64 %s
+// RUN: %clang_cc1 -triple sm83 -mdouble=32 -emit-llvm -o - %s | FileCheck --check-prefix=CHECK-32 %s
 //
 // By default, `double` and `long double` are standard 64-bit IEEE-754 binary64
-// on Z80. When -mdouble=32 is specified, they become 32-bit IEEE-754
+// on Z80 and SM83. When -mdouble=32 is specified, they become 32-bit IEEE-754
 // binary32 (the same width and bit format as `float`) for compatibility with
 // 32-bit runtimes like z88dk math32.
 
