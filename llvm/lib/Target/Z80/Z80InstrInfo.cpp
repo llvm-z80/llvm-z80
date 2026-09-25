@@ -1582,6 +1582,24 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::ASHR16_VAR: return IsSM83 ? 11 : 10;
     // LD A,B; OR C; JR Z,e; LDIR
     case Z80::LDIR_GUARDED: return 6;
+    // Z80: AND A(1)+SBC HL,rr(2) = 3
+    // SM83: LD A,L(1)+SUB lo(1)+LD L,A(1)+LD A,H(1)+SBC hi(1)+LD H,A(1) = 6
+    case Z80::SUB_HL_rr:
+    // Z80: AND A(1)+ADC HL,rr(2) = 3
+    // SM83: LD A,L(1)+ADD lo(1)+LD L,A(1)+LD A,H(1)+ADC hi(1)+LD H,A(1) = 6
+    case Z80::SADD_HL_rr: return IsSM83 ? 6 : 3;
+    // Z80: AND A(1)+SBC HL,rr(2)+SBC A,A(1)+AND n(2) = 6
+    // SM83: LD A,L(1)+SUB lo(1)+LD L,A(1)+LD A,H(1)+SBC hi(1)+LD H,A(1)
+    //       +SBC A,A(1)+AND n(2) = 9
+    case Z80::SUB_HL_rr_BO: return IsSM83 ? 9 : 6;
+    // Z80: LD A,r(1)+RRCA(1)+ADC HL,rr(2)+SBC A,A(1)+AND n(2) = 7
+    // SM83: LD A,r(1)+RRCA(1)+LD A,L(1)+ADC lo(1)+LD L,A(1)+LD A,H(1)+ADC hi(1)
+    //       +LD H,A(1)+SBC A,A(1)+AND n(2) = 11
+    case Z80::ADC_HL_rr_CIO: return IsSM83 ? 11 : 7;
+    // Z80: LD A,r(1)+RRCA(1)+SBC HL,rr(2)+SBC A,A(1)+AND n(2) = 7
+    // SM83: LD A,r(1)+RRCA(1)+LD A,L(1)+SBC lo(1)+LD L,A(1)+LD A,H(1)+SBC hi(1)
+    //       +LD H,A(1)+SBC A,A(1)+AND n(2) = 11
+    case Z80::SBC_HL_rr_BIO: return IsSM83 ? 11 : 7;
     // Callee-cleanup return.  The sequences are in expandPostRAPseudoImpl;
     // SM83 needs one ADD SP,e per 127 bytes because the displacement is
     // signed 8-bit.
@@ -1698,8 +1716,6 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::CALL_nn:
   case Z80::LD_rr_nn:
   case Z80::LD_SP_nn:
-  case Z80::SUB_HL_rr:  // AND A(1) + SBC HL,rr(2) = 3
-  case Z80::SADD_HL_rr: // AND A(1) + ADC HL,rr(2) = 3
     return 3;
 
   case Z80::CMP16_FLAGS: // LD A,lo(1) + SUB lo(1) + LD A,hi(1) + SBC A,hi(1) =
@@ -1715,9 +1731,6 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::ADD_HL_rr_CO: // ADD HL,rr(1) + SBC A,A(1) + AND n(2) = 4
     return 4;
 
-  case Z80::SUB_HL_rr_BO: // AND A(1) + SBC HL,rr(2) + SBC A,A(1) + AND n(2) = 6
-    return 6;
-
   case Z80::CMP16_ULT: // LD A,lo(1) + SUB lo(1) + LD A,hi(1) + SBC A,hi(1) +
                        // SBC A,A(1) + AND 1(2) = 7
     return 7;
@@ -1725,10 +1738,6 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   // CAPTURE_PV: PUSH AF(1) + POP HL(1) + LD A,L(1) + RRCA(1) + RRCA(1) + AND
   // n(2) = 7
   case Z80::CAPTURE_PV:
-  case Z80::ADC_HL_rr_CIO: // LD A,r(1) + RRCA(1) + ADC HL,rr(2) + SBC A,A(1) +
-                           // AND n(2) = 7
-  case Z80::SBC_HL_rr_BIO: // LD A,r(1) + RRCA(1) + SBC HL,rr(2) + SBC A,A(1) +
-                           // AND n(2) = 7
     return 7;
 
   // Zero test pseudo

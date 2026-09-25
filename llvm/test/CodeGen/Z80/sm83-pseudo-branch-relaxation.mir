@@ -1,0 +1,369 @@
+# RUN: llc -mtriple=z80 -mcpu=generic -mattr=+sm83 -run-pass=branch-relaxation,z80-branch-cleanup %s -o - | FileCheck %s --check-prefix=SM83
+# RUN: llc -mtriple=z80 -mcpu=generic -run-pass=branch-relaxation,z80-branch-cleanup %s -o - | FileCheck %s --check-prefix=Z80
+#
+# Regression test: getInstSizeInBytes must report the correct expansion size
+# on SM83 for pseudos that lack ED-prefixed 16-bit ALU instructions:
+#   SUB_HL_rr:     6 bytes on SM83 (vs 3 on Z80)
+#   SADD_HL_rr:    6 bytes on SM83 (vs 3 on Z80)
+#   SUB_HL_rr_BO:  9 bytes on SM83 (vs 6 on Z80)
+#   ADC_HL_rr_CIO: 11 bytes on SM83 (vs 7 on Z80)
+#   SBC_HL_rr_BIO: 11 bytes on SM83 (vs 7 on Z80)
+#
+# If a pseudo is undersized on SM83, BranchRelaxation fails to relax JR to JP.
+# Under Z80, these same cases remain <= 127 bytes and keep JR (positive control).
+#
+# C pattern:
+#
+#   void test(int cond, unsigned short a, unsigned short b) {
+#       if (cond) {
+#           // Block containing ~120 bytes of code followed by 16-bit ALU op:
+#           //   ... 120 bytes ...
+#           //   unsigned short diff = a - b; // 16-bit ALU pseudo
+#       }
+#       // Branch across the block:
+#       // On SM83, the block expands to >127 bytes, exceeding the signed
+#       // 8-bit displacement of relative JR (-128..+127).
+#       // When getInstSizeInBytes reports Z80 sizes (3-7 bytes instead of
+#       // 6-11 bytes), BranchRelaxation underestimates distance as <=127 bytes
+#       // and fails to relax JR to JP, causing branch offset overflow.
+#   }
+
+--- |
+  target triple = "z80"
+
+  define void @sm83_sub_hl_rr_bo_boundary() { ret void }
+  define void @sm83_adc_hl_rr_cio_boundary() { ret void }
+  define void @sm83_sbc_hl_rr_bio_boundary() { ret void }
+  define void @sm83_sub_hl_rr_boundary() { ret void }
+  define void @sm83_sadd_hl_rr_boundary() { ret void }
+...
+---
+name: sm83_sub_hl_rr_bo_boundary
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $bc, $de, $hl, $flags
+    JR_Z_e %bb.2, implicit $flags
+
+  bb.1:
+    liveins: $bc, $de, $hl
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    SUB_HL_rr_BO $de, implicit-def $hl, implicit-def $a, implicit-def $flags, implicit $hl
+
+  bb.2:
+    liveins: $bc, $de, $hl
+    RET
+...
+---
+name: sm83_adc_hl_rr_cio_boundary
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $a, $bc, $de, $hl, $flags
+    JR_Z_e %bb.2, implicit $flags
+
+  bb.1:
+    liveins: $a, $bc, $de, $hl
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    ADC_HL_rr_CIO $de, $a, implicit-def $hl, implicit-def $a, implicit-def $flags, implicit $hl
+
+  bb.2:
+    liveins: $bc, $de, $hl
+    RET
+...
+---
+name: sm83_sbc_hl_rr_bio_boundary
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $a, $bc, $de, $hl, $flags
+    JR_Z_e %bb.2, implicit $flags
+
+  bb.1:
+    liveins: $a, $bc, $de, $hl
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    SBC_HL_rr_BIO $de, $a, implicit-def $hl, implicit-def $a, implicit-def $flags, implicit $hl
+
+  bb.2:
+    liveins: $bc, $de, $hl
+    RET
+...
+---
+name: sm83_sub_hl_rr_boundary
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $bc, $de, $hl, $flags
+    JR_Z_e %bb.2, implicit $flags
+
+  bb.1:
+    liveins: $bc, $de, $hl
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    SUB_HL_rr $de, implicit-def $hl, implicit-def $a, implicit-def $flags, implicit $hl
+
+  bb.2:
+    liveins: $bc, $de, $hl
+    RET
+...
+---
+name: sm83_sadd_hl_rr_boundary
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $bc, $de, $hl, $flags
+    JR_Z_e %bb.2, implicit $flags
+
+  bb.1:
+    liveins: $bc, $de, $hl
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    SADD_HL_rr $de, implicit-def $hl, implicit-def $a, implicit-def $flags, implicit $hl
+
+  bb.2:
+    liveins: $bc, $de, $hl
+    RET
+...
+
+# 40 * 3 B = 120 B padding.
+# On SM83, SUB_HL_rr_BO is 9 B -> total distance 129 B > 127 B -> must relax to JP_Z_nn.
+# On Z80, SUB_HL_rr_BO is 6 B -> total distance 126 B <= 127 B -> must stay JR_Z_e.
+# SM83-LABEL: name: sm83_sub_hl_rr_bo_boundary
+# SM83:       bb.0:
+# SM83:         JP_Z_nn %bb.2
+# Z80-LABEL:  name: sm83_sub_hl_rr_bo_boundary
+# Z80:        bb.0:
+# Z80:          JR_Z_e %bb.2
+
+# 39 * 3 B = 117 B padding.
+# On SM83, ADC_HL_rr_CIO is 11 B -> total distance 128 B > 127 B -> must relax to JP_Z_nn.
+# On Z80, ADC_HL_rr_CIO is 7 B -> total distance 124 B <= 127 B -> must stay JR_Z_e.
+# SM83-LABEL: name: sm83_adc_hl_rr_cio_boundary
+# SM83:       bb.0:
+# SM83:         JP_Z_nn %bb.2
+# Z80-LABEL:  name: sm83_adc_hl_rr_cio_boundary
+# Z80:        bb.0:
+# Z80:          JR_Z_e %bb.2
+
+# 39 * 3 B = 117 B padding.
+# On SM83, SBC_HL_rr_BIO is 11 B -> total distance 128 B > 127 B -> must relax to JP_Z_nn.
+# On Z80, SBC_HL_rr_BIO is 7 B -> total distance 124 B <= 127 B -> must stay JR_Z_e.
+# SM83-LABEL: name: sm83_sbc_hl_rr_bio_boundary
+# SM83:       bb.0:
+# SM83:         JP_Z_nn %bb.2
+# Z80-LABEL:  name: sm83_sbc_hl_rr_bio_boundary
+# Z80:        bb.0:
+# Z80:          JR_Z_e %bb.2
+
+# 41 * 3 B = 123 B padding.
+# On SM83, SUB_HL_rr is 6 B -> total distance 129 B > 127 B -> must relax to JP_Z_nn.
+# On Z80, SUB_HL_rr is 3 B -> total distance 126 B <= 127 B -> must stay JR_Z_e.
+# SM83-LABEL: name: sm83_sub_hl_rr_boundary
+# SM83:       bb.0:
+# SM83:         JP_Z_nn %bb.2
+# Z80-LABEL:  name: sm83_sub_hl_rr_boundary
+# Z80:        bb.0:
+# Z80:          JR_Z_e %bb.2
+
+# 41 * 3 B = 123 B padding.
+# On SM83, SADD_HL_rr is 6 B -> total distance 129 B > 127 B -> must relax to JP_Z_nn.
+# On Z80, SADD_HL_rr is 3 B -> total distance 126 B <= 127 B -> must stay JR_Z_e.
+# SM83-LABEL: name: sm83_sadd_hl_rr_boundary
+# SM83:       bb.0:
+# SM83:         JP_Z_nn %bb.2
+# Z80-LABEL:  name: sm83_sadd_hl_rr_boundary
+# Z80:        bb.0:
+# Z80:          JR_Z_e %bb.2
