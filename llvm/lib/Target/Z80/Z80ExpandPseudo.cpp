@@ -28,6 +28,10 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 
+#include "llvm/ADT/Twine.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
+
 #define DEBUG_TYPE "z80-expand-pseudo"
 
 STATISTIC(NumVarShifts, "Number of expandVarShift pseudos expanded");
@@ -43,6 +47,30 @@ STATISTIC(NumSDivMod16, "Number of expandSDivMod16 pseudos expanded");
 using namespace llvm;
 
 namespace {
+
+static cl::opt<bool> VerifyInlineRuntimeSize(
+    "z80-verify-inline-runtime-size", cl::Hidden, cl::init(false),
+    cl::desc("Assert selected Z80 pseudos' getInstSizeInBytes entries match "
+             "the real byte count of their expansions"));
+
+static bool isInlineRuntimeSizedPseudo(unsigned Opcode) {
+  switch (Opcode) {
+  case Z80::LDIR_GUARDED:
+  case Z80::LDDR_GUARDED:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static unsigned sumFunctionSizeBytes(const MachineFunction &MF,
+                                     const Z80InstrInfo &TII) {
+  unsigned Total = 0;
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB)
+      Total += TII.getInstSizeInBytes(MI);
+  return Total;
+}
 
 class Z80ExpandPseudo : public MachineFunctionPass {
 public:
@@ -63,8 +91,8 @@ private:
                       const Z80InstrInfo &TII, bool IsDiv);
   bool expandSDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
                       const Z80InstrInfo &TII, bool IsDiv);
-  bool expandGuardedBlockMove(MachineBasicBlock &MBB, MachineInstr &MI,
-                              const Z80InstrInfo &TII);
+  bool expandLdirGuarded(MachineBasicBlock &MBB, MachineInstr &MI,
+                         const Z80InstrInfo &TII, unsigned BlockOpc);
   bool expandSatArith8(MachineBasicBlock &MBB, MachineInstr &MI,
                        const Z80InstrInfo &TII);
   bool expandMul16(MachineBasicBlock &MBB, MachineInstr &MI,
@@ -89,6 +117,16 @@ bool Z80ExpandPseudo::runOnMachineFunction(MachineFunction &MF) {
     for (auto MI = MBB.begin(), ME = MBB.end(); MI != ME;) {
       MachineInstr &Inst = *MI;
       ++MI; // Advance before potential erase
+
+      unsigned VerifyOpc = 0;
+      unsigned VerifyReported = 0;
+      unsigned VerifyBefore = 0;
+      if (VerifyInlineRuntimeSize &&
+          isInlineRuntimeSizedPseudo(Inst.getOpcode())) {
+        VerifyOpc = Inst.getOpcode();
+        VerifyReported = TII.getInstSizeInBytes(Inst);
+        VerifyBefore = sumFunctionSizeBytes(MF, TII);
+      }
 
       switch (Inst.getOpcode()) {
       case Z80::SHL8_VAR:
@@ -150,11 +188,28 @@ bool Z80ExpandPseudo::runOnMachineFunction(MachineFunction &MF) {
         MI = MBB.end();
         break;
       case Z80::LDIR_GUARDED:
-        Modified |= expandGuardedBlockMove(MBB, Inst, TII);
+        Modified |= expandLdirGuarded(MBB, Inst, TII, Z80::LDIR);
+        MI = MBB.end();
+        break;
+      case Z80::LDDR_GUARDED:
+        Modified |= expandLdirGuarded(MBB, Inst, TII, Z80::LDDR);
         MI = MBB.end();
         break;
       default:
         break;
+      }
+
+      if (VerifyOpc) {
+        unsigned VerifyAfter = sumFunctionSizeBytes(MF, TII);
+        if (VerifyAfter != VerifyBefore) {
+          int Actual =
+              (int)VerifyReported + ((int)VerifyAfter - (int)VerifyBefore);
+          report_fatal_error(
+              Twine("Z80 pseudo ") + TII.getName(VerifyOpc) +
+              " getInstSizeInBytes reports " + Twine(VerifyReported) +
+              " bytes but its expansion is " + Twine(Actual) +
+              " bytes; update Z80InstrInfo::getInstSizeInBytes");
+        }
       }
     }
   }
@@ -596,34 +651,49 @@ bool Z80ExpandPseudo::expandSDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
   return true;
 }
 
-bool Z80ExpandPseudo::expandGuardedBlockMove(MachineBasicBlock &MBB,
-                                             MachineInstr &MI,
-                                             const Z80InstrInfo &TII) {
-  // LDIR_GUARDED:  LD A,B; OR C; JR Z,.done; LDIR; .done:
+bool Z80ExpandPseudo::expandLdirGuarded(MachineBasicBlock &MBB,
+                                        MachineInstr &MI,
+                                        const Z80InstrInfo &TII,
+                                        unsigned BlockOpc) {
+  // Expand LDIR_GUARDED / LDDR_GUARDED into a runtime BC==0 guard
+  // around the block-move.
   //
-  // LDIR decrements BC before testing it for zero, so a zero length would copy
-  // 65536 bytes.  The guard costs four bytes and is only emitted for lengths
-  // the compiler could not prove non-zero.
+  //   HeadMBB:                 (was the original MBB up to MI)
+  //     ...
+  //     LD A, B
+  //     OR C                   ; sets Z if BC == 0
+  //     JR Z, TailMBB
+  //   BodyMBB:
+  //     LDIR (or LDDR)         ; only runs when BC > 0
+  //   TailMBB:                  (everything that was after MI)
+  //     ...
+  //
+  // Skipping the block instruction when BC==0 prevents the 65 536-
+  // iteration runaway that would otherwise trash 64 KB of RAM.
   MachineFunction *MF = MBB.getParent();
   DebugLoc DL = MI.getDebugLoc();
 
+  MachineBasicBlock *BodyMBB = MF->CreateMachineBasicBlock();
   MachineBasicBlock *TailMBB = MF->CreateMachineBasicBlock();
-  MF->insert(std::next(MBB.getIterator()), TailMBB);
+
+  MachineFunction::iterator InsertPos = std::next(MBB.getIterator());
+  MF->insert(InsertPos, BodyMBB);
+  MF->insert(InsertPos, TailMBB);
+
   TailMBB->splice(TailMBB->begin(), &MBB,
                   std::next(MachineBasicBlock::iterator(MI)), MBB.end());
   TailMBB->transferSuccessorsAndUpdatePHIs(&MBB);
 
-  MachineBasicBlock *MoveMBB = MF->CreateMachineBasicBlock();
-  MF->insert(TailMBB->getIterator(), MoveMBB);
-
+  // Head: LD A,B; OR C; JR Z, TailMBB.
   Z80::buildLD8(&MBB, DL, TII, Z80::A, Z80::B);
   Z80::buildAlu8(&MBB, DL, TII, Z80::OR_r, Z80::C);
   BuildMI(&MBB, DL, TII.get(Z80::JR_Z_e)).addMBB(TailMBB);
+  MBB.addSuccessor(BodyMBB);
   MBB.addSuccessor(TailMBB);
-  MBB.addSuccessor(MoveMBB);
 
-  BuildMI(MoveMBB, DL, TII.get(Z80::LDIR));
-  MoveMBB->addSuccessor(TailMBB);
+  // Body: the actual block-move.
+  BuildMI(BodyMBB, DL, TII.get(BlockOpc));
+  BodyMBB->addSuccessor(TailMBB);
 
   MI.eraseFromParent();
   ++NumBlockMoves;
@@ -1218,7 +1288,6 @@ bool Z80ExpandPseudo::expandSDivMod16(MachineBasicBlock &MBB, MachineInstr &MI,
   ++NumSDivMod16;
   return true;
 }
-// clang-format on
 
 } // namespace
 
