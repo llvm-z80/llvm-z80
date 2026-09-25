@@ -210,9 +210,16 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Z80's division runtime returns both quotient and remainder in one call:
   //   Z80:  __udivhi3: HL÷DE → DE=quot, HL=rem
   //   SM83: __udivhi3: DE÷BC → BC=quot, HL=rem
-  // Custom-lower i16 G_UDIVREM/G_SDIVREM to a single runtime call.
+  // Custom-lower G_UDIVREM/G_SDIVREM to a single runtime call.
   // i8 and others fall back to separate div+rem.
-  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM}).customFor({S16}).lower();
+  //
+  // i16 is selected directly in ISel (register-only ABI). i32 is routed by
+  // legalizeCustom to the fused __udivmodsi4 / __divmodsi4 (quotient
+  // returned, remainder via a caller pointer) so an adjacent x/y, x%y pair
+  // costs one 32-bit division instead of two.
+  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM})
+      .customFor({S16, S32})
+      .lower();
 
   // Comparisons
   // G_ICMP produces a boolean result - we widen it to S8 since Z80 has
@@ -822,9 +829,51 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   }
 
   case TargetOpcode::G_UDIVREM:
-  case TargetOpcode::G_SDIVREM:
-    // Pass through to ISel — the runtime call returns both quot and rem.
+  case TargetOpcode::G_SDIVREM: {
+    Register QuotReg = MI.getOperand(0).getReg();
+    if (MRI.getType(QuotReg).getSizeInBits() != 32)
+      // i16: the register-only fused divrem is selected directly in ISel.
+      return true;
+
+    // i32: fuse into the compiler-rt __udivmodsi4 / __divmodsi4 ABI. One
+    // runtime division returns the quotient (in registers) and writes the
+    // remainder through a caller-provided 4-byte stack buffer, instead of
+    // the two separate __[u]divsi3 + __[u]modsi3 calls the split-and-lower
+    // path emits (each re-running the full 32-bit division core).
+    bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
+    const char *FuncName = IsSigned ? "__divmodsi4" : "__udivmodsi4";
+    Register RemReg = MI.getOperand(1).getReg();
+    Register LHSReg = MI.getOperand(2).getReg();
+    Register RHSReg = MI.getOperand(3).getReg();
+
+    MachineFunction &MF = MIRBuilder.getMF();
+    LLVMContext &Ctx = MF.getFunction().getContext();
+    Type *I32Ty = Type::getInt32Ty(Ctx);
+    Type *PtrTy = PointerType::getUnqual(Ctx);
+
+    // Stack slot that receives the remainder. Byte-aligned: SP is at an
+    // arbitrary address on function entry, so a wider alignment can't be
+    // honored (Z80FrameLowering rejects it), and the callee stores the
+    // remainder one byte at a time regardless.
+    int FI = MF.getFrameInfo().CreateStackObject(4, Align(1), false);
+    auto RemPtr = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
+
+    // quotient = __[u]divmodsi4(dividend, divisor, &rem_slot)
+    auto Status = Helper.createLibcall(
+        FuncName, {QuotReg, I32Ty, 0},
+        {{LHSReg, I32Ty, 0}, {RHSReg, I32Ty, 1}, {RemPtr.getReg(0), PtrTy, 2}},
+        CallingConv::C, LocObserver, &MI);
+    if (Status != LegalizerHelper::Legalized)
+      return false;
+
+    // Load the remainder the callee stored into the slot.
+    auto *MMO = MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
+                                        MachineMemOperand::MOLoad, 4, Align(1));
+    MIRBuilder.buildLoad(RemReg, RemPtr, *MMO);
+
+    MI.eraseFromParent();
     return true;
+  }
 
   case TargetOpcode::G_VASTART: {
     // Store the address of the first vararg into the va_list pointer.
