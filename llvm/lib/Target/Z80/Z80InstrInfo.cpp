@@ -104,6 +104,33 @@ Z80InstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
   return std::nullopt;
 }
 
+/// Emit IMPLICIT_DEF for any dead half of a register pair before a 16-bit PUSH.
+///
+/// When a sequence saves a 16-bit register pair (such as HL) across an operation,
+/// PUSH reads both 8-bit sub-registers. If one half is live and the other is dead
+/// or undef at the insertion point, the PUSH will read an undefined register,
+/// causing MachineVerifier failures under -verify-machineinstrs. Emitting an
+/// IMPLICIT_DEF for the dead half marks it as defined with a don't-care value so
+/// the verifier accepts the subsequent PUSH.
+///
+/// Example:
+///   In `COPY $e = $ixh` with `$h` live and `$l` undef:
+///     Pre-fix:  PUSH_HL reads undefined $l -> MachineVerifier error.
+///     Post-fix: $l = IMPLICIT_DEF; PUSH_HL -> valid.
+static void emitImplicitDefForDeadHalves(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         const DebugLoc &DL,
+                                         const TargetInstrInfo &TII,
+                                         const TargetRegisterInfo *TRI,
+                                         Register RegLo, Register RegHi) {
+  // If the low half has no live value reaching here, mark it defined (don't-care).
+  if (MBB.computeRegisterLiveness(TRI, RegLo, I) == MachineBasicBlock::LQR_Dead)
+    BuildMI(MBB, I, DL, TII.get(TargetOpcode::IMPLICIT_DEF), RegLo);
+  // If the high half has no live value reaching here, mark it defined (don't-care).
+  if (MBB.computeRegisterLiveness(TRI, RegHi, I) == MachineBasicBlock::LQR_Dead)
+    BuildMI(MBB, I, DL, TII.get(TargetOpcode::IMPLICIT_DEF), RegHi);
+}
+
 void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                MachineBasicBlock::iterator I,
                                const DebugLoc &DL, Register DestReg,
@@ -240,20 +267,31 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
         BuildMI(MBB, I, DL, get(Z80::POP_AF));
       return;
     }
-    // SP → BC or DE: Z80 has no ADD BC,SP / ADD DE,SP, so route through HL.
-    // PUSH HL; LD HL,N; ADD HL,SP; LD r,H; LD r,L; POP HL
+    // SP -> BC or DE: Z80 has no ADD BC,SP / ADD DE,SP, so route through HL.
+    // [PUSH HL;] LD HL,N; ADD HL,SP; LD r,H; LD r,L [;POP HL]
     // N compensates for PUSH HL (and PUSH AF if FLAGS is live).
+    // Skip PUSH_HL/POP_HL when HL is dead — reading undef HL would fail
+    // -verify-machineinstrs. When HL is partially live, IMPLICIT_DEF the
+    // dead half so PUSH_HL does not read an undefined register.
     if (DestReg == Z80::BC || DestReg == Z80::DE) {
       Register DstHi = (DestReg == Z80::BC) ? Z80::B : Z80::D;
       Register DstLo = (DestReg == Z80::BC) ? Z80::C : Z80::E;
+      const TargetRegisterInfo *TRI = STI->getRegisterInfo();
+      auto HLLQ = MBB.computeRegisterLiveness(TRI, Z80::HL, I);
+      bool SaveHL = (HLLQ != MachineBasicBlock::LQR_Dead);
       if (FlagsLive)
         BuildMI(MBB, I, DL, get(Z80::PUSH_AF));
-      Z80::emitHLSavePush(MBB, I, DL, *this);
-      Z80::buildLD16n(MBB, I, DL, *this, Z80::HL).addImm(SPComp + 2);
+      if (SaveHL) {
+        emitImplicitDefForDeadHalves(MBB, I, DL, *this, TRI, Z80::L, Z80::H);
+        Z80::emitHLSavePush(MBB, I, DL, *this);
+      }
+      Z80::buildLD16n(MBB, I, DL, *this, Z80::HL)
+          .addImm(SPComp + (SaveHL ? 2 : 0));
       BuildMI(MBB, I, DL, get(Z80::ADD_HL_SP));
       Z80::buildLD8(MBB, I, DL, *this, DstHi, Z80::H);
       Z80::buildLD8(MBB, I, DL, *this, DstLo, Z80::L);
-      BuildMI(MBB, I, DL, get(Z80::POP_HL));
+      if (SaveHL)
+        BuildMI(MBB, I, DL, get(Z80::POP_HL));
       if (FlagsLive)
         BuildMI(MBB, I, DL, get(Z80::POP_AF));
       return;
@@ -294,6 +332,11 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
           BuildMI(MBB, I, DL, get(Z80::POP_DE));
         }
       } else {
+        // IMPLICIT_DEF any dead half of HL so the PUSH_HL save reads a
+        // defined (don't-care) register when only one half is live at the
+        // COPY point.
+        const TargetRegisterInfo *TRI = STI->getRegisterInfo();
+        emitImplicitDefForDeadHalves(MBB, I, DL, *this, TRI, Z80::L, Z80::H);
         Z80::emitHLSavePush(MBB, I, DL, *this);
         BuildMI(MBB, I, DL, get(PushOp));
         BuildMI(MBB, I, DL, get(Z80::POP_HL));
@@ -320,6 +363,8 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       if (SrcReg == Z80::H || SrcReg == Z80::L) {
         BuildMI(MBB, I, DL, get(Z80::PUSH_AF));
         Z80::buildLD8(MBB, I, DL, *this, Z80::A, SrcReg);
+        const TargetRegisterInfo *TRI = STI->getRegisterInfo();
+        emitImplicitDefForDeadHalves(MBB, I, DL, *this, TRI, Z80::L, Z80::H);
         Z80::emitHLSavePush(MBB, I, DL, *this);
         BuildMI(MBB, I, DL, get(PushIR));
         BuildMI(MBB, I, DL, get(Z80::POP_HL));
@@ -331,6 +376,11 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
         return;
       }
 
+      // IMPLICIT_DEF any dead half of HL so the PUSH_HL save reads a
+      // defined (don't-care) register when only one half is live at the
+      // COPY point.
+      const TargetRegisterInfo *TRI = STI->getRegisterInfo();
+      emitImplicitDefForDeadHalves(MBB, I, DL, *this, TRI, Z80::L, Z80::H);
       Z80::emitHLSavePush(MBB, I, DL, *this);
       BuildMI(MBB, I, DL, get(PushIR));
       BuildMI(MBB, I, DL, get(Z80::POP_HL));
