@@ -4643,6 +4643,25 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return true;
     }
 
+    case Intrinsic::z80_im2: {
+      // void @llvm.z80.im2()
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::IM_2));
+      MI.eraseFromParent();
+      return true;
+    }
+
+    case Intrinsic::z80_set_i: {
+      // void @llvm.z80.set_i(i8 val) -> LD I,A (the value must be in A)
+      Register ValueReg = MI.getOperand(1).getReg();
+      if (!RBI.constrainGenericRegister(ValueReg, Z80::GR8RegClass, MRI))
+        return false;
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
+          .addReg(ValueReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_I_A));
+      MI.eraseFromParent();
+      return true;
+    }
+
     default:
       return false;
     }

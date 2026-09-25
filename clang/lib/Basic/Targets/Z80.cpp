@@ -12,10 +12,30 @@
 
 #include "Z80.h"
 #include "clang/Basic/MacroBuilder.h"
+#include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/STLExtras.h"
 
+using namespace clang;
 using namespace clang::targets;
+
+static constexpr int NumBuiltins =
+    clang::Z80::LastTSBuiltin - Builtin::FirstTSBuiltin;
+
+#define GET_BUILTIN_STR_TABLE
+#include "clang/Basic/BuiltinsZ80.inc"
+#undef GET_BUILTIN_STR_TABLE
+
+static constexpr Builtin::Info BuiltinInfos[] = {
+#define GET_BUILTIN_INFOS
+#include "clang/Basic/BuiltinsZ80.inc"
+#undef GET_BUILTIN_INFOS
+};
+static_assert(std::size(BuiltinInfos) == NumBuiltins);
+
+SmallVector<Builtin::InfosShard> Z80TargetInfo::getTargetBuiltins() const {
+  return {{&BuiltinStrings, BuiltinInfos}};
+}
 
 Z80TargetInfo::Z80TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
     : TargetInfo(Triple) {
@@ -151,4 +171,22 @@ bool Z80TargetInfo::isValidFeatureName(StringRef Feature) const {
       "static-frame", "inline-i16-runtime",
   };
   return llvm::is_contained(Known, Feature);
+}
+
+bool Z80TargetInfo::initFeatureMap(
+    llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags, StringRef CPU,
+    const std::vector<std::string> &FeaturesVec) const {
+  bool Ok = TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
+  // The base Z80 ISA is implied for the z80 triple but not for sm83 (Game Boy),
+  // which has no interrupt modes and no I register. This gates the z80-only
+  // builtins __builtin_z80_im2 / __builtin_z80_set_i (Features = "z80" in
+  // BuiltinsZ80.td) so Sema rejects them on sm83 with a clean diagnostic
+  // instead of a backend cannot-select.
+  if (!getTriple().isSM83())
+    Features["z80"] = true;
+  return Ok;
+}
+
+bool Z80TargetInfo::hasFeature(StringRef Feature) const {
+  return Feature == "z80" ? !getTriple().isSM83() : false;
 }

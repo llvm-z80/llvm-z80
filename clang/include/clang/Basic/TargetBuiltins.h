@@ -143,6 +143,17 @@ namespace clang {
   };
   }
 
+  /// Z80 builtins
+  namespace Z80 {
+  enum {
+    LastTIBuiltin = clang::Builtin::FirstTSBuiltin - 1,
+#define GET_BUILTIN_ENUMERATORS
+#include "clang/Basic/BuiltinsZ80.inc"
+#undef GET_BUILTIN_ENUMERATORS
+    LastTSBuiltin
+  };
+  }
+
   /// DirectX builtins
   namespace DirectX {
   enum {
