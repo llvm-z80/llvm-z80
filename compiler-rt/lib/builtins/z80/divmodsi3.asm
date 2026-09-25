@@ -5,6 +5,9 @@
 	.globl ___divsi3
 	.globl ___umodsi3
 	.globl ___modsi3
+	.globl ___udivmodsi4
+	.globl __neg32_hlde
+	.globl __neg32_divisor
 
 ;===------------------------------------------------------------------------===;
 ; __udiv32_core - Core 32-bit unsigned division subroutine
@@ -201,6 +204,63 @@ ___umodsi3:
 	exx
 	pop	de
 	pop	hl
+	pop	ix
+	ret
+
+;===------------------------------------------------------------------------===;
+; ___udivmodsi4 - Unsigned 32-bit fused divide + modulo (compiler-rt ABI)
+;
+; One __udiv32_core pass yields BOTH results, so the quotient and remainder
+; cost a single division instead of the two separate __udivsi3 + __umodsi3
+; calls the compiler used to emit for an adjacent x/y, x%y pair.
+;
+; Input:  HLDE = dividend
+;         stack IX+4..7 = divisor
+;         stack IX+8..9 = pointer to a 4-byte remainder buffer (caller-owned)
+; Output: HLDE = quotient (return value)
+;         *(IX+8..9) = remainder (4 bytes, little-endian)
+;===------------------------------------------------------------------------===;
+___udivmodsi4:
+	push	ix
+	ld	ix, #0
+	add	ix, sp
+	exx
+	ld	hl, #0
+	ld	de, #0
+	exx
+	ld	b, #32
+	call	__udiv32_core		; HLDE = quotient, shadow HL':DE' = remainder
+
+	; Stash the quotient so HLDE is free to assemble the remainder.
+	push	hl
+	push	de
+
+	; Move the remainder out of the shadow registers into main HLDE.
+	exx
+	push	hl			; remainder high word (shadow HL')
+	push	de			; remainder low  word (shadow DE')
+	exx
+	pop	de			; DE = remainder low
+	pop	hl			; HL = remainder high  -> HLDE = remainder
+
+	; Store the 4-byte remainder through the caller's pointer (IX+8..9).
+	ld	c, 8(ix)
+	ld	b, 9(ix)		; BC = &remainder
+	ld	a, e
+	ld	(bc), a
+	inc	bc
+	ld	a, d
+	ld	(bc), a
+	inc	bc
+	ld	a, l
+	ld	(bc), a
+	inc	bc
+	ld	a, h
+	ld	(bc), a
+
+	; Restore the quotient as the return value.
+	pop	de
+	pop	hl			; HLDE = quotient
 	pop	ix
 	ret
 
