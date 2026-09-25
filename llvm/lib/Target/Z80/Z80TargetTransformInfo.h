@@ -6,10 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines a TargetTransformInfo::Concept conforming object specific
+// This file declares a TargetTransformInfo::Concept conforming object specific
 // to the Z80 target machine. It uses the target's detailed information to
 // provide more precise answers to certain TTI queries, while letting the
 // target-independent and default TTI implementations handle the rest.
+//
+// The cost-model bodies live in Z80TargetTransformInfo.cpp (matching the
+// in-tree convention for targets with a non-trivial cost model); this header
+// only declares the overridden hooks.
 //
 //===----------------------------------------------------------------------===//
 
@@ -38,42 +42,52 @@ public:
       : BaseT(TM, F.getParent()->getDataLayout()), ST(TM->getSubtargetImpl(F)),
         TLI(ST->getTargetLowering()) {}
 
-  // All div, rem, and divrem ops are libcalls, so any possible combination
-  // exists.
-  bool hasDivRemOp(Type *DataType, bool IsSigned) const override {
-    return true;
-  }
+  /// Returns true if div/rem operations are supported (all lowered to libcalls).
+  bool hasDivRemOp(Type *DataType, bool IsSigned) const override;
 
+  /// Prioritizes minimizing register pressure over instruction count in LSR.
   bool isLSRCostLess(const TargetTransformInfo::LSRCost &C1,
-                     const TargetTransformInfo::LSRCost &C2) const override {
-    // Prefer instruction count to the other metrics.
-    return std::tie(C1.Insns, C1.NumRegs, C1.AddRecCost, C1.NumIVMuls,
-                    C1.NumBaseAdds, C1.ScaleCost, C1.ImmCost, C1.SetupCost) <
-           std::tie(C2.Insns, C2.NumRegs, C2.AddRecCost, C2.NumIVMuls,
-                    C2.NumBaseAdds, C2.ScaleCost, C2.ImmCost, C2.SetupCost);
-  }
+                     const TargetTransformInfo::LSRCost &C2) const override;
 
-  BranchProbability getPredictableBranchThreshold() const override {
-    return BranchProbability(0, 1);
-  }
+  /// Returns branch probability threshold; Z80 has no branch predictor.
+  BranchProbability getPredictableBranchThreshold() const override;
 
-  bool isValidAddrSpaceCast(unsigned FromAS, unsigned ToAS) const override {
-    return true;
-  }
+  /// Returns true as Z80 uses a single flat 16-bit address space.
+  bool isValidAddrSpaceCast(unsigned FromAS, unsigned ToAS) const override;
 
-  // Z80 has only 3 GP register pairs (BC, DE, HL). Inlining large functions
-  // causes massive register spilling that dwarfs the benefit.
-  // Allow inlining for:
-  //   - functions marked inlinehint (e.g. Rust iterators)
-  //   - small functions (≤ 10 instructions) where call overhead dominates
+  /// Reports available 16-bit register pairs (BC, DE, HL) to prevent excess IV spills.
+  unsigned getNumberOfRegisters(unsigned ClassID) const override;
+
+  /// Reports native 8-bit scalar register width; vector registers are unsupported.
+  TypeSize
+  getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const override;
+
+  /// Restricts function inlining to small functions, inline hints, or single callers.
   bool areInlineCompatible(const Function *Caller,
-                           const Function *Callee) const override {
-    if (Callee->hasFnAttribute(Attribute::InlineHint))
-      return true;
-    if (Callee->getInstructionCount() <= 10)
-      return true;
-    return false;
-  }
+                           const Function *Callee) const override;
+
+  /// Returns false because Z80 has no SIMD or vector addressing support.
+  bool prefersVectorizedAddressing() const override;
+
+  /// Returns true only for |Imm| <= 3, where INC/DEC chains beat materialize-and-add.
+  bool isLegalAddImmediate(int64_t Imm) const override;
+
+  /// Costs arithmetic operations: Mul is a libcall, shifts scale with count and width.
+  InstructionCost getArithmeticInstrCost(
+      unsigned Opcode, Type *Ty, TargetTransformInfo::TargetCostKind CostKind,
+      TargetTransformInfo::OperandValueInfo Op1Info = {
+          TargetTransformInfo::OK_AnyValue, TargetTransformInfo::OP_None},
+      TargetTransformInfo::OperandValueInfo Op2Info = {
+          TargetTransformInfo::OK_AnyValue, TargetTransformInfo::OP_None},
+      ArrayRef<const Value *> Args = {},
+      const Instruction *CxtI = nullptr) const override;
+
+  /// Costs integer casts: truncation is free, extension scales monotonically.
+  InstructionCost
+  getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
+                   TargetTransformInfo::CastContextHint CCH,
+                   TargetTransformInfo::TargetCostKind CostKind,
+                   const Instruction *I = nullptr) const override;
 };
 
 } // end namespace llvm
