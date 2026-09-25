@@ -47,10 +47,11 @@ using namespace llvm;
 // `-mllvm -z80-float-sdcccall0`).
 static cl::opt<bool> UseSDCCCall0ForF32Libcalls(
     "z80-float-sdcccall0", cl::init(false), cl::Hidden,
-    cl::desc("Emit the f32 arithmetic libcalls (__addsf3/__subsf3/__mulsf3/"
-             "__divsf3, and their _fast nnan/ninf/nsz variants) with "
-             "CallingConv::Z80_SDCCCall0 instead of the default C ABI, so "
-             "they alias an sdcccall(0) float runtime (e.g. z88dk math32) "
+    cl::desc("Emit the f32 arithmetic and compare libcalls "
+             "(__addsf3/__subsf3/__mulsf3/__divsf3, __cmpsf2/__gtsf2/"
+             "__gesf2/__unordsf2, and their _fast nnan/ninf/nsz variants) "
+             "with CallingConv::Z80_SDCCCall0 instead of the default C ABI, "
+             "so they alias an sdcccall(0) float runtime (e.g. z88dk math32) "
              "with zero glue code. Only safe when linking against such a "
              "runtime, NOT the ELF path's own compiler-rt float runtime, "
              "which expects the default C ABI (sdcccall(1))."));
@@ -1200,9 +1201,12 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
         return true;
       }
       Register UnordResult = MRI.createGenericVirtualRegister(S16);
+      CallingConv::ID LibcallCC = UseSDCCCall0ForF32Libcalls
+                                       ? CallingConv::Z80_SDCCCall0
+                                       : CallingConv::C;
       auto Status = Helper.createLibcall("__unordsf2", {UnordResult, I16Ty, 0},
                                          {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                         CallingConv::C, LocObserver, &MI);
+                                         LibcallCC, LocObserver, &MI);
       if (Status != LegalizerHelper::Legalized)
         return false;
       auto Zero = MIRBuilder.buildConstant(S16, 0);
@@ -1256,10 +1260,13 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       return false;
     }
 
+    CallingConv::ID LibcallCC = UseSDCCCall0ForF32Libcalls
+                                     ? CallingConv::Z80_SDCCCall0
+                                     : CallingConv::C;
     Register CmpResult = MRI.createGenericVirtualRegister(S16);
     auto Status = Helper.createLibcall(LibcallName, {CmpResult, I16Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                       CallingConv::C, LocObserver, &MI);
+                                       LibcallCC, LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
       return false;
 
@@ -1272,7 +1279,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       Register UnordResult = MRI.createGenericVirtualRegister(S16);
       auto UStatus = Helper.createLibcall("__unordsf2", {UnordResult, I16Ty, 0},
                                           {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                          CallingConv::C, LocObserver, &MI);
+                                          LibcallCC, LocObserver, &MI);
       if (UStatus != LegalizerHelper::Legalized)
         return false;
 
