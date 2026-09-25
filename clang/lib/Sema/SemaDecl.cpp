@@ -3732,6 +3732,25 @@ static void adjustDeclContextForDeclaratorDecl(DeclaratorDecl *NewD,
     FixSemaDC(VD->getDescribedVarTemplate());
 }
 
+// True when CC is one of the Z80 calling conventions AND we are actually
+// targeting Z80. Used to preserve an explicit C-library ABI (smallc,
+// sdcccall(0), z88dk_callee, ...) on a redeclaration of a recognized C
+// library builtin, instead of forcibly resetting it to the builtin default.
+static bool isZ80CallingConv(CallingConv CC, const llvm::Triple &T) {
+  if (!T.isZ80())
+    return false;
+  switch (CC) {
+  case CC_Z80SDCCCall0:
+  case CC_Z80Z88dkFastCall:
+  case CC_Z80Z88dkCallee:
+  case CC_Z80SmallC:
+  case CC_Z80SmallCCallee:
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
                              bool MergeTypeWithOld, bool NewDeclIsDefn) {
   // Verify the old decl was also a function.
@@ -3907,18 +3926,34 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
       // there but not here.
       NewTypeInfo = NewTypeInfo.withCallingConv(OldTypeInfo.getCC());
       RequiresAdjustment = true;
-    } else if (Old->getBuiltinID()) {
+    } else if (Old->getBuiltinID() &&
+               !isZ80CallingConv(NewTypeInfo.getCC(),
+                                 Context.getTargetInfo().getTriple())) {
       // Builtin attribute isn't propagated to the new one yet at this point,
       // so we check if the old one is a builtin.
 
       // Calling Conventions on a Builtin aren't really useful and setting a
       // default calling convention and cdecl'ing some builtin redeclarations is
       // common, so warn and ignore the calling convention on the redeclaration.
+      //
+      // EXCEPTION: on Z80, a classic-ABI C library may declare a standard
+      // library function with an explicit Z80 calling convention (smallc,
+      // sdcccall(0), z88dk_callee, etc.) that is byte-for-byte the ABI the
+      // linked implementation actually uses. Unlike a generic host, that CC
+      // is NOT cosmetic here: dropping it makes clang pass args/return in
+      // the wrong registers/stack slots, corrupting the call at runtime. So
+      // when the redeclaration carries an explicit Z80 CC, honor it instead
+      // of forcing the builtin default.
       Diag(New->getLocation(), diag::warn_cconv_unsupported)
           << FunctionType::getNameForCallConv(NewTypeInfo.getCC())
           << (int)CallingConventionIgnoredReason::BuiltinFunction;
       NewTypeInfo = NewTypeInfo.withCallingConv(OldTypeInfo.getCC());
       RequiresAdjustment = true;
+    } else if (Old->getBuiltinID()) {
+      // Z80 redeclaration with an explicit Z80 CC (see the exception above):
+      // keep the caller's CC (New) so the library's actual ABI is honored.
+      // No adjustment -- New already carries the correct Z80 calling
+      // convention.
     } else {
       // Calling conventions aren't compatible, so complain.
       bool FirstCCExplicit = getCallingConvAttributedType(First->getType());
