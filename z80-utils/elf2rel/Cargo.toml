@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 object = { version = "0.36", default-features = false, features = ["read_core", "elf"] }
+
+[dev-dependencies]
+object = { version = "0.36", default-features = false, features = ["write", "elf"] }
