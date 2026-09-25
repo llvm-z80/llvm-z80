@@ -1212,18 +1212,27 @@ LegalizerHelper::createFCMPLibcall(MachineInstr &MI,
   LLT DstTy = MRI.getType(DstReg);
   const auto Cond = Cmp->getCond();
 
+  // The GCC soft-float comparison ABI returns a C `int`. Most targets have a
+  // 32-bit int, but some (e.g. Z80, MSP430) have a narrower one, so consult
+  // getCmpLibcallReturnType() rather than hardcoding i32 -- otherwise the caller
+  // reads a wider result than the routine defines and the high bits are callee
+  // garbage, corrupting the boolean (e.g. `a == a` returning false on Z80).
+  const unsigned CmpRetBits =
+      MVT(TLI.getCmpLibcallReturnType()).getSizeInBits();
+  Type *CmpRetTy = IntegerType::get(Ctx, CmpRetBits);
+
   // Reference:
   // https://gcc.gnu.org/onlinedocs/gccint/Soft-float-library-routines.html#Comparison-functions-1
   // Generates a libcall followed by ICMP.
   const auto BuildLibcall = [&](const RTLIB::Libcall Libcall,
                                 const CmpInst::Predicate ICmpPred,
                                 const DstOp &Res) -> Register {
-    // FCMP libcall always returns an i32, and needs an ICMP with #0.
-    LLT TempLLT = LLT::integer(32);
+    // FCMP libcall returns the target's C `int` (CmpRetBits), needs ICMP with #0.
+    LLT TempLLT = LLT::integer(CmpRetBits);
     Register Temp = MRI.createGenericVirtualRegister(TempLLT);
     // Generate libcall, holding result in Temp
     const auto Status = createLibcall(
-        Libcall, {Temp, Type::getInt32Ty(Ctx), 0},
+        Libcall, {Temp, CmpRetTy, 0},
         {{Cmp->getLHSReg(), OpType, 0}, {Cmp->getRHSReg(), OpType, 1}},
         LocObserver, &MI);
     if (Status != Legalized)
