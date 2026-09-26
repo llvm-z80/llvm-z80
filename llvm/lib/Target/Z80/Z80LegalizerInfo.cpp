@@ -44,6 +44,95 @@ static bool hasAllFastFlags(const MachineInstr &MI,
   return NoNans && NoInfs && Nsz;
 }
 
+/// The top byte of \p V, which holds its sign bit.
+static Register highByte(MachineIRBuilder &B, Register V, LLT Ty) {
+  while (Ty.getSizeInBits() > 8) {
+    Ty = LLT::scalar(Ty.getSizeInBits() / 2);
+    V = B.buildUnmerge(Ty, V).getReg(1);
+  }
+  return V;
+}
+
+/// \p V with its sign bit flipped, which is flipping it in the top byte.
+static Register flipSignBit(MachineIRBuilder &B, Register V, LLT Ty) {
+  const LLT S8 = LLT::scalar(8);
+  if (Ty == S8)
+    return B.buildXor(S8, V, B.buildConstant(S8, 0x80)).getReg(0);
+  LLT Half = LLT::scalar(Ty.getSizeInBits() / 2);
+  auto Halves = B.buildUnmerge(Half, V);
+  Register Hi = flipSignBit(B, Halves.getReg(1), Half);
+  return B.buildMergeLikeInstr(Ty, {Halves.getReg(0), Hi}).getReg(0);
+}
+
+/// The selector compares directly only in the unsigned orders, and against a
+/// constant only with the constant on the right. Rewrites a compare of any
+/// width into those forms, returning false when it is in one already:
+///  * x > c is x >= c + 1, and x <= c is x < c + 1, keeping c on the right
+///    where a byte compares with it as an immediate. A wider compare has no
+///    immediate to keep, so it changes only when that turns x > -1 into
+///    x >= 0.
+///  * x < 0 and x >= 0 ask only for the sign bit, which is in the top byte.
+///  * Any other signed order is the unsigned one on both sides with the sign
+///    bit flipped, which a constant side has done here once and for all.
+/// So no other signed order reaches the selector.
+static bool canonicalizeICmp(MachineInstr &MI, MachineRegisterInfo &MRI,
+                             MachineIRBuilder &B) {
+  Register Dst = MI.getOperand(0).getReg();
+  auto Pred = static_cast<CmpInst::Predicate>(MI.getOperand(1).getPredicate());
+  Register LHS = MI.getOperand(2).getReg();
+  Register RHS = MI.getOperand(3).getReg();
+  LLT Ty = MRI.getType(LHS);
+  std::optional<APInt> C = getIConstantVRegVal(RHS, MRI);
+
+  auto Rebuild = [&](CmpInst::Predicate P, Register L, Register R) {
+    B.buildICmp(P, Dst, L, R);
+    MI.eraseFromParent();
+    return true;
+  };
+
+  if (!C && getIConstantVRegVal(LHS, MRI))
+    return Rebuild(CmpInst::getSwappedPredicate(Pred), RHS, LHS);
+
+  if (Ty.isPointer()) {
+    if (!ICmpInst::isSigned(Pred))
+      return false;
+    // A signed order on pointers is one on their addresses.
+    LLT S16 = LLT::scalar(16);
+    Register L = B.buildPtrToInt(S16, LHS).getReg(0);
+    Register R = C ? B.buildConstant(S16, *C).getReg(0)
+                   : B.buildPtrToInt(S16, RHS).getReg(0);
+    return Rebuild(Pred, L, R);
+  }
+
+  if (C &&
+      (Pred == CmpInst::ICMP_UGT || Pred == CmpInst::ICMP_ULE ||
+       Pred == CmpInst::ICMP_SGT || Pred == CmpInst::ICMP_SLE) &&
+      !(ICmpInst::isSigned(Pred) ? C->isMaxSignedValue() : C->isMaxValue()) &&
+      (Ty.getSizeInBits() == 8 ||
+       (ICmpInst::isSigned(Pred) && C->isAllOnes())))
+    return Rebuild(ICmpInst::getFlippedStrictnessPredicate(Pred), LHS,
+                   B.buildConstant(Ty, *C + 1).getReg(0));
+
+  if (!ICmpInst::isSigned(Pred))
+    return false;
+
+  if (C && C->isZero() &&
+      (Pred == CmpInst::ICMP_SLT || Pred == CmpInst::ICMP_SGE)) {
+    if (Ty.getSizeInBits() == 8)
+      return false;
+    Register Top = highByte(B, LHS, Ty);
+    return Rebuild(Pred, Top, B.buildConstant(LLT::scalar(8), 0).getReg(0));
+  }
+
+  // The left side last, so that a byte is still in A to compare.
+  Register R =
+      C ? B.buildConstant(Ty, *C ^ APInt::getSignMask(Ty.getSizeInBits()))
+              .getReg(0)
+        : flipSignBit(B, RHS, Ty);
+  Register L = flipSignBit(B, LHS, Ty);
+  return Rebuild(ICmpInst::getUnsignedPredicate(Pred), L, R);
+}
+
 Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   using namespace TargetOpcode;
 
@@ -220,7 +309,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Note: s1 IS a power of 2, so widenScalarToNextPow2 won't widen it.
   // We must use minScalar to force s1 -> s8.
   getActionDefinitionsBuilder(G_ICMP)
-      .legalFor({{S8, S8}, {S8, S16}, {S8, P0}})
+      .customFor({{S8, S8}, {S8, S16}, {S8, P0}})
       .minScalarOrElt(0, S8) // no s1 elements: they cannot reach memory ops
       .scalarize(0)
       .customFor({{S8, S32}, {S8, S64}, {S8, S128}})
@@ -991,6 +1080,12 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   }
 
   case TargetOpcode::G_ICMP: {
+    if (canonicalizeICmp(MI, MRI, MIRBuilder))
+      return true;
+    // Bytes, pairs and pointers are compared as they are.
+    if (MRI.getType(MI.getOperand(2).getReg()).getSizeInBits() <= 16)
+      return true;
+
     // Custom lowering for i32/i64/i128 G_ICMP: split into i16 halves and emit
     // G_Z80_ICMP32/64. The instruction selector handles these as chained
     // 8-bit SUB/SBC comparisons. Avoids the generic narrowScalar cascade
@@ -1059,14 +1154,6 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
         Register LoCmp = MRI.createGenericVirtualRegister(S8);
         Register HiEq = MRI.createGenericVirtualRegister(S8);
 
-        // Compare using unsigned for lo half in signed comparisons
-        CmpInst::Predicate LoPred =
-            ICmpInst::isUnsigned(Pred)    ? Pred
-            : (Pred == CmpInst::ICMP_SLT) ? CmpInst::ICMP_ULT
-            : (Pred == CmpInst::ICMP_SLE) ? CmpInst::ICMP_ULE
-            : (Pred == CmpInst::ICMP_SGT) ? CmpInst::ICMP_UGT
-                                          : /* ICMP_SGE */ CmpInst::ICMP_UGE;
-
         MIRBuilder.buildInstr(Z80::G_Z80_ICMP64)
             .addDef(HiCmp)
             .addImm(static_cast<int64_t>(Pred))
@@ -1091,7 +1178,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
             .addUse(RHSHiParts.getReg(3));
         MIRBuilder.buildInstr(Z80::G_Z80_ICMP64)
             .addDef(LoCmp)
-            .addImm(static_cast<int64_t>(LoPred))
+            .addImm(static_cast<int64_t>(Pred))
             .addUse(LHSLoParts.getReg(0))
             .addUse(LHSLoParts.getReg(1))
             .addUse(LHSLoParts.getReg(2))

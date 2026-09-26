@@ -38,14 +38,14 @@ define i8 @icmp_ult16(i16 %a, i16 %b) {
   ret i8 %r
 }
 
-; 16-bit UGE: uses 8-bit SUB/SBC chain + CCF
+; 16-bit UGE: uses 8-bit SUB/SBC chain, then -1 + 1 on a borrow and 0 + 1
+; without one
 define i8 @icmp_uge16(i16 %a, i16 %b) {
 ; CHECK-LABEL: icmp_uge16:
 ; CHECK:       sub e
 ; CHECK:       sbc a,d
-; CHECK:       ccf
-; CHECK:       sbc a,a
-; CHECK:       and #1
+; CHECK-NEXT:  sbc a,a
+; CHECK-NEXT:  inc a
   %c = icmp uge i16 %a, %b
   %r = zext i1 %c to i8
   ret i8 %r
