@@ -1059,6 +1059,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
+  case Z80::ADC_HL_rr_CI:
   case Z80::ADC_HL_rr_CIO: {
     // 16-bit add with carry in/out: HL = HL + rr + carry_in, A = carry_out.
     Register RHS = MI.getOperand(0).getReg();
@@ -1084,13 +1085,16 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       // Z80: ADC HL,rr (reads carry from RRCA above).
       Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::ADC_HL_rr, RHS);
     }
-    // Capture carry out: SBC A,A; AND 1
-    Z80::buildSbcAA(MBB, MI, DL, *this);
-    BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
+    if (MI.getOpcode() == Z80::ADC_HL_rr_CIO) {
+      // Capture carry out: SBC A,A; AND 1
+      Z80::buildSbcAA(MBB, MI, DL, *this);
+      BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
+    }
     MI.eraseFromParent();
     return true;
   }
 
+  case Z80::SBC_HL_rr_BI:
   case Z80::SBC_HL_rr_BIO: {
     // 16-bit sub with borrow in/out: HL = HL - rr - borrow_in, A = borrow_out.
     Register RHS = MI.getOperand(0).getReg();
@@ -1116,9 +1120,11 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       // Z80: SBC HL,rr (reads borrow from RRCA above).
       Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::SBC_HL_rr, RHS);
     }
-    // Capture borrow out: SBC A,A; AND 1
-    Z80::buildSbcAA(MBB, MI, DL, *this);
-    BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
+    if (MI.getOpcode() == Z80::SBC_HL_rr_BIO) {
+      // Capture borrow out: SBC A,A; AND 1
+      Z80::buildSbcAA(MBB, MI, DL, *this);
+      BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
+    }
     MI.eraseFromParent();
     return true;
   }

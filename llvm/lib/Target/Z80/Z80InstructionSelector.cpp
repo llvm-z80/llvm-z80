@@ -3989,18 +3989,19 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
       // Use atomic pseudo ADC_HL_rr_CIO which combines carry restoration
       // (LD A,carry; RRCA) + ADC HL,rr + carry capture (SBC A,A; AND 1)
-      // into a single indivisible instruction.
+      // into a single indivisible instruction. The top of a chain has no
+      // use for the carry out and leaves the capture off.
+      bool CarryOutUsed = !MRI.use_nodbg_empty(CarryOutReg);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
           .addReg(Src1Reg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::ADC_HL_rr_CIO))
+      BuildMI(MBB, MI, MI.getDebugLoc(),
+              TII.get(CarryOutUsed ? Z80::ADC_HL_rr_CIO : Z80::ADC_HL_rr_CI))
           .addReg(Src2Reg)
           .addReg(CarryInReg);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
           .addReg(Z80::HL);
 
-      // Carry out is always captured inside the atomic pseudo (in A).
-      // Copy it to the virtual register only if used.
-      if (!MRI.use_nodbg_empty(CarryOutReg)) {
+      if (CarryOutUsed) {
         if (!RBI.constrainGenericRegister(CarryOutReg, Z80::GR8RegClass, MRI))
           return false;
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY),
@@ -4072,16 +4073,19 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         return false;
 
       // Use atomic pseudo SBC_HL_rr_BIO which combines borrow restoration
-      // (LD A,borrow; RRCA) + SBC HL,rr + borrow capture (SBC A,A; AND 1).
+      // (LD A,borrow; RRCA) + SBC HL,rr + borrow capture (SBC A,A; AND 1),
+      // or SBC_HL_rr_BI without the capture when nothing reads the borrow.
+      bool BorrowOutUsed = !MRI.use_nodbg_empty(BorrowOutReg);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
           .addReg(Src1Reg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SBC_HL_rr_BIO))
+      BuildMI(MBB, MI, MI.getDebugLoc(),
+              TII.get(BorrowOutUsed ? Z80::SBC_HL_rr_BIO : Z80::SBC_HL_rr_BI))
           .addReg(Src2Reg)
           .addReg(BorrowInReg);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
           .addReg(Z80::HL);
 
-      if (!MRI.use_nodbg_empty(BorrowOutReg)) {
+      if (BorrowOutUsed) {
         if (!RBI.constrainGenericRegister(BorrowOutReg, Z80::GR8RegClass, MRI))
           return false;
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY),

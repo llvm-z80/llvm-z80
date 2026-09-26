@@ -744,6 +744,23 @@ def SBC_HL_rr_BIO : Z80Inst<"sbc_hl_rr_bio"> {
   let Defs = [HL, A, FLAGS];
 }
 
+// The same two without the carry or borrow out, for the top of a chain.
+// LD A,carry; RRCA; ADC HL,rr
+def ADC_HL_rr_CI : Z80Inst<"adc_hl_rr_ci"> {
+  let InOperandList = (ins GR16_BCDE:$rhs, GR8:$carry_in);
+  let OutOperandList = (outs);
+  let Uses = [HL];
+  let Defs = [HL, A, FLAGS];
+}
+
+// LD A,borrow; RRCA; SBC HL,rr
+def SBC_HL_rr_BI : Z80Inst<"sbc_hl_rr_bi"> {
+  let InOperandList = (ins GR16_BCDE:$rhs, GR8:$borrow_in);
+  let OutOperandList = (outs);
+  let Uses = [HL];
+  let Defs = [HL, A, FLAGS];
+}
+
 } // isPseudo, isCodeGenOnly
 
 // CAPTURE_PV: Read the P/V flag (bit 2 of F register) into A as 0 or 1.
