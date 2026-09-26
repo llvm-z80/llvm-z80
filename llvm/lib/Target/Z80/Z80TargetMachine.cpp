@@ -77,17 +77,6 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80StaticFrameAllocPass(PR);
 }
 
-// Z80 data layout:
-// e = little endian
-// p:16:8 = 16-bit pointers with 8-bit alignment
-// i16:8 = 16-bit integers with 8-bit alignment
-// i32:8 = 32-bit integers with 8-bit alignment
-// f32:8 = 32-bit floats with 8-bit alignment
-// f64:8 = 64-bit floats with 8-bit alignment
-// n8:16 = native integer widths are 8 and 16 bits
-static const char *Z80DataLayout =
-    "e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-ve-n8:16";
-
 // On by default for both targets. On SM83 a wide slot costs a byte more in
 // static memory than on the stack, so frame lowering keeps a size build's
 // wide slots on the stack; an eight-bit slot is a win either way. Explicit
@@ -122,8 +111,9 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
                                    std::optional<Reloc::Model> RM,
                                    std::optional<CodeModel::Model> CM,
                                    CodeGenOptLevel OL, bool JIT)
-    : CodeGenTargetMachineImpl(T, Z80DataLayout, TT, selectZ80CPU(CPU, TT), FS,
-                               Options, getEffectiveRelocModel(RM),
+    : CodeGenTargetMachineImpl(T, TT.computeDataLayout(), TT,
+                               selectZ80CPU(CPU, TT), FS, Options,
+                               getEffectiveRelocModel(RM),
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
       SubTarget(TT, selectZ80CPU(CPU, TT).str(), FS.str(), *this) {
   this->TLOF = std::make_unique<Z80TargetObjectFile>();
