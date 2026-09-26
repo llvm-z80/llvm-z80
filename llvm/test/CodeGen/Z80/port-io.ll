@@ -1,9 +1,8 @@
 ; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O2 < %s | FileCheck %s
 
-; address_space(2) is Z80 port I/O.  A compile-time-constant port selects the
-; short constant forms OUT (n),A / IN A,(n).  (ravn/llvm-z80 #1, #44.)
-; The runtime-port (PHI'd) case is intentionally rejected -- see
-; port-io-runtime-reject.ll.
+; address_space(2) represents Z80 port I/O. A compile-time-constant port selects
+; the short constant instructions OUT (n),A / IN A,(n).
+; Non-constant runtime ports fail instruction selection (see port-io-runtime-reject.ll).
 
 define void @out_const(i8 %v) nounwind {
 ; CHECK-LABEL: _out_const:

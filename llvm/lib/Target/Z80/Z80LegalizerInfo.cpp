@@ -314,9 +314,9 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       [](const LegalityQuery &) { return true; });
 
   // PHI nodes
-  // P2 (port I/O address space) is 16-bit like P0 -- both are legal for PHI.
-  // Without P2 here, conditional port_out (e.g. SIO channel A vs B) crashes the
-  // Legalizer when the optimizer merges the port pointers into a PHI (#44).
+  // P2 (port I/O address space) pointers are 16-bit like P0 and must be legal
+  // for G_PHI and G_FREEZE so that control-flow merges of port pointers do not
+  // crash the Legalizer; invalid runtime ports are caught during selection.
   getActionDefinitionsBuilder(G_PHI)
       .legalFor({S8, S16, P0, P2})
       .scalarize(0)

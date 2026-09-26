@@ -1782,7 +1782,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
     const DebugLoc &DL = MI.getDebugLoc();
 
-    // Port I/O: address_space(2) → IN A,(n) or IN A,(C)
+    // Port I/O: address_space(2) -> IN A,(n)
     if (MI.hasOneMemOperand() &&
         (*MI.memoperands_begin())->getAddrSpace() == Z80::AS_IO) {
       if (DstTy.getSizeInBits() > 8)
@@ -1800,11 +1800,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // constant (e.g. port 0 shows up as `ptr addrspace(2) null`).
         PortAddr = AddrDef->getOperand(1).getCImm()->getZExtValue() & 0xFF;
       }
-      // Only a compile-time-constant port is supported (selects IN A,(n)).
-      // A runtime/PHI'd port is intentionally rejected rather than silently
-      // emitting IN A,(C): that form puts B on the high address bits, which is
-      // only *coincidentally* harmless on RC700 (low-8-bit port decode). Fail
-      // loudly instead of baking that hardware assumption into codegen (#44).
+      // Only compile-time constant ports are supported (selects IN A,(n)).
+      // Runtime-selected ports are intentionally rejected: on Z80, IN r,(C)
+      // places register B on the upper 8 address lines (A8-A15). On systems
+      // with 16-bit port decoding, emitting (C) without explicit control over
+      // B risks unintended bus contention or misaddressing.
       if (PortAddr < 0)
         return false;
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
@@ -2031,7 +2031,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT SrcTy = MRI.getType(SrcReg);
     const DebugLoc &DL = MI.getDebugLoc();
 
-    // Port I/O: address_space(2) → OUT (n),A or OUT (C),A
+    // Port I/O: address_space(2) -> OUT (n),A
     if (MI.hasOneMemOperand() &&
         (*MI.memoperands_begin())->getAddrSpace() == Z80::AS_IO) {
       if (SrcTy.getSizeInBits() > 8)
@@ -2048,11 +2048,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // constant (e.g. port 0 shows up as `ptr addrspace(2) null`).
         PortAddr = AddrDef->getOperand(1).getCImm()->getZExtValue() & 0xFF;
       }
-      // Only a compile-time-constant port is supported (selects OUT (n),A).
-      // A runtime/PHI'd port is intentionally rejected rather than silently
-      // emitting OUT (C),A: that form puts B on the high address bits, which is
-      // only *coincidentally* harmless on RC700 (low-8-bit port decode). Fail
-      // loudly instead of baking that hardware assumption into codegen (#44).
+      // Only compile-time constant ports are supported (selects OUT (n),A).
+      // Runtime-selected ports are intentionally rejected: on Z80, OUT (C),r
+      // places register B on the upper 8 address lines (A8-A15). On systems
+      // with 16-bit port decoding, emitting (C) without explicit control over
+      // B risks unintended bus contention or misaddressing.
       if (PortAddr < 0)
         return false;
       if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))

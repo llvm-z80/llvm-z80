@@ -1,14 +1,13 @@
 ; RUN: not llc -mtriple=z80 -O2 %s -o /dev/null 2>&1 | FileCheck %s
 
 ; A runtime-selected (PHI'd / select'd) address_space(2) port is intentionally
-; NOT supported.  It must FAIL TO SELECT rather than silently emit OUT (C),A,
-; whose "B on the high address bits" behaviour is only coincidentally harmless
-; on RC700 (which decodes just the low 8 port bits).  Baking that hardware
-; assumption into codegen would be a silent-miscompile trap, so we reject it.
+; rejected. On Z80, IN r,(C) / OUT (C),r place register B on the upper address
+; lines (A8-A15). On systems with 16-bit I/O decoding, emitting (C) without
+; explicit control over B could cause unintended bus side-effects.
 ;
-; The Legalizer must still ACCEPT the p2 PHI/select (P2 is legal for G_PHI /
-; G_FREEZE) -- i.e. it must not crash; the diagnostic is a clean "cannot select"
-; at instruction selection.  (ravn/llvm-z80 #44.)
+; The Legalizer still accepts the p2 PHI/select (P2 is legal for G_PHI and
+; G_FREEZE) so it does not crash early; the diagnostic is a clean "cannot select"
+; during instruction selection.
 
 ; CHECK: cannot select: {{.*}}G_STORE{{.*}}p2
 

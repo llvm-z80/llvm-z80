@@ -671,6 +671,9 @@ private:
 
 namespace Z80 {
 
+/// Address spaces supported by the Z80 target.
+/// AS_Memory (0) is the unified 64 KB RAM/ROM space (standard LD/PUSH/POP).
+/// AS_IO (2) is the dedicated 8-bit/16-bit I/O port bus (IN/OUT instructions).
 enum AddressSpace : unsigned { AS_Memory = 0, AS_IO = 2, NumAddrSpaces };
 
 /// Target-specific flags on symbol machine operands. They select which part
