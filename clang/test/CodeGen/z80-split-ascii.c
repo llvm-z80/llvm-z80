@@ -53,3 +53,24 @@ const char bytes48[48] = "123456789012345678901234567890123456789012345678";
 // CHECK-LABEL: _bytes48:
 // CHECK-NEXT:  .ascii	"123456789012345678901234567890123456789012345678"
 // CHECK-NEXT:  .size	_bytes48, 48
+
+// 6. Very large byte array (2048 bytes, matching the SEM702 ROM font table).
+// Previously emitted as a single ~8000-character .ascii line that broke
+// copt's 512-byte line buffer and z80asm's 256-byte STR_SIZE token buffer.
+// With MaxAsciiLength = 48, 2048 bytes must be split into:
+// 42 chunks of 48 bytes + 1 final chunk of 32 bytes = 43 directives.
+const unsigned char font2048[2048] = {
+    [0] = 0xAA, [47] = 0xBB,
+    [48] = 0xCC, [95] = 0xDD,
+    [2016] = 0xEE, [2047] = 0xFF
+};
+
+// CHECK-LABEL: _font2048:
+// First 48-byte chunk:
+// CHECK-NEXT:  .ascii	"\252\000{{.*}}\273"
+// Second 48-byte chunk:
+// CHECK-NEXT:  .ascii	"\314\000{{.*}}\335"
+// Final chunk (starts at offset 2016, 32 bytes long):
+// CHECK-COUNT-40: .ascii
+// CHECK-NEXT:  .ascii	"\356\000{{.*}}\377"
+// CHECK-NEXT:  .size	_font2048, 2048
