@@ -71,3 +71,4 @@ f:
 ; CHECK-NOT:   .note.GNU-stack
 ; CHECK-NOT:   __do_copy_data
 ; CHECK-NOT:   __do_zero_bss
+; CHECK-NOT:   .addrsig

@@ -2752,11 +2752,15 @@ void MCAsmStreamer::emitRelocDirective(const MCExpr &Offset, StringRef Name,
 }
 
 void MCAsmStreamer::emitAddrsig() {
+  if (MAI->isZ80ASM())
+    return;
   OS << "\t.addrsig";
   EmitEOL();
 }
 
 void MCAsmStreamer::emitAddrsigSym(const MCSymbol *Sym) {
+  if (MAI->isZ80ASM())
+    return;
   OS << "\t.addrsig_sym ";
   Sym->print(OS, MAI);
   EmitEOL();

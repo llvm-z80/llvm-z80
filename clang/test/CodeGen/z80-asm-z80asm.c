@@ -85,4 +85,5 @@ int global_bss[4];
 // CHECK-NOT:   .ident
 // CHECK-NOT:   .note.GNU-stack
 // CHECK-NOT:   .p2align
+// CHECK-NOT:   .addrsig
 
