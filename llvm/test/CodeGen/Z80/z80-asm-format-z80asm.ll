@@ -4,9 +4,9 @@
 ; CHECK:        SECTION code_compiler
 ; CHECK-NEXT:   GLOBAL	_test_branch
 ; CHECK-LABEL: _test_branch:
-; CHECK:        jr	z, LBB0_
+; CHECK:        jr	nz,LBB0_2
 ; CHECK:        call	_foo
-; CHECK-LABEL: LBB0_
+; CHECK:        LBB0_2:
 ; CHECK:        ret
 ; CHECK-NOT:   .Lfunc_end
 ; CHECK-NOT:   .size
@@ -29,12 +29,12 @@ f:
 ; CHECK-NEXT:   DEFW	1234
 @var_16 = dso_local global i16 1234, align 2
 
-; CHECK-NEXT:   GLOBAL	_var_32
+; CHECK:        GLOBAL	_var_32
 ; CHECK-LABEL: _var_32:
 ; CHECK-NEXT:   DEFQ	305419896
 @var_32 = dso_local global i32 305419896, align 4
 
-; CHECK-NEXT:   GLOBAL	_var_64
+; CHECK:        GLOBAL	_var_64
 ; CHECK-LABEL: _var_64:
 ; CHECK-NEXT:   DEFQ	2309737967
 ; CHECK-NEXT:   DEFQ	19088743

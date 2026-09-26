@@ -27,7 +27,9 @@ cl::opt<Z80AsmFormatTy> Z80AsmFormat(
     cl::desc("Override Z80 assembly output format (default: auto from triple)"),
     cl::values(clEnumValN(Z80AsmFormat_ELF, "elf", "ELF/GNU style"),
                clEnumValN(Z80AsmFormat_SDASZ80, "sdasz80",
-                          "SDCC sdasz80 compatible")));
+                          "SDCC sdasz80 compatible"),
+               clEnumValN(Z80AsmFormat_Z80ASM, "z80asm",
+                          "z88dk z80asm compatible")));
 
 constexpr EnumStringDef<MCAsmInfo::AtSpecifierKind> AtSpecifierDefs[] = {
     {{"z80_imm8"}, Z80MCExpr::VK_IMM8},
@@ -149,6 +151,84 @@ void Z80MCAsmInfoSDCC::printSwitchToSection(const MCSection &Section,
     OS << "\t.area\t_BSS\n";
   else if (Name == ".rodata" || Name.starts_with(".rodata."))
     OS << "\t.area\t_CODE\n";
+  // Silently ignore other sections (.note.GNU-stack, .comment, etc.)
+}
+
+//===----------------------------------------------------------------------===//
+// Z80MCAsmInfoZ80ASM - z88dk z80asm compatible assembly format
+//===----------------------------------------------------------------------===//
+
+Z80MCAsmInfoZ80ASM::Z80MCAsmInfoZ80ASM(const Triple &TT,
+                                       const MCTargetOptions &Options)
+    : MCAsmInfo(Options) {
+  CodePointerSize = 2;
+  CalleeSaveStackSlotSize = 0;
+  SeparatorString = "\n";
+  CommentString = ";";
+  MaxInstLength = 4;
+  MaxAsciiLength = 48;
+
+  // Standard Zilog syntax (SyntaxVariant 0)
+  AssemblerDialect = 0;
+  IsZ80ASM = true;
+
+  // Suppress ELF-specific directives
+  HasDotTypeDotSizeDirective = false;
+  HasSingleParameterDotFile = false;
+  HasIdentDirective = false;
+  SupportsDebugInformation = false;
+  WeakRefDirective = nullptr;
+
+  // z80asm accepts 0xFF hex format
+  UseMotorolaIntegers = false;
+
+  // z80asm data directives:
+  // Data64bitsDirective is left null so MCAsmStreamer automatically splits
+  // 64-bit integer values into two 32-bit DEFQ directives.
+  Data8bitsDirective = "\tDEFB\t";
+  Data16bitsDirective = "\tDEFW\t";
+  Data32bitsDirective = "\tDEFQ\t";
+  Data64bitsDirective = nullptr;
+
+  // z80asm uses DEFS for reserve / zero-fill
+  ZeroDirective = "\tDEFS\t";
+
+  // z80asm uses DEFM for string literals; AscizDirective is null so
+  // strings are emitted via DEFM (with embedded octal/hex escapes for NUL).
+  AsciiDirective = "\tDEFM\t";
+  AscizDirective = nullptr;
+
+  // Labels and symbols: InternalSymbolPrefix = "L" ensures compiler-generated
+  // labels (such as LBB0_1) have no leading dot, as dots are syntax tokens in z80asm.
+  GlobalDirective = "\tGLOBAL\t";
+  InternalSymbolPrefix = "L";
+
+  initializeAtSpecifiers(AtSpecifiers);
+}
+
+unsigned Z80MCAsmInfoZ80ASM::getMaxInstLength(const MCSubtargetInfo *STI) const {
+  if (!STI)
+    return MaxInstLength;
+  if (STI->hasFeature(Z80::FeatureEZ80))
+    return 6;
+  return 4;
+}
+
+void Z80MCAsmInfoZ80ASM::printSwitchToSection(const MCSection &Section,
+                                              uint32_t Subsection,
+                                              const Triple &T,
+                                              raw_ostream &OS) const {
+  StringRef Name = Section.getName();
+
+  // Map ELF section names to z88dk z80asm SECTION directives
+  if (Name == ".text" || Name.starts_with(".text."))
+    OS << "\tSECTION\tcode_compiler\n";
+  else if (Name == ".data" || Name.starts_with(".data."))
+    OS << "\tSECTION\tdata_compiler\n";
+  else if (Name == ".bss" || Name.starts_with(".bss."))
+    OS << "\tSECTION\tbss_compiler\n";
+  else if (Name == ".rodata" || Name.starts_with(".rodata."))
+    OS << "\tSECTION\trodata_compiler\n";
   // Silently ignore other sections (.note.GNU-stack, .comment, etc.)
 }
 

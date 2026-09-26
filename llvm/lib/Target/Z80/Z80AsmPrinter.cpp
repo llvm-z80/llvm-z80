@@ -74,6 +74,8 @@ public:
 
   void emitStartOfAsmFile(Module &M) override;
 
+  void emitFunctionEntryLabel() override;
+
   void emitGlobalVariable(const GlobalVariable *GV) override;
 
   void emitJumpTableInfo() override;
@@ -155,6 +157,38 @@ void Z80AsmPrinter::emitStartOfAsmFile(Module &M) {
   // TODO: Emit Z80-specific directives if needed
 }
 
+// Emits the function entry label.
+//
+// WHAT: Emits the primary symbol for the function, but suppresses the ELF-only
+//       $local alias when targeting sdasz80 or z80asm.
+// WHY:  On ELF, AsmPrinter generates an internal local alias (e.g. `L_foo$local`)
+//       to allow direct local calls. However, z80asm treats '$' as an invalid
+//       identifier character (syntax error), and neither z80asm nor sdasz80
+//       use or understand the ELF $local alias convention.
+//
+// Worked example:
+//   In `test_func`, standard ELF AsmPrinter would emit:
+//     _test_func:
+//     L_test_func$local:
+//   For z80asm, this method skips `L_test_func$local:`, emitting only `_test_func:`.
+void Z80AsmPrinter::emitFunctionEntryLabel() {
+  CurrentFnSym->redefineIfPossible();
+  OutStreamer->emitLabel(CurrentFnSym);
+
+  // Non-ELF targets (sdasz80 and z80asm) do not use ELF-style $local aliases.
+  if (MAI.isSDCC() || MAI.isZ80ASM())
+    return;
+
+  if (TM.getTargetTriple().isOSBinFormatELF()) {
+    MCSymbol *Sym = getSymbolPreferLocal(MF->getFunction());
+    if (Sym != CurrentFnSym) {
+      CurrentFnBeginLocal = Sym;
+      OutStreamer->emitLabel(Sym);
+      OutStreamer->emitSymbolAttribute(Sym, MCSA_ELF_TypeFunction);
+    }
+  }
+}
+
 void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
   if (MAI.isSDCC()) {
     // BSS locals: sdasz80 doesn't support .local/.comm directives.
@@ -172,6 +206,30 @@ void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
       OutStreamer->emitLabel(GVSym);
       for (uint64_t i = 0; i < Size; i++)
         OutStreamer->emitInt8(0);
+      return;
+    }
+  }
+
+  if (MAI.isZ80ASM()) {
+    // z80asm does not support .comm or .local directives.
+    // Zero-initialized or common variables must be emitted explicitly in
+    // bss_compiler using DEFS (which the z88dk CRT zeroes on startup).
+    if (!GV->hasInitializer() || GV->getInitializer()->isNullValue() ||
+        GV->hasCommonLinkage()) {
+      if (!GV->hasInitializer() && !GV->hasCommonLinkage())
+        return; // External declaration, nothing to emit.
+
+      MCSymbol *GVSym = getSymbol(GV);
+      const DataLayout &DL = GV->getDataLayout();
+      uint64_t Size = DL.getTypeAllocSize(GV->getValueType());
+      if (Size == 0)
+        Size = 1;
+
+      OutStreamer->switchSection(OutContext.getELFSection(".bss", 0, 0));
+      if (!GV->hasLocalLinkage())
+        OutStreamer->emitSymbolAttribute(GVSym, MCSA_Global);
+      OutStreamer->emitLabel(GVSym);
+      OutStreamer->emitZeros(Size);
       return;
     }
   }

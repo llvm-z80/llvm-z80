@@ -28,9 +28,9 @@ namespace llvm {
 Z80TargetStreamer::Z80TargetStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
 
 void Z80TargetStreamer::finish() {
-  // SDCC has its own CRT initialization mechanism.
+  // Non-ELF targets (sdasz80 and z80asm) have their own CRT initialization.
   const MCAsmInfo &MAI = Streamer.getContext().getAsmInfo();
-  if (MAI.isSDCC())
+  if (MAI.isSDCC() || MAI.isZ80ASM())
     return;
   if (hasBSS())
     stronglyReference("__do_zero_bss",

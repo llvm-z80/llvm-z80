@@ -1648,6 +1648,10 @@ void MCAsmStreamer::emitAlignmentDirective(uint64_t ByteAlignment,
                                            std::optional<int64_t> Value,
                                            unsigned ValueSize,
                                            unsigned MaxBytesToEmit) {
+  // z80asm does not support alignment directives; Z80 has no alignment requirements.
+  if (MAI->isZ80ASM())
+    return;
+
   if (MAI->isAIX()) {
     if (!isPowerOf2_64(ByteAlignment))
       report_fatal_error("Only power-of-two alignments are supported "

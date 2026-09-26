@@ -21,7 +21,11 @@ namespace llvm {
 
 class Triple;
 
-enum Z80AsmFormatTy { Z80AsmFormat_ELF = 0, Z80AsmFormat_SDASZ80 = 1 };
+enum Z80AsmFormatTy {
+  Z80AsmFormat_ELF = 0,
+  Z80AsmFormat_SDASZ80 = 1,
+  Z80AsmFormat_Z80ASM = 2
+};
 extern cl::opt<Z80AsmFormatTy> Z80AsmFormat;
 
 /// Specifies the format of Z80 assembly files (ELF/GNU style).
@@ -36,6 +40,21 @@ public:
 class Z80MCAsmInfoSDCC : public MCAsmInfo {
 public:
   explicit Z80MCAsmInfoSDCC(const Triple &TT, const MCTargetOptions &Options);
+
+  unsigned getMaxInstLength(const MCSubtargetInfo *STI) const override;
+
+  void printSwitchToSection(const MCSection &Section, uint32_t Subsection,
+                            const Triple &T, raw_ostream &OS) const override;
+
+  bool useCodeAlign(const MCSection &Sec) const override { return false; }
+};
+
+/// Specifies the format of Z80 assembly files for z88dk's z80asm assembler.
+/// Emits standard Zilog instructions, z80asm SECTION and data directives
+/// (DEFB/DEFW/DEFQ/DEFS/DEFM), and suppresses ELF-only metadata.
+class Z80MCAsmInfoZ80ASM : public MCAsmInfo {
+public:
+  explicit Z80MCAsmInfoZ80ASM(const Triple &TT, const MCTargetOptions &Options);
 
   unsigned getMaxInstLength(const MCSubtargetInfo *STI) const override;
 
