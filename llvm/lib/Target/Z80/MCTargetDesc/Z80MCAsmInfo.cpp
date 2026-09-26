@@ -57,6 +57,9 @@ Z80MCAsmInfo::Z80MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   // Maximum instruction length across all supported subtargets.
   MaxInstLength = 7;
   SupportsDebugInformation = true;
+  // Split .ascii/.asciz into chunks of at most 48 bytes to stay safely under
+  // downstream buffer limits (such as z80asm's 256-char STR_SIZE and copt's 512).
+  MaxAsciiLength = 48;
 
   initializeAtSpecifiers(AtSpecifiers);
 }

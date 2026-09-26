@@ -1443,6 +1443,35 @@ void MCAsmStreamer::emitBytes(StringRef Data) {
     return true;
   };
 
+  unsigned MaxLen = MAI->getMaxAsciiLength();
+  if (MaxLen != 0 && Data.size() > MaxLen &&
+      (MAI->getAsciiDirective() || MAI->getAscizDirective())) {
+    while (!Data.empty()) {
+      size_t ChunkSize = std::min<size_t>(Data.size(), MaxLen);
+      StringRef Chunk = Data.substr(0, ChunkSize);
+      Data = Data.substr(ChunkSize);
+      // For the final chunk, if the entire string ends with NUL and .asciz is
+      // supported, emitAsString will use .asciz for that final chunk.
+      // All earlier chunks (or strings without trailing NUL) will not end with
+      // 0 (unless that specific chunk byte happens to be 0, but Data.back()
+      // only applies if it is truly the final null terminator of the whole string).
+      if (Data.empty()) {
+        emitAsString(Chunk);
+      } else {
+        // Not the final chunk; must emit as .ascii (even if Chunk ends in 0,
+        // it is not the string's terminator).
+        if (MAI->getAsciiDirective()) {
+          OS << MAI->getAsciiDirective();
+          PrintQuotedString(Chunk, OS);
+          EmitEOL();
+        } else {
+          emitAsString(Chunk);
+        }
+      }
+    }
+    return;
+  }
+
   if (Data.size() != 1 && emitAsString(Data))
     return;
 

@@ -232,6 +232,11 @@ protected:
   /// doesn't support this, it can be set to null.  Defaults to "\t.asciz\t"
   const char *AscizDirective = "\t.asciz\t";
 
+  /// If non-zero, maximum number of bytes to emit in a single .ascii or .asciz
+  /// directive. Longer strings or byte arrays are split into multiple directives
+  /// to avoid exceeding assembler line buffer limits. Defaults to 0 (unlimited).
+  unsigned MaxAsciiLength = 0;
+
   /// Form used for character literals in the assembly syntax.  Useful for
   /// producing strings as byte lists.  If a target does not use or support
   /// this, it shall be set to ACLS_Unknown.  Defaults to ACLS_Unknown.
@@ -608,6 +613,7 @@ public:
   const char *getZeroDirective() const { return ZeroDirective; }
   const char *getAsciiDirective() const { return AsciiDirective; }
   const char *getAscizDirective() const { return AscizDirective; }
+  unsigned getMaxAsciiLength() const { return MaxAsciiLength; }
   AsmCharLiteralSyntax characterLiteralSyntax() const {
     return CharacterLiteralSyntax;
   }
