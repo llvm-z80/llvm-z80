@@ -803,6 +803,14 @@ def CMP16_FLAGS : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
   let mayStore = false;
 }
 
+// CMP16_FLAGS against an immediate, which needs no pair for the constant:
+// LD A,lhs_lo; SUB lo; LD A,lhs_hi; SBC A,hi.
+def CMP16_FLAGS_IMM : Z80Pseudo<(outs), (ins GR16:$lhs, i16imm:$rhs)> {
+  let Defs = [A, FLAGS];
+  let mayLoad = false;
+  let mayStore = false;
+}
+
 // CMP16_ULT: materializes unsigned less-than as 0/1 in A.
 // Appends SBC A,A; AND 1 after the SUB/SBC chain.
 def CMP16_ULT : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
@@ -816,6 +824,15 @@ def CMP16_ULT : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
 // Uses carry-in from previous CMP16_FLAGS or CMP16_SBC_FLAGS.
 // Uses = [FLAGS] ensures regalloc won't insert flag-clobbering ops in between.
 def CMP16_SBC_FLAGS : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
+  let Defs = [A, FLAGS];
+  let Uses = [FLAGS];
+  let mayLoad = false;
+  let mayStore = false;
+}
+
+// CMP16_SBC_FLAGS against an immediate:
+// LD A,lhs_lo; SBC A,lo; LD A,lhs_hi; SBC A,hi.
+def CMP16_SBC_FLAGS_IMM : Z80Pseudo<(outs), (ins GR16:$lhs, i16imm:$rhs)> {
   let Defs = [A, FLAGS];
   let Uses = [FLAGS];
   let mayLoad = false;

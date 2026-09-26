@@ -2,8 +2,8 @@
 ; RUN: llc -verify-machineinstrs -mtriple=sm83 -O1 < %s | FileCheck %s --check-prefixes=CHECK,SM83
 
 ; The legalizer puts a compare in the forms the selector takes directly: on a
-; byte, x > c as x >= c + 1 and x <= c as x < c + 1, so that c stays an
-; immediate on the right; a signed order as the unsigned one with the sign bit
+; byte or a pair, x > c as x >= c + 1 and x <= c as x < c + 1, so that c
+; stays an immediate on the right; a signed order as the unsigned one with the sign bit
 ; of both sides flipped; and x < 0 or x >= 0, at any width, as a test of the
 ; sign bit alone.
 
@@ -124,20 +124,16 @@ f:
   ret void
 }
 
-; 5 ^ 0x8000 is 32773.
+; x > 5 is x >= 6, and 6 ^ 0x8000 is taken as immediates.
 define void @pair_signed_const(i16 %x) {
 ; CHECK-LABEL: pair_signed_const:
 ; Z80:           ld a,h
 ; SM83:          ld a,d
 ; CHECK-NEXT:    xor 128
-; CHECK:         ld bc,32773
-; CHECK-NEXT:    ld a,c
-; Z80-NEXT:      sub l
-; SM83-NEXT:     sub e
-; CHECK-NEXT:    ld a,b
-; Z80-NEXT:      sbc a,h
-; SM83-NEXT:     sbc a,d
-; CHECK-NEXT:    jr nc,
+; CHECK:         sub 6
+; CHECK-NEXT:    ld a,{{[hd]}}
+; CHECK-NEXT:    sbc a,128
+; CHECK-NEXT:    jr c,
   %c = icmp sgt i16 %x, 5
   br i1 %c, label %t, label %f
 t:

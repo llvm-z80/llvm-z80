@@ -879,6 +879,40 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
+  case Z80::CMP16_FLAGS_IMM: {
+    // Only the carry is read after this. With the low byte of the immediate
+    // zero, the low bytes cannot borrow, and the high bytes decide alone.
+    Register LHSReg = MI.getOperand(0).getReg();
+    uint16_t Imm = MI.getOperand(1).getImm();
+    if (Imm & 0xFF) {
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A,
+                    TRI->getSubReg(LHSReg, Z80::sub_lo));
+      BuildMI(MBB, MI, DL, get(Z80::SUB_n)).addImm(Imm & 0xFF);
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A,
+                    TRI->getSubReg(LHSReg, Z80::sub_hi));
+      BuildMI(MBB, MI, DL, get(Z80::SBC_A_n)).addImm(Imm >> 8);
+    } else {
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A,
+                    TRI->getSubReg(LHSReg, Z80::sub_hi));
+      BuildMI(MBB, MI, DL, get(Z80::CP_n)).addImm(Imm >> 8);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case Z80::CMP16_SBC_FLAGS_IMM: {
+    Register LHSReg = MI.getOperand(0).getReg();
+    uint16_t Imm = MI.getOperand(1).getImm();
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A,
+                  TRI->getSubReg(LHSReg, Z80::sub_lo));
+    BuildMI(MBB, MI, DL, get(Z80::SBC_A_n)).addImm(Imm & 0xFF);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A,
+                  TRI->getSubReg(LHSReg, Z80::sub_hi));
+    BuildMI(MBB, MI, DL, get(Z80::SBC_A_n)).addImm(Imm >> 8);
+    MI.eraseFromParent();
+    return true;
+  }
+
   case Z80::CMP16_SBC_FLAGS: {
     // Carry-chain continuation: all SBC (no initial SUB).
     // LD A,lhs_lo; SBC A,rhs_lo; LD A,lhs_hi; SBC A,rhs_hi

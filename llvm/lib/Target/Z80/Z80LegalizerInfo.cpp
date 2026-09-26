@@ -68,9 +68,7 @@ static Register flipSignBit(MachineIRBuilder &B, Register V, LLT Ty) {
 /// constant only with the constant on the right. Rewrites a compare of any
 /// width into those forms, returning false when it is in one already:
 ///  * x > c is x >= c + 1, and x <= c is x < c + 1, keeping c on the right
-///    where a byte compares with it as an immediate. A wider compare has no
-///    immediate to keep, so it changes only when that turns x > -1 into
-///    x >= 0.
+///    where the compare takes it as an immediate.
 ///  * x < 0 and x >= 0 ask only for the sign bit, which is in the top byte.
 ///  * Any other signed order is the unsigned one on both sides with the sign
 ///    bit flipped, which a constant side has done here once and for all.
@@ -107,9 +105,7 @@ static bool canonicalizeICmp(MachineInstr &MI, MachineRegisterInfo &MRI,
   if (C &&
       (Pred == CmpInst::ICMP_UGT || Pred == CmpInst::ICMP_ULE ||
        Pred == CmpInst::ICMP_SGT || Pred == CmpInst::ICMP_SLE) &&
-      !(ICmpInst::isSigned(Pred) ? C->isMaxSignedValue() : C->isMaxValue()) &&
-      (Ty.getSizeInBits() == 8 ||
-       (ICmpInst::isSigned(Pred) && C->isAllOnes())))
+      !(ICmpInst::isSigned(Pred) ? C->isMaxSignedValue() : C->isMaxValue()))
     return Rebuild(ICmpInst::getFlippedStrictnessPredicate(Pred), LHS,
                    B.buildConstant(Ty, *C + 1).getReg(0));
 

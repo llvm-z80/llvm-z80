@@ -69,6 +69,9 @@ private:
                             MachineRegisterInfo &MRI);
   void emitBoolFromZero(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
                         const DebugLoc &DL, bool Equal);
+  bool emitOrderChain(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                      const DebugLoc &DL, ArrayRef<Register> LHS,
+                      ArrayRef<Register> RHS, MachineRegisterInfo &MRI);
   bool emit32CompareFlags(MachineBasicBlock &MBB,
                           MachineBasicBlock::iterator InsertPt,
                           CmpInst::Predicate Pred, Register LhsLo,
@@ -751,6 +754,32 @@ void Z80InstructionSelector::emitBoolFromZero(MachineBasicBlock &MBB,
   BuildMI(MBB, I, DL, TII.get(Z80::AND_n)).addImm(1);
 }
 
+/// Sets the carry exactly when \p LHS is below \p RHS, unsigned, for values
+/// held as pairs from the low one up: the first pair is subtracted and each
+/// one after with the borrow. A constant pair is taken as immediates, with no
+/// pair of its own.
+bool Z80InstructionSelector::emitOrderChain(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator I, const DebugLoc &DL,
+    ArrayRef<Register> LHS, ArrayRef<Register> RHS, MachineRegisterInfo &MRI) {
+  for (unsigned K = 0; K != LHS.size(); ++K) {
+    if (!RBI.constrainGenericRegister(LHS[K], Z80::GR16RegClass, MRI))
+      return false;
+    if (std::optional<APInt> C = getIConstantVRegVal(RHS[K], MRI)) {
+      BuildMI(MBB, I, DL,
+              TII.get(K ? Z80::CMP16_SBC_FLAGS_IMM : Z80::CMP16_FLAGS_IMM))
+          .addReg(LHS[K])
+          .addImm(C->getZExtValue() & 0xFFFF);
+      continue;
+    }
+    if (!RBI.constrainGenericRegister(RHS[K], Z80::GR16RegClass, MRI))
+      return false;
+    BuildMI(MBB, I, DL, TII.get(K ? Z80::CMP16_SBC_FLAGS : Z80::CMP16_FLAGS))
+        .addReg(LHS[K])
+        .addReg(RHS[K]);
+  }
+  return true;
+}
+
 bool Z80InstructionSelector::emitFusedCompareAndBranch(
     MachineBasicBlock &MBB, MachineInstr &MI, MachineInstr &CmpMI,
     MachineRegisterInfo &MRI) {
@@ -849,11 +878,9 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
       // The legalizer leaves no signed order on pairs.
       return false;
     } else {
-      // Unsigned ULT/UGE: CMP16_FLAGS sets carry flag.
-      if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
-          !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
+      // Unsigned ULT/UGE: the carry decides.
+      if (!emitOrderChain(MBB, MI, DL, LHS, RHS, MRI))
         return false;
-      BuildMI(MBB, MI, DL, TII.get(Z80::CMP16_FLAGS)).addReg(LHS).addReg(RHS);
     }
   } else {
     return false;
@@ -911,21 +938,8 @@ bool Z80InstructionSelector::emit32CompareFlags(
     std::swap(LhsHi, RhsHi);
   }
 
-  if (!RBI.constrainGenericRegister(LhsLo, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(LhsHi, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(RhsLo, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(RhsHi, Z80::GR16RegClass, MRI))
+  if (!emitOrderChain(MBB, InsertPt, DL, {LhsLo, LhsHi}, {RhsLo, RhsHi}, MRI))
     return false;
-
-  // SUB_HL_rr (low 16 bits) + CMP16_SBC_FLAGS (high 16 bits) sets carry.
-  if (!RBI.constrainGenericRegister(RhsLo, Z80::GR16_BCDERegClass, MRI))
-    return false;
-  BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Z80::HL)
-      .addReg(LhsLo);
-  BuildMI(MBB, InsertPt, DL, TII.get(Z80::SUB_HL_rr)).addReg(RhsLo);
-  BuildMI(MBB, InsertPt, DL, TII.get(Z80::CMP16_SBC_FLAGS))
-      .addReg(LhsHi)
-      .addReg(RhsHi);
 
   NormalizedPred = Pred;
   return true;
@@ -978,31 +992,9 @@ bool Z80InstructionSelector::emit64CompareFlags(
     std::swap(LhsW3, RhsW3);
   }
 
-  if (!RBI.constrainGenericRegister(LhsW0, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(LhsW1, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(LhsW2, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(LhsW3, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(RhsW0, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(RhsW1, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(RhsW2, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(RhsW3, Z80::GR16RegClass, MRI))
+  if (!emitOrderChain(MBB, InsertPt, DL, {LhsW0, LhsW1, LhsW2, LhsW3},
+                      {RhsW0, RhsW1, RhsW2, RhsW3}, MRI))
     return false;
-
-  // SUB_HL_rr (W0) + CMP16_SBC_FLAGS (W1, W2, W3) chains carry.
-  if (!RBI.constrainGenericRegister(RhsW0, Z80::GR16_BCDERegClass, MRI))
-    return false;
-  BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Z80::HL)
-      .addReg(LhsW0);
-  BuildMI(MBB, InsertPt, DL, TII.get(Z80::SUB_HL_rr)).addReg(RhsW0);
-  BuildMI(MBB, InsertPt, DL, TII.get(Z80::CMP16_SBC_FLAGS))
-      .addReg(LhsW1)
-      .addReg(RhsW1);
-  BuildMI(MBB, InsertPt, DL, TII.get(Z80::CMP16_SBC_FLAGS))
-      .addReg(LhsW2)
-      .addReg(RhsW2);
-  BuildMI(MBB, InsertPt, DL, TII.get(Z80::CMP16_SBC_FLAGS))
-      .addReg(LhsW3)
-      .addReg(RhsW3);
 
   NormalizedPred = Pred;
   return true;
@@ -2937,10 +2929,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           break;
         }
 
-        if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
-            !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
+        if (!emitOrderChain(MBB, MI, DL, LHS, RHS, MRI))
           return false;
-        BuildMI(MBB, MI, DL, TII.get(Z80::CMP16_FLAGS)).addReg(LHS).addReg(RHS);
 
         switch (Pred) {
         case CmpInst::ICMP_ULT:
