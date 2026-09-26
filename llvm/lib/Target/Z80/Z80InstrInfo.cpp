@@ -899,84 +899,6 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
-  case Z80::XOR_CMP_EQ16:
-  case Z80::XOR_CMP_NE16: {
-    // XOR-based 16-bit equality comparison.
-    // Compares two GR16 registers using byte-level XOR, produces 0/1 in A.
-    // Does NOT clobber the source register pairs (unlike SBC HL,DE).
-    // Only clobbers A and B.
-    //
-    // Sequence: LD A,lhs_hi; XOR rhs_hi; LD B,A; LD A,lhs_lo; XOR rhs_lo; OR B
-    // Then normalize: EQ → SUB 1; SBC A,A; AND 1
-    //                 NE → ADD 0xFF; SBC A,A; AND 1
-    Register LHSReg = MI.getOperand(0).getReg();
-    Register RHSReg = MI.getOperand(1).getReg();
-    Register LHS_hi = TRI->getSubReg(LHSReg, Z80::sub_hi);
-    Register LHS_lo = TRI->getSubReg(LHSReg, Z80::sub_lo);
-    Register RHS_hi = TRI->getSubReg(RHSReg, Z80::sub_hi);
-    Register RHS_lo = TRI->getSubReg(RHSReg, Z80::sub_lo);
-
-    // XOR opcode table indexed by gr8RegToIndex
-    // XOR high bytes, save to B
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LHS_hi);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, RHS_hi);
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::B, Z80::A);
-    // XOR low bytes, OR with saved high result
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LHS_lo);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, RHS_lo);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::OR_r, Z80::B);
-
-    // Normalize to 0/1
-    if (MI.getOpcode() == Z80::XOR_CMP_EQ16) {
-      // A=0 (equal) → SUB 1 sets carry → SBC A,A → 0xFF → AND 1 → 1
-      BuildMI(MBB, MI, DL, get(Z80::SUB_n)).addImm(1);
-    } else {
-      // A=0 (equal) → ADD 0xFF no carry → SBC A,A → 0 → AND 1 → 0
-      BuildMI(MBB, MI, DL, get(Z80::ADD_A_n)).addImm(0xFF);
-    }
-    Z80::buildSbcAA(MBB, MI, DL, *this);
-    BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
-
-    MI.eraseFromParent();
-    return true;
-  }
-
-  case Z80::SM83_CMP_ZERO16: {
-    // Lightweight 16-bit zero test: LD A,lo; OR hi — sets Z if reg==0.
-    // Only clobbers A (not B), saving register pressure in loops.
-    Register SrcReg = MI.getOperand(0).getReg();
-    Register Lo = TRI->getSubReg(SrcReg, Z80::sub_lo);
-    Register Hi = TRI->getSubReg(SrcReg, Z80::sub_hi);
-
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Lo);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::OR_r, Hi);
-
-    MI.eraseFromParent();
-    return true;
-  }
-  case Z80::SM83_CMP_Z16:
-  case Z80::XOR_CMP_Z16: {
-    // 16-bit XOR-based equality comparison — sets Z flag directly.
-    // Sequence: LD A,lhs_hi; XOR rhs_hi; LD B,A; LD A,lhs_lo; XOR rhs_lo; OR B
-    // After OR B: Z=1 if equal, Z=0 if not equal.
-    Register LHSReg = MI.getOperand(0).getReg();
-    Register RHSReg = MI.getOperand(1).getReg();
-    Register LHS_hi = TRI->getSubReg(LHSReg, Z80::sub_hi);
-    Register LHS_lo = TRI->getSubReg(LHSReg, Z80::sub_lo);
-    Register RHS_hi = TRI->getSubReg(RHSReg, Z80::sub_hi);
-    Register RHS_lo = TRI->getSubReg(RHSReg, Z80::sub_lo);
-
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LHS_hi);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, RHS_hi);
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::B, Z80::A);
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, LHS_lo);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, RHS_lo);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::OR_r, Z80::B);
-
-    MI.eraseFromParent();
-    return true;
-  }
-
   case Z80::SUB_HL_rr: {
     // 16-bit subtraction: HL = HL - rr (no borrow in).
     Register RHS = MI.getOperand(0).getReg();
@@ -1736,19 +1658,6 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::SBC_HL_rr_BIO: // LD A,r(1) + RRCA(1) + SBC HL,rr(2) + SBC A,A(1) +
                            // AND n(2) = 7
     return 7;
-
-  // Zero test pseudo
-  case Z80::SM83_CMP_ZERO16: // LD A,lo + OR hi = 2
-    return 2;
-
-  // XOR-based comparison pseudos
-  case Z80::SM83_CMP_Z16: // LD+XOR+LD B,A+LD+XOR+OR B = 6
-  case Z80::XOR_CMP_Z16:
-    return 6;
-  case Z80::XOR_CMP_EQ16: // 6 (XOR chain) + SUB 1(2) + SBC A,A(1) + AND 1(2) =
-                          // 11
-  case Z80::XOR_CMP_NE16:
-    return 11;
 
   // SM83 signed overflow pseudos: 12 x 1-byte + 1 x 2-byte = 14 bytes
   case Z80::SM83_SADDO_HL_rr:

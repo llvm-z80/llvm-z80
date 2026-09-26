@@ -9,7 +9,7 @@
 ; CHECK-LABEL: name: eq_small_const
 ; CHECK:      COPY %{{[0-9]+}}.sub_hi
 ; CHECK:      $a = COPY %{{[0-9]+}}.sub_lo
-; CHECK-NEXT: SUB_n 42
+; CHECK-NEXT: XOR_n 42
 ; CHECK-NEXT: OR_r
 ; CHECK-NOT:  $hl = COPY
 

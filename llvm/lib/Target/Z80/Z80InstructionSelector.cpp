@@ -60,6 +60,15 @@ private:
   bool tryNarrowSDivMod16(MachineInstr &MI, bool IsDiv);
   bool emitFusedCompareAndBranch(MachineBasicBlock &MBB, MachineInstr &MI,
                                  MachineInstr &CmpMI, MachineRegisterInfo &MRI);
+  bool emitEqualityTest(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                        const DebugLoc &DL, Register LHS, Register RHS,
+                        bool FlagsOnly, MachineRegisterInfo &MRI);
+  bool emitWideEqualityTest(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator I, const DebugLoc &DL,
+                            ArrayRef<Register> LHS, ArrayRef<Register> RHS,
+                            MachineRegisterInfo &MRI);
+  void emitBoolFromZero(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                        const DebugLoc &DL, bool Equal);
   bool emit32CompareFlags(MachineBasicBlock &MBB,
                           MachineBasicBlock::iterator InsertPt,
                           CmpInst::Predicate Pred, Register LhsLo,
@@ -636,6 +645,112 @@ bool Z80InstructionSelector::selectMulByConst(MachineInstr &MI) {
   return true;
 }
 
+/// Sets the Z flag exactly when the byte or pair \p LHS equals \p RHS, for
+/// a branch and a 0/1 value alike. Unless \p FlagsOnly, A is also left zero
+/// exactly then, for the value to be made from; a branch compares a byte with
+/// CP instead, which leaves \p LHS in A.
+///
+/// A pair is equal when the differences of its two bytes OR to zero. A byte
+/// compared with zero is its own difference and goes into the OR as it is,
+/// so a constant with a zero byte needs no register for the other.
+bool Z80InstructionSelector::emitEqualityTest(MachineBasicBlock &MBB,
+                                              MachineBasicBlock::iterator I,
+                                              const DebugLoc &DL, Register LHS,
+                                              Register RHS, bool FlagsOnly,
+                                              MachineRegisterInfo &MRI) {
+  std::optional<int64_t> C = getIConstantVRegSExtVal(RHS, MRI);
+
+  if (MRI.getType(LHS).getSizeInBits() <= 8) {
+    if (!RBI.constrainGenericRegister(LHS, Z80::GR8RegClass, MRI) ||
+        (!C && !RBI.constrainGenericRegister(RHS, Z80::GR8RegClass, MRI)))
+      return false;
+    BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(LHS);
+    if (C && (*C & 0xFF) == 0) {
+      // A is its own difference from zero; only a branch needs the flag.
+      if (FlagsOnly)
+        Z80::buildAlu8(MBB, I, DL, TII, Z80::OR_r, Z80::A);
+    } else if (C) {
+      BuildMI(MBB, I, DL, TII.get(FlagsOnly ? Z80::CP_n : Z80::SUB_n))
+          .addImm(*C & 0xFF);
+    } else {
+      BuildMI(MBB, I, DL, TII.get(FlagsOnly ? Z80::CP_r : Z80::SUB_r))
+          .addReg(RHS);
+    }
+    return true;
+  }
+
+  if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
+      (!C && !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI)))
+    return false;
+  auto byteOf = [&](Register Pair, unsigned Sub) {
+    Register Byte = MRI.createVirtualRegister(&Z80::GR8RegClass);
+    BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), Byte)
+        .addReg(Pair, RegState{}, Sub);
+    return Byte;
+  };
+  // Leaves in A the difference of one byte of the pair.
+  auto difference = [&](unsigned Sub) {
+    Register Other = C ? Register() : byteOf(RHS, Sub);
+    BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), Z80::A)
+        .addReg(LHS, RegState{}, Sub);
+    if (Other) {
+      BuildMI(MBB, I, DL, TII.get(Z80::XOR_r)).addReg(Other);
+      return;
+    }
+    uint8_t V = (*C >> (Sub == Z80::sub_hi ? 8 : 0)) & 0xFF;
+    if (V)
+      BuildMI(MBB, I, DL, TII.get(Z80::XOR_n)).addImm(V);
+  };
+  uint8_t Lo = C ? *C & 0xFF : 1;
+  uint8_t Hi = C ? (*C >> 8) & 0xFF : 1;
+  if (!Hi || !Lo) {
+    unsigned ZeroSub = !Hi ? Z80::sub_hi : Z80::sub_lo;
+    Register Zero = byteOf(LHS, ZeroSub);
+    difference(!Hi ? Z80::sub_lo : Z80::sub_hi);
+    BuildMI(MBB, I, DL, TII.get(Z80::OR_r)).addReg(Zero);
+    return true;
+  }
+  difference(Z80::sub_hi);
+  Register HiDiff = MRI.createVirtualRegister(&Z80::GR8RegClass);
+  BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), HiDiff).addReg(Z80::A);
+  difference(Z80::sub_lo);
+  BuildMI(MBB, I, DL, TII.get(Z80::OR_r)).addReg(HiDiff);
+  return true;
+}
+
+/// The same for a value split into pairs: the differences of all of them,
+/// ORed together, leave A zero and the Z flag set exactly on equality.
+bool Z80InstructionSelector::emitWideEqualityTest(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator I, const DebugLoc &DL,
+    ArrayRef<Register> LHS, ArrayRef<Register> RHS, MachineRegisterInfo &MRI) {
+  Register Acc;
+  for (unsigned K = 0; K != LHS.size(); ++K) {
+    if (!emitEqualityTest(MBB, I, DL, LHS[K], RHS[K], /*FlagsOnly=*/false, MRI))
+      return false;
+    if (Acc)
+      BuildMI(MBB, I, DL, TII.get(Z80::OR_r)).addReg(Acc);
+    if (K + 1 == LHS.size())
+      break;
+    Acc = MRI.createVirtualRegister(&Z80::GR8RegClass);
+    BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), Acc).addReg(Z80::A);
+  }
+  return true;
+}
+
+/// Turns A, left zero exactly on equality by the tests above, into the 0/1
+/// value of EQ or NE: SUB 1 borrows only from zero and ADD 0xFF carries from
+/// anything else, and SBC A,A spreads the carry.
+void Z80InstructionSelector::emitBoolFromZero(MachineBasicBlock &MBB,
+                                              MachineBasicBlock::iterator I,
+                                              const DebugLoc &DL, bool Equal) {
+  if (Equal)
+    BuildMI(MBB, I, DL, TII.get(Z80::SUB_n)).addImm(1);
+  else
+    BuildMI(MBB, I, DL, TII.get(Z80::ADD_A_n)).addImm(0xFF);
+  Z80::buildSbcAA(MBB, I, DL, TII);
+  BuildMI(MBB, I, DL, TII.get(Z80::AND_n)).addImm(1);
+}
+
 bool Z80InstructionSelector::emitFusedCompareAndBranch(
     MachineBasicBlock &MBB, MachineInstr &MI, MachineInstr &CmpMI,
     MachineRegisterInfo &MRI) {
@@ -693,47 +808,20 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
   bool IsSigned = ICmpInst::isSigned(Pred);
 
   if (LHSTy.getSizeInBits() <= 8) {
-    if (!IsSigned) {
-      // Check if comparing with a constant for optimization.
-      auto getConst = [&](Register Reg) -> std::optional<int64_t> {
-        MachineInstr *Def = MRI.getVRegDef(Reg);
-        if (Def && Def->getOpcode() == TargetOpcode::G_CONSTANT)
-          return Def->getOperand(1).getCImm()->getZExtValue();
-        return std::nullopt;
-      };
-      // EQ/NE comparisons are symmetric; for ULT/UGE we can only use
-      // immediate on RHS.
-      auto ConstRHS = getConst(RHS);
-      bool IsEqNe = (Pred == CmpInst::ICMP_EQ || Pred == CmpInst::ICMP_NE);
-      auto ConstLHS = IsEqNe ? getConst(LHS) : std::nullopt;
-
-      Register VarReg = LHS;
-      std::optional<int64_t> ConstVal = ConstRHS;
-      if (!ConstVal && ConstLHS) {
-        VarReg = RHS;
-        ConstVal = ConstLHS;
-      }
-
-      if (ConstVal) {
-        if (!RBI.constrainGenericRegister(VarReg, Z80::GR8RegClass, MRI))
-          return false;
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-            .addReg(VarReg);
-        if (*ConstVal == 0 && IsEqNe) {
-          // Compare with 0: OR A sets Z flag (1 byte, 4T)
-          BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(Z80::A);
-        } else {
-          // Compare with immediate: CP n (2 bytes, 7T)
-          BuildMI(MBB, MI, DL, TII.get(Z80::CP_n)).addImm(*ConstVal & 0xFF);
-        }
-      } else {
-        if (!RBI.constrainGenericRegister(LHS, Z80::GR8RegClass, MRI) ||
-            !RBI.constrainGenericRegister(RHS, Z80::GR8RegClass, MRI))
-          return false;
-        // Unsigned/eq/ne: CP compares A with operand, sets Z and C flags.
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(LHS);
+    if (Pred == CmpInst::ICMP_EQ || Pred == CmpInst::ICMP_NE) {
+      if (!emitEqualityTest(MBB, MI, DL, LHS, RHS, /*FlagsOnly=*/true, MRI))
+        return false;
+    } else if (!IsSigned) {
+      // CP sets the carry when A is below its operand.
+      std::optional<int64_t> C = getIConstantVRegSExtVal(RHS, MRI);
+      if (!RBI.constrainGenericRegister(LHS, Z80::GR8RegClass, MRI) ||
+          (!C && !RBI.constrainGenericRegister(RHS, Z80::GR8RegClass, MRI)))
+        return false;
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A).addReg(LHS);
+      if (C)
+        BuildMI(MBB, MI, DL, TII.get(Z80::CP_n)).addImm(*C & 0xFF);
+      else
         BuildMI(MBB, MI, DL, TII.get(Z80::CP_r)).addReg(RHS);
-      }
     } else {
       // The legalizer leaves a signed order only as x < 0 or x >= 0, which
       // asks for the sign bit alone. A value that dies here is shifted out of
@@ -754,124 +842,9 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
       }
     }
   } else if (LHSTy.getSizeInBits() <= 16) {
-    const auto &STI = MBB.getParent()->getSubtarget<Z80Subtarget>();
     if (Pred == CmpInst::ICMP_EQ || Pred == CmpInst::ICMP_NE) {
-      // Check if either operand is a small constant (0-255) for optimized
-      // comparison. For constant C with high byte 0:
-      //   C==0: LD A, L; OR H          (3 bytes, 12T)
-      //   C>0:  LD A, L; SUB C; OR H   (5 bytes, 19T)
-      // vs generic: LD DE,#C; AND A; SBC HL,DE (8 bytes, 37T)
-      // Z flag is set iff the 16-bit value equals C.
-      Register VarReg;
-      int64_t ConstVal = -1;
-      auto getSmallConst = [&](Register Reg) -> bool {
-        MachineInstr *Def = MRI.getVRegDef(Reg);
-        if (!Def || Def->getOpcode() != TargetOpcode::G_CONSTANT)
-          return false;
-        int64_t Val = Def->getOperand(1).getCImm()->getSExtValue();
-        if (Val >= 0 && Val <= 255) {
-          ConstVal = Val;
-          return true;
-        }
+      if (!emitEqualityTest(MBB, MI, DL, LHS, RHS, /*FlagsOnly=*/true, MRI))
         return false;
-      };
-      if (getSmallConst(RHS))
-        VarReg = LHS;
-      else if (getSmallConst(LHS))
-        VarReg = RHS;
-
-      if (VarReg.isValid() && !STI.hasSM83()) {
-        // Z80: Optimized small-constant EQ/NE test via SUB+OR. Both halves are
-        // named where the value already sits, as the byte-wise paths below do:
-        // moving it into HL first would tie the allocator to one pair and leave
-        // a definition of that pair which the halves outlive.
-        if (!RBI.constrainGenericRegister(VarReg, Z80::GR16RegClass, MRI))
-          return false;
-        Register VarHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), VarHi)
-            .addReg(VarReg, RegState{}, Z80::sub_hi);
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-            .addReg(VarReg, RegState{}, Z80::sub_lo);
-        if (ConstVal != 0)
-          BuildMI(MBB, MI, DL, TII.get(Z80::SUB_n)).addImm(ConstVal);
-        BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(VarHi);
-      } else if (STI.hasSM83()) {
-        // Check if RHS is constant 0 — use lightweight OR-based zero test.
-        bool RHSIsZero = false;
-        MachineInstr *RHSDef = MRI.getVRegDef(RHS);
-        if (RHSDef && RHSDef->getOpcode() == TargetOpcode::G_CONSTANT) {
-          auto *CI = RHSDef->getOperand(1).getCImm();
-          RHSIsZero = CI && CI->isZero();
-        }
-
-        if (RHSIsZero) {
-          if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI))
-            return false;
-          BuildMI(MBB, MI, DL, TII.get(Z80::SM83_CMP_ZERO16)).addReg(LHS);
-        } else {
-          // SM83: XOR-based comparison sets Z flag correctly for 16-bit EQ/NE.
-          if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
-              !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
-            return false;
-          BuildMI(MBB, MI, DL, TII.get(Z80::SM83_CMP_Z16))
-              .addReg(LHS)
-              .addReg(RHS);
-        }
-      } else {
-        // Z80: XOR-based 16-bit EQ/NE — avoids clobbering HL and doesn't
-        // need BC/DE for constants, reducing register pressure.
-        //   LD A, lhs_hi; XOR rhs_hi; LD tmp, A;
-        //   LD A, lhs_lo; XOR rhs_lo; OR tmp   → Z set iff equal
-        if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI))
-          return false;
-
-        // Check if RHS is a constant for immediate XOR optimization.
-        MachineInstr *RHSDef = MRI.getVRegDef(RHS);
-        int64_t CVal = -1;
-        if (RHSDef && RHSDef->getOpcode() == TargetOpcode::G_CONSTANT)
-          CVal = RHSDef->getOperand(1).getCImm()->getZExtValue() & 0xFFFF;
-
-        Register TmpReg = MRI.createVirtualRegister(&Z80::GR8RegClass);
-
-        if (CVal >= 0) {
-          uint8_t Lo = CVal & 0xFF;
-          uint8_t Hi = (CVal >> 8) & 0xFF;
-          // High byte: LD A, lhs_hi; XOR #Hi
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-              .addReg(LHS, RegState{}, Z80::sub_hi);
-          if (Hi)
-            BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(Hi);
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), TmpReg)
-              .addReg(Z80::A);
-          // Low byte: LD A, lhs_lo; XOR #Lo; OR tmp
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-              .addReg(LHS, RegState{}, Z80::sub_lo);
-          if (Lo)
-            BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(Lo);
-          BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(TmpReg);
-        } else {
-          // Variable RHS: XOR with register sub-bytes.
-          if (!RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
-            return false;
-          Register RhsHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
-          Register RhsLo = MRI.createVirtualRegister(&Z80::GR8RegClass);
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), RhsHi)
-              .addReg(RHS, RegState{}, Z80::sub_hi);
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), RhsLo)
-              .addReg(RHS, RegState{}, Z80::sub_lo);
-          // High byte
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-              .addReg(LHS, RegState{}, Z80::sub_hi);
-          BuildMI(MBB, MI, DL, TII.get(Z80::XOR_r)).addReg(RhsHi);
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), TmpReg)
-              .addReg(Z80::A);
-          // Low byte
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::A)
-              .addReg(LHS, RegState{}, Z80::sub_lo);
-          BuildMI(MBB, MI, DL, TII.get(Z80::XOR_r)).addReg(RhsLo);
-          BuildMI(MBB, MI, DL, TII.get(Z80::OR_r)).addReg(TmpReg);
-        }
-      }
     } else if (IsSigned) {
       // The legalizer leaves no signed order on pairs.
       return false;
@@ -898,44 +871,19 @@ bool Z80InstructionSelector::emit32CompareFlags(
     CmpInst::Predicate &NormalizedPred, bool FusedBranch) {
 
   if (Pred == CmpInst::ICMP_EQ || Pred == CmpInst::ICMP_NE) {
-    if (!RBI.constrainGenericRegister(LhsLo, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(LhsHi, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(RhsLo, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(RhsHi, Z80::GR16RegClass, MRI))
+    if (!emitWideEqualityTest(MBB, InsertPt, DL, {LhsLo, LhsHi}, {RhsLo, RhsHi},
+                              MRI))
       return false;
-
     if (FusedBranch) {
-      // Fused compare-and-branch: use XOR_CMP_Z16 (no normalize) for each half,
-      // then OR to combine. Z=1 when equal, Z=0 when not.
-      // Flip NormalizedPred so the caller's jump mapping works correctly:
+      // Z is set on equality. Flip NormalizedPred so the caller's jump
+      // mapping works correctly:
       //   EQ → NE (caller emits JP_Z → jumps when Z=1 → equal)
       //   NE → EQ (caller emits JP_NZ → jumps when Z=0 → not equal)
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_Z16))
-          .addReg(LhsLo)
-          .addReg(RhsLo);
-      Register LoResult = MRI.createVirtualRegister(&Z80::GR8RegClass);
-      BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), LoResult)
-          .addReg(Z80::A);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_Z16))
-          .addReg(LhsHi)
-          .addReg(RhsHi);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::OR_r)).addReg(LoResult);
       NormalizedPred =
           (Pred == CmpInst::ICMP_EQ) ? CmpInst::ICMP_NE : CmpInst::ICMP_EQ;
     } else {
-      // Standalone: materialize 0/1 in A using XOR_CMP_EQ16 pairs.
-      // XOR_CMP_EQ16 returns 1 if equal, 0 if not.
-      // AND both halves: A = 1 only if full 32-bit values match.
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_EQ16))
-          .addReg(LhsLo)
-          .addReg(RhsLo);
-      Register LoEq = MRI.createVirtualRegister(&Z80::GR8RegClass);
-      BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), LoEq)
-          .addReg(Z80::A);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_EQ16))
-          .addReg(LhsHi)
-          .addReg(RhsHi);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::AND_r)).addReg(LoEq);
+      // Standalone: A holds the 0/1 result.
+      emitBoolFromZero(MBB, InsertPt, DL, Pred == CmpInst::ICMP_EQ);
       NormalizedPred = Pred;
     }
     return true;
@@ -991,77 +939,16 @@ bool Z80InstructionSelector::emit64CompareFlags(
     CmpInst::Predicate &NormalizedPred, bool FusedBranch) {
 
   if (Pred == CmpInst::ICMP_EQ || Pred == CmpInst::ICMP_NE) {
-    if (!RBI.constrainGenericRegister(LhsW0, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(LhsW1, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(LhsW2, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(LhsW3, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(RhsW0, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(RhsW1, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(RhsW2, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(RhsW3, Z80::GR16RegClass, MRI))
+    if (!emitWideEqualityTest(MBB, InsertPt, DL, {LhsW0, LhsW1, LhsW2, LhsW3},
+                              {RhsW0, RhsW1, RhsW2, RhsW3}, MRI))
       return false;
-
     if (FusedBranch) {
-      // Fused: four XOR_CMP_Z16 + OR combines all word pairs.
-      // Z=1 when all 8 bytes match.
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_Z16))
-          .addReg(LhsW0)
-          .addReg(RhsW0);
-      Register Tmp = MRI.createVirtualRegister(&Z80::GR8RegClass);
-      BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Tmp)
-          .addReg(Z80::A);
-
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_Z16))
-          .addReg(LhsW1)
-          .addReg(RhsW1);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::OR_r)).addReg(Tmp);
-      Tmp = MRI.createVirtualRegister(&Z80::GR8RegClass);
-      BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Tmp)
-          .addReg(Z80::A);
-
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_Z16))
-          .addReg(LhsW2)
-          .addReg(RhsW2);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::OR_r)).addReg(Tmp);
-      Tmp = MRI.createVirtualRegister(&Z80::GR8RegClass);
-      BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Tmp)
-          .addReg(Z80::A);
-
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_Z16))
-          .addReg(LhsW3)
-          .addReg(RhsW3);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::OR_r)).addReg(Tmp);
+      // Z is set on equality; flipped as for 32 bits.
       NormalizedPred =
           (Pred == CmpInst::ICMP_EQ) ? CmpInst::ICMP_NE : CmpInst::ICMP_EQ;
     } else {
-      // Standalone: XOR_CMP_EQ16 each word pair, AND all results together.
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_EQ16))
-          .addReg(LhsW0)
-          .addReg(RhsW0);
-      Register Tmp = MRI.createVirtualRegister(&Z80::GR8RegClass);
-      BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Tmp)
-          .addReg(Z80::A);
-
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_EQ16))
-          .addReg(LhsW1)
-          .addReg(RhsW1);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::AND_r)).addReg(Tmp);
-      Tmp = MRI.createVirtualRegister(&Z80::GR8RegClass);
-      BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Tmp)
-          .addReg(Z80::A);
-
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_EQ16))
-          .addReg(LhsW2)
-          .addReg(RhsW2);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::AND_r)).addReg(Tmp);
-      Tmp = MRI.createVirtualRegister(&Z80::GR8RegClass);
-      BuildMI(MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Tmp)
-          .addReg(Z80::A);
-
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::XOR_CMP_EQ16))
-          .addReg(LhsW3)
-          .addReg(RhsW3);
-      BuildMI(MBB, InsertPt, DL, TII.get(Z80::AND_r)).addReg(Tmp);
+      // Standalone: A holds the 0/1 result.
+      emitBoolFromZero(MBB, InsertPt, DL, Pred == CmpInst::ICMP_EQ);
       NormalizedPred = Pred;
     }
     return true;
@@ -2944,15 +2831,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         return std::nullopt;
       };
 
-      // Helper: emit SUB_r or SUB_n depending on whether operand is constant
-      auto emitSUB = [&](Register Reg) {
-        auto C = getRHSConst(Reg);
-        if (C)
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SUB_n))
-              .addImm(*C & 0xFF);
-        else
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SUB_r)).addReg(Reg);
-      };
       // Helper: emit CP_r or CP_n depending on whether operand is constant
       auto emitCP = [&](Register Reg) {
         auto C = getRHSConst(Reg);
@@ -2969,24 +2847,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
       switch (Pred) {
       case CmpInst::ICMP_EQ:
-        // EQ: A = LHS - RHS; SUB 1 (sets C only if A was 0); SBC A,A; AND 1
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
-            .addReg(LHS);
-        emitSUB(RHS);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SUB_n)).addImm(1);
-        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
-        break;
-
       case CmpInst::ICMP_NE:
-        // NE: A = LHS - RHS; ADD 0xFF (sets C if A was non-zero); SBC A,A; AND
-        // 1
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::A)
-            .addReg(LHS);
-        emitSUB(RHS);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::ADD_A_n)).addImm(0xFF);
-        Z80::buildSbcAA(MBB, MI, MI.getDebugLoc(), TII);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::AND_n)).addImm(1);
+        if (!emitEqualityTest(MBB, MI, MI.getDebugLoc(), LHS, RHS,
+                              /*FlagsOnly=*/false, MRI))
+          return false;
+        emitBoolFromZero(MBB, MI, MI.getDebugLoc(), Pred == CmpInst::ICMP_EQ);
         break;
 
       case CmpInst::ICMP_ULT:
@@ -3049,14 +2914,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       DebugLoc DL = MI.getDebugLoc();
 
       if (Pred == CmpInst::ICMP_EQ || Pred == CmpInst::ICMP_NE) {
-        // EQ/NE: XOR_CMP pseudo avoids SBC HL,DE (which clobbers HL).
-        // Expanded post-RA to byte-level XOR with known physical regs.
-        if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
-            !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
+        if (!emitEqualityTest(MBB, MI, DL, LHS, RHS, /*FlagsOnly=*/false, MRI))
           return false;
-        unsigned PseudoOpc =
-            (Pred == CmpInst::ICMP_EQ) ? Z80::XOR_CMP_EQ16 : Z80::XOR_CMP_NE16;
-        BuildMI(MBB, MI, DL, TII.get(PseudoOpc)).addReg(LHS).addReg(RHS);
+        emitBoolFromZero(MBB, MI, DL, Pred == CmpInst::ICMP_EQ);
       } else if (ICmpInst::isSigned(Pred)) {
         // The legalizer leaves no signed order on pairs.
         return false;
@@ -3154,53 +3014,12 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     if (LHSTy.getSizeInBits() <= 16) {
       // 16-bit fused compare-and-branch.
-      // EQ/NE: Z80 uses SUB_HL_rr (SBC HL,rr sets Z correctly).
-      //        SM83 uses SM83_CMP_Z16 (XOR+OR sets Z correctly).
+      // EQ/NE: the shared equality test sets Z.
       // ULT/UGE: use CMP16_FLAGS (8-bit SUB/SBC chain, carry flag).
-      const auto &STI = MF.getSubtarget<Z80Subtarget>();
       if (Opcode == Z80::G_Z80_CMP_BR_EQ || Opcode == Z80::G_Z80_CMP_BR_NE) {
-        if (STI.hasSM83()) {
-          // Check if RHS is constant 0 — use lightweight OR-based zero test
-          // (LD A,lo; OR hi) which only clobbers A, not A+B.
-          // This avoids spilling loop-carried values around the comparison.
-          bool RHSIsZero = false;
-          MachineInstr *RHSDef = MRI.getVRegDef(RHS);
-          if (RHSDef && RHSDef->getOpcode() == TargetOpcode::G_CONSTANT) {
-            auto *CI = RHSDef->getOperand(1).getCImm();
-            RHSIsZero = CI && CI->isZero();
-          }
-
-          if (RHSIsZero) {
-            // LHS == 0: LD A,lo; OR hi — sets Z if LHS is zero.
-            // Only clobbers A (not B), reducing register pressure.
-            if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI))
-              return false;
-            // Emit: LD A, LHS_lo; OR LHS_hi
-            // The actual sub-register extraction happens in expandPostRAPseudo
-            // via a new pseudo SM83_CMP_ZERO16.
-            BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SM83_CMP_ZERO16))
-                .addReg(LHS);
-          } else {
-            // SM83: XOR-based comparison sets Z flag correctly for 16-bit
-            // EQ/NE.
-            if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
-                !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
-              return false;
-            BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SM83_CMP_Z16))
-                .addReg(LHS)
-                .addReg(RHS);
-          }
-        } else {
-          // Z80: AND A; SBC HL,rr sets Z flag correctly for 16-bit EQ/NE.
-          if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
-              !RBI.constrainGenericRegister(RHS, Z80::GR16_BCDERegClass, MRI))
-            return false;
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY),
-                  Z80::HL)
-              .addReg(LHS);
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SUB_HL_rr))
-              .addReg(RHS);
-        }
+        if (!emitEqualityTest(MBB, MI, MI.getDebugLoc(), LHS, RHS,
+                              /*FlagsOnly=*/true, MRI))
+          return false;
       } else {
         if (!RBI.constrainGenericRegister(LHS, Z80::GR16RegClass, MRI) ||
             !RBI.constrainGenericRegister(RHS, Z80::GR16RegClass, MRI))
@@ -3254,11 +3073,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return false;
 
     // Materialize boolean from flags into A register.
-    if (NormPred == CmpInst::ICMP_EQ) {
-      // A already holds 1 (equal) or 0 (not equal).
-    } else if (NormPred == CmpInst::ICMP_NE) {
-      // A holds 1 if equal → flip to get NE.
-      BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
+    if (NormPred == CmpInst::ICMP_EQ || NormPred == CmpInst::ICMP_NE) {
+      // A already holds the 0/1 result.
     } else if (NormPred == CmpInst::ICMP_ULT) {
       // Carry flag set if LHS < RHS.
       Z80::buildSbcAA(MBB, MI, DL, TII);
@@ -3296,10 +3112,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return false;
 
     // Materialize boolean from flags (same as G_Z80_ICMP32).
-    if (NormPred == CmpInst::ICMP_EQ) {
-      // A already holds 1 (equal) or 0 (not equal).
-    } else if (NormPred == CmpInst::ICMP_NE) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::XOR_n)).addImm(1);
+    if (NormPred == CmpInst::ICMP_EQ || NormPred == CmpInst::ICMP_NE) {
+      // A already holds the 0/1 result.
     } else if (NormPred == CmpInst::ICMP_ULT) {
       Z80::buildSbcAA(MBB, MI, DL, TII);
       BuildMI(MBB, MI, DL, TII.get(Z80::AND_n)).addImm(1);

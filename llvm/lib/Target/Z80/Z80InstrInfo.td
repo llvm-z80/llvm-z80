@@ -822,33 +822,6 @@ def CMP16_SBC_FLAGS : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
   let mayStore = false;
 }
 
-// 16-bit XOR-based equality comparison pseudo-instructions.
-// These compare two 16-bit registers using byte-level XOR and produce 0/1 in A.
-// Expanded in expandPostRAPseudo after register allocation, when physical
-// registers are known and sub-register extraction is safe.
-// Uses A, B as scratch. Does NOT clobber HL/DE (unlike SBC HL,DE).
-def XOR_CMP_EQ16 : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
-  let Defs = [A, B, FLAGS];
-  let mayLoad = false;
-  let mayStore = false;
-}
-def XOR_CMP_NE16 : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
-  let Defs = [A, B, FLAGS];
-  let mayLoad = false;
-  let mayStore = false;
-}
-
-// 16-bit XOR-based equality comparison — sets Z flag directly.
-// XORs both bytes, ORs results: Z=1 if equal, Z=0 if not.
-// Same as SM83_CMP_Z16 but available on Z80.
-// Used in fused compare-and-branch to avoid 0/1 normalize overhead.
-// 6 bytes: LD A,hi; XOR hi'; LD B,A; LD A,lo; XOR lo'; OR B
-def XOR_CMP_Z16 : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
-  let Defs = [A, B, FLAGS];
-  let mayLoad = false;
-  let mayStore = false;
-}
-
 // 16-bit shift right pseudo-instructions.
 // Expanded in expandPostRAPseudo to SRL/SRA hi + RR lo.
 def LSHR16 : Z80Pseudo<(outs GR16:$dst), (ins GR16:$src)> {
