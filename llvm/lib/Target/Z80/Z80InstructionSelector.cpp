@@ -1731,9 +1731,10 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
   }
 
   case TargetOpcode::G_GLOBAL_VALUE: {
-    // Load address of global variable
+    // Load address of global variable, displaced by the constant the
+    // combiner folded into it.
     Register DstReg = MI.getOperand(0).getReg();
-    const GlobalValue *GV = MI.getOperand(1).getGlobal();
+    const MachineOperand &GVOp = MI.getOperand(1);
 
     // Constrain destination to 16-bit register class
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
@@ -1741,7 +1742,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     // Use LD_r16_nn pseudo with the global's address
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::LD_rr_nn), DstReg)
-        .addGlobalAddress(GV);
+        .addGlobalAddress(GVOp.getGlobal(), GVOp.getOffset());
     MI.eraseFromParent();
     return true;
   }
