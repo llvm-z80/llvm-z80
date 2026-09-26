@@ -1,5 +1,8 @@
 ; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=z80asm < %s | FileCheck %s
 
+; CHECK:        EXTERN	_ext_var
+; CHECK:        EXTERN	_foo
+
 ; 1. Function in code_compiler section with GLOBAL directive and branch label
 ; CHECK:        SECTION code_compiler
 ; CHECK-NEXT:   GLOBAL	_test_branch
@@ -11,9 +14,11 @@
 ; CHECK-NOT:   .Lfunc_end
 ; CHECK-NOT:   .size
 ; CHECK-NOT:   .type
+@ext_var = external global i16
 declare void @foo()
 define void @test_branch(i1 %c) {
 entry:
+  %v = load i16, ptr @ext_var
   br i1 %c, label %t, label %f
 t:
   call void @foo()

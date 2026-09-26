@@ -7,6 +7,8 @@ void test_func(char c) {
     external_call();
 }
 
+// CHECK:        EXTERN	_external_call
+
 // CHECK:        SECTION code_compiler
 // CHECK-NEXT:   GLOBAL	_test_func
 // CHECK-LABEL: _test_func:
