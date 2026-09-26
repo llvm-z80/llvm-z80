@@ -48,7 +48,13 @@ public:
     };
     for (MachineBasicBlock &MBB : MF)
       for (MachineInstr &MI : MBB) {
-        if (!MI.isDebugInstr() || none_of(MI.debug_operands(), IsDangling))
+        // Only DBG_VALUE / DBG_VALUE_LIST / DBG_INSTR_REF carry value operands;
+        // debug_operands() asserts isDebugValueLike(). DBG_LABEL / DBG_PHI are
+        // debug instrs too but have NO value operands -- calling debug_operands()
+        // on them drop_front(2)s a shorter operand list into an out-of-bounds
+        // range, and in a release (no-assert) build the garbage iteration
+        // segfaults in setReg (crashed rcbios @rwoper / @bios_write_c DBG_LABEL).
+        if (!MI.isDebugValueLike() || none_of(MI.debug_operands(), IsDangling))
           continue;
         // A location with an unavailable operand cannot be evaluated at all,
         // so the canonical form marks the whole value undef.
