@@ -560,6 +560,71 @@ class Z80Pseudo<dag outs, dag ins> : Instruction {
   let isCodeGenOnly = true;
 }
 
+// The 8-bit ALU with the accumulator as an operand. The real instructions
+// name A implicitly, so selecting them directly pins every operand and
+// result to A through physical copies. These take the accumulator as a
+// virtual register in Ac instead, which leaves the register allocator to
+// decide where each value lives, and expand into the real instructions once
+// it has put them in A.
+multiclass AccALU {
+  let Constraints = "$dst = $lhs", Defs = [FLAGS],
+      mayLoad = false, mayStore = false in {
+    def _r : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR8:$rhs)>;
+    def _n : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, i8imm:$rhs)>;
+  }
+}
+defm ADD_Ac : AccALU;
+defm SUB_Ac : AccALU;
+defm AND_Ac : AccALU;
+defm OR_Ac  : AccALU;
+defm XOR_Ac : AccALU;
+
+// Comparisons, which set the flags and leave A as it was: CP, and OR A for
+// A against zero.
+let Defs = [FLAGS], isCompare = true, mayLoad = false, mayStore = false in {
+  def CP_Ac_r : Z80Pseudo<(outs), (ins Ac:$lhs, GR8:$rhs)>;
+  def CP_Ac_n : Z80Pseudo<(outs), (ins Ac:$lhs, i8imm:$rhs)>;
+  def TST_Ac : Z80Pseudo<(outs), (ins Ac:$src)>;
+}
+
+// Operations on A alone: ADD A,A doubles it, and CPL, the rotates and SM83's
+// SWAP name no other register.
+let Constraints = "$dst = $src", Defs = [FLAGS],
+    mayLoad = false, mayStore = false in {
+  def ADD_Ac_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
+  def CPL_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
+  def RLCA_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
+  def RRCA_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
+  let Predicates = [HasSM83] in
+  def SWAP_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
+}
+
+// SM83's loads and stores of A at an absolute address, the second in the
+// top page.
+let Predicates = [HasSM83] in {
+  let mayLoad = true, mayStore = false in {
+    def SM83_LD_Ac_nnind : Z80Pseudo<(outs Ac:$dst), (ins i16imm:$addr)>;
+    def SM83_LDH_Ac_nind : Z80Pseudo<(outs Ac:$dst), (ins i8imm:$port)>;
+  }
+  let mayLoad = false, mayStore = true in {
+    def SM83_LD_nnind_Ac : Z80Pseudo<(outs), (ins Ac:$src, i16imm:$addr)>;
+    def SM83_LDH_nind_Ac : Z80Pseudo<(outs), (ins Ac:$src, i8imm:$port)>;
+  }
+}
+
+// SBC A,A: nothing of A survives, so the result is the carry alone, spread
+// to 0 or 0xFF.
+let Uses = [FLAGS], Defs = [FLAGS], mayLoad = false, mayStore = false in
+def SBC_Ac_Ac : Z80Pseudo<(outs Ac:$dst), (ins)>;
+
+// IN r,(C) and OUT (C),r name their register in the opcode. These take it as
+// an operand, any of them, and expand to the one allocated.
+let Predicates = [HasZ80], hasSideEffects = true, mayLoad = false,
+    mayStore = false, Uses = [C] in {
+  def IN8_C : Z80Pseudo<(outs GR8:$dst), (ins)> { let Defs = [FLAGS]; }
+  def OUT8_C : Z80Pseudo<(outs), (ins GR8:$src)>;
+}
+
 // Spill/Reload pseudo instructions for stack slots (frame index).
 // No static Defs: small offsets expand to IX+d (no clobbers), large offsets
 // are expanded in eliminateFrameIndex with register scavenging.
@@ -608,14 +673,16 @@ def SUB_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi, i32imm:$offset)> {
   let mayStore = false;
   let Predicates = [HasZ80];
 }
-// 8-bit ALU against a frame slot. $op says which operation, so one pseudo
-// covers them all. Selection cannot name the addressing mode yet: whether
-// the frame pointer exists and whether the displacement fits are settled in
+// 8-bit ALU against a frame slot, with the accumulator as an operand as in
+// the register forms. $op says which operation, so one pseudo covers them
+// all. Selection cannot name the addressing mode yet: whether the frame
+// pointer exists and whether the displacement fits are settled in
 // eliminateFrameIndex, which picks IX+d, an address in a pair, or unfolds
 // back to a reload and a register ALU.
-def ALU_A_FI : Z80Pseudo<(outs), (ins i32imm:$op, i32imm:$fi, i32imm:$offset)> {
-  let Uses = [A];
-  let Defs = [A, FLAGS];
+def ALU_Ac_FI : Z80Pseudo<(outs Ac:$dst),
+                          (ins Ac:$lhs, i32imm:$op, i32imm:$fi, i32imm:$offset)> {
+  let Constraints = "$dst = $lhs";
+  let Defs = [FLAGS];
   let mayLoad = true;
   let mayStore = false;
   let Predicates = [HasZ80];
@@ -656,13 +723,11 @@ def LEA_IX_FI : Z80Pseudo<(outs GR16:$dst), (ins i32imm:$fi)> {
 //   DE → LD A,(DE) / LD (DE),A
 //   HL → LD A,(HL) / LD (HL),A
 // This avoids forcing the address into HL, reducing register pressure.
-def LOAD8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
-  let Defs = [A];
+def LOAD8_IND : Z80Pseudo<(outs Ac:$dst), (ins GR16:$addr)> {
   let mayLoad = true;
   let mayStore = false;
 }
-def STORE8_IND : Z80Pseudo<(outs), (ins GR16:$addr)> {
-  let Uses = [A];
+def STORE8_IND : Z80Pseudo<(outs), (ins Ac:$src, GR16:$addr)> {
   let mayLoad = false;
   let mayStore = true;
 }
@@ -712,39 +777,9 @@ def SADD_HL_rr : Z80Inst<"sadd_hl_rr"> {
   let Defs = [HL, A, FLAGS];
 }
 
-// ADD HL,rr; SBC A,A; AND 1 — carry out in A
-def ADD_HL_rr_CO : Z80Inst<"add_hl_rr_co"> {
-  let InOperandList = (ins GR16_BCDE:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, A, FLAGS];
-}
-
-// AND A; SBC HL,rr; SBC A,A; AND 1 — borrow out in A
-def SUB_HL_rr_BO : Z80Inst<"sub_hl_rr_bo"> {
-  let InOperandList = (ins GR16_BCDE:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, A, FLAGS];
-}
-
-// LD A,carry; RRCA; ADC HL,rr; SBC A,A; AND 1
-def ADC_HL_rr_CIO : Z80Inst<"adc_hl_rr_cio"> {
-  let InOperandList = (ins GR16_BCDE:$rhs, GR8:$carry_in);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, A, FLAGS];
-}
-
-// LD A,borrow; RRCA; SBC HL,rr; SBC A,A; AND 1
-def SBC_HL_rr_BIO : Z80Inst<"sbc_hl_rr_bio"> {
-  let InOperandList = (ins GR16_BCDE:$rhs, GR8:$borrow_in);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, A, FLAGS];
-}
-
-// The same two without the carry or borrow out, for the top of a chain.
+// ADC HL,rr and SBC HL,rr with the carry or borrow in taken from a register,
+// restored into the flags right before the instruction that reads it. The
+// carry or borrow out is left in the flags.
 // LD A,carry; RRCA; ADC HL,rr
 def ADC_HL_rr_CI : Z80Inst<"adc_hl_rr_ci"> {
   let InOperandList = (ins GR16_BCDE:$rhs, GR8:$carry_in);
@@ -770,15 +805,22 @@ def SBC_HL_rr_BI : Z80Inst<"sbc_hl_rr_bi"> {
 let isPseudo = true, isCodeGenOnly = true in {
 def CAPTURE_PV : Z80Inst<"capture_pv"> {
   let InOperandList = (ins);
-  let OutOperandList = (outs);
+  let OutOperandList = (outs Ac:$ov);
   let Uses = [FLAGS];
-  let Defs = [A, HL, FLAGS];
+  let Defs = [HL, FLAGS];
 }
 }
 
 // Zero extend 8-bit to 16-bit.
 // Expanded in expandPostRAPseudo: LD lo,src; LD hi,0
 def ZEXT_GR8_GR16 : Z80Pseudo<(outs GR16:$dst), (ins GR8:$src)> {
+  let mayLoad = false;
+  let mayStore = false;
+}
+
+// A byte shifted into the high half of a pair, the low half zero.
+// Expanded in expandPostRAPseudo: LD hi,src; LD lo,0
+def SHL8_GR8_GR16 : Z80Pseudo<(outs GR16:$dst), (ins GR8:$src)> {
   let mayLoad = false;
   let mayStore = false;
 }
@@ -806,14 +848,6 @@ def CMP16_FLAGS : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
 // CMP16_FLAGS against an immediate, which needs no pair for the constant:
 // LD A,lhs_lo; SUB lo; LD A,lhs_hi; SBC A,hi.
 def CMP16_FLAGS_IMM : Z80Pseudo<(outs), (ins GR16:$lhs, i16imm:$rhs)> {
-  let Defs = [A, FLAGS];
-  let mayLoad = false;
-  let mayStore = false;
-}
-
-// CMP16_ULT: materializes unsigned less-than as 0/1 in A.
-// Appends SBC A,A; AND 1 after the SUB/SBC chain.
-def CMP16_ULT : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
   let Defs = [A, FLAGS];
   let mayLoad = false;
   let mayStore = false;
@@ -863,29 +897,18 @@ def SEXT16 : Z80Pseudo<(outs GR16:$dst), (ins GR16:$src)> {
   let mayStore = false;
 }
 
-// Variable shift pseudos - expanded to DJNZ loops in expandPostRAPseudo.
+// Variable shift pseudos - expanded to DJNZ loops in Z80ExpandPseudo.
 // Pattern: INC B; DEC B; JR Z,done; .loop: <shift>; DJNZ .loop; .done:
-// 8-bit: value in A, count in B, result in A. B is decremented to 0.
+// 8-bit: count in B, which is decremented to 0. The shifts are CB
+// instructions that work in any register; the rotates are RLCA and RRCA,
+// which work in A.
 let mayLoad = false, mayStore = false in {
-def SHL8_VAR : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, B];
-  let Defs = [A, B, FLAGS];
-}
-def LSHR8_VAR : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, B];
-  let Defs = [A, B, FLAGS];
-}
-def ASHR8_VAR : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, B];
-  let Defs = [A, B, FLAGS];
-}
-def ROTL8_VAR : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, B];
-  let Defs = [A, B, FLAGS];
-}
-def ROTR8_VAR : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, B];
-  let Defs = [A, B, FLAGS];
+let Constraints = "$dst = $src", Uses = [B], Defs = [B, FLAGS] in {
+def SHL8_VAR : Z80Pseudo<(outs GR8:$dst), (ins GR8:$src)>;
+def LSHR8_VAR : Z80Pseudo<(outs GR8:$dst), (ins GR8:$src)>;
+def ASHR8_VAR : Z80Pseudo<(outs GR8:$dst), (ins GR8:$src)>;
+def ROTL8_VAR : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
+def ROTR8_VAR : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
 }
 // 16-bit: value in HL, count in B, result in HL. B is decremented to 0.
 def SHL16_VAR : Z80Pseudo<(outs), (ins)> {
@@ -903,30 +926,27 @@ def ASHR16_VAR : Z80Pseudo<(outs), (ins)> {
 // 8-bit multiply pseudo - expanded to DJNZ shift-add loop.
 // Input: A = multiplier, E = multiplicand. Output: A = result (low 8 bits).
 // Loop body: ADD A,A; RL D; JR NC,skip; ADD A,E; DJNZ loop
-def MUL8 : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, E];
-  let Defs = [A, B, D, FLAGS];
+let Constraints = "$dst = $src", Uses = [E] in {
+def MUL8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)> {
+  let Defs = [B, D, FLAGS];
 }
 // 8-bit unsigned division pseudo - expanded to DJNZ restoring division loop.
 // Input: A = dividend, E = divisor. Output: A = quotient.
 // After loop: D = quotient, A = remainder; UDIV8 returns D, UMOD8 returns A.
-def UDIV8 : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, E];
-  let Defs = [A, B, D, FLAGS];
+def UDIV8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)> {
+  let Defs = [B, D, FLAGS];
 }
-def UMOD8 : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, E];
-  let Defs = [A, B, D, FLAGS];
+def UMOD8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)> {
+  let Defs = [B, D, FLAGS];
 }
 // 8-bit signed division pseudo - sign-handles operands then restoring division.
 // Input: A = dividend, E = divisor. Output: A = quotient (SDIV8) or remainder (SMOD8).
-def SDIV8 : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, E];
-  let Defs = [A, B, C, D, E, FLAGS];
+def SDIV8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)> {
+  let Defs = [B, C, D, E, FLAGS];
 }
-def SMOD8 : Z80Pseudo<(outs), (ins)> {
-  let Uses = [A, E];
-  let Defs = [A, B, C, D, E, FLAGS];
+def SMOD8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)> {
+  let Defs = [B, C, D, E, FLAGS];
+}
 }
 // 16-bit multiply pseudo (for +inline-i16-runtime mode).
 // Input: HL = multiplicand, DE = multiplier. Output: DE = result.
@@ -968,29 +988,19 @@ def LDIR_GUARDED : Z80Pseudo<(outs), (ins)> {
   let hasSideEffects = 1;
 }
 
+let Constraints = "$dst = $lhs", Defs = [FLAGS] in {
 // 8-bit unsigned saturating add pseudo.
 // ADD A,src; JR NC,.done; LD A,#0xFF; .done:
-def UADDSAT8 : Z80Pseudo<(outs), (ins GR8:$src)> {
-  let Uses = [A];
-  let Defs = [A, FLAGS];
-}
+def UADDSAT8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR8:$src)>;
 // 8-bit unsigned saturating subtract pseudo.
 // SUB src; JR NC,.done; XOR A; .done:
-def USUBSAT8 : Z80Pseudo<(outs), (ins GR8:$src)> {
-  let Uses = [A];
-  let Defs = [A, FLAGS];
-}
+def USUBSAT8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR8:$src)>;
 // 8-bit signed saturating add pseudo (Z80 only — uses P/V overflow flag).
 // ADD A,src; JP PO,.done; RLCA; SBC A,A; XOR #0x80; .done:
-def SADDSAT8 : Z80Pseudo<(outs), (ins GR8:$src)> {
-  let Uses = [A];
-  let Defs = [A, FLAGS];
-}
+def SADDSAT8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR8:$src)>;
 // 8-bit signed saturating subtract pseudo (Z80 only — uses P/V overflow flag).
 // SUB src; JP PO,.done; RLCA; SBC A,A; XOR #0x80; .done:
-def SSUBSAT8 : Z80Pseudo<(outs), (ins GR8:$src)> {
-  let Uses = [A];
-  let Defs = [A, FLAGS];
+def SSUBSAT8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR8:$src)>;
 }
 } // mayLoad = false, mayStore = false
 

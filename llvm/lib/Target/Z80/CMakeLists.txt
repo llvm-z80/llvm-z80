@@ -24,6 +24,7 @@ add_public_tablegen_target(Z80CommonTableGen)
 
 add_llvm_target(Z80CodeGen
   SM83CallLowering.cpp
+  Z80AccumulatorCopies.cpp
   Z80AsmPrinter.cpp
   Z80BranchCleanup.cpp
   Z80CallLowering.cpp
@@ -45,7 +46,6 @@ add_llvm_target(Z80CodeGen
   Z80MCInstLower.cpp
   Z80NarrowMemAccess.cpp
   Z80NonReentrant.cpp
-  Z80PostRACompareMerge.cpp
   Z80PreEmitPeephole.cpp
   Z80RegisterBankInfo.cpp
   Z80RegisterInfo.cpp

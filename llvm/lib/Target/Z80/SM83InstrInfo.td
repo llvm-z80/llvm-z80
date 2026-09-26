@@ -112,8 +112,8 @@ def LD_A_HLD : Inst8<"ld a, (hl-)", 0x3A> {
 // SM83 has no P/V flag, so overflow is computed via sign bit comparison:
 //   overflow = (result_hi ^ lhs_hi) & (result_hi ^ rhs_hi), bit 7
 // Uses the "other" register pair (BC if rhs=DE, DE if rhs=BC) as temps.
-def SM83_SADDO_HL_rr : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs)> {
-  let Defs = [A, BC, DE, HL, FLAGS];
+def SM83_SADDO_HL_rr : Z80Pseudo<(outs Ac:$ov), (ins GR16_BCDE:$rhs)> {
+  let Defs = [BC, DE, HL, FLAGS];
   let Uses = [HL];
   let mayLoad = false;
   let mayStore = false;
@@ -122,8 +122,8 @@ def SM83_SADDO_HL_rr : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs)> {
 // SM83 signed 16-bit sub with overflow detection.
 // HL = HL - rr, A = overflow (0 or 1).
 // overflow = (result_hi ^ lhs_hi) & (lhs_hi ^ rhs_hi), bit 7
-def SM83_SSUBO_HL_rr : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs)> {
-  let Defs = [A, BC, DE, HL, FLAGS];
+def SM83_SSUBO_HL_rr : Z80Pseudo<(outs Ac:$ov), (ins GR16_BCDE:$rhs)> {
+  let Defs = [BC, DE, HL, FLAGS];
   let Uses = [HL];
   let mayLoad = false;
   let mayStore = false;

@@ -27,8 +27,13 @@ namespace llvm {
 class Z80Subtarget;
 
 namespace Z80 {
-/// Which operation an ALU_A_FI performs. Stored as its first operand.
+/// Which operation an ALU_Ac_FI performs.
 enum AluOp { ALU_ADD, ALU_SUB, ALU_AND, ALU_OR, ALU_XOR };
+
+/// The operation of an ALU_Ac_FI, stored after its accumulator operand.
+inline unsigned getAluFIOp(const MachineInstr &MI) {
+  return MI.getOperand(2).getImm();
+}
 
 /// The IX-indexed form of an ALU operation.
 inline unsigned getAluIXdOpcode(unsigned Op) {
@@ -606,6 +611,13 @@ public:
   reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;
 
   bool expandPostRAPseudo(MachineInstr &MI) const override;
+
+  bool analyzeCompare(const MachineInstr &MI, Register &SrcReg,
+                      Register &SrcReg2, int64_t &Mask,
+                      int64_t &Value) const override;
+  bool optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
+                            Register SrcReg2, int64_t Mask, int64_t Value,
+                            const MachineRegisterInfo *MRI) const override;
 
   int getSPAdjust(const MachineInstr &MI) const override;
 

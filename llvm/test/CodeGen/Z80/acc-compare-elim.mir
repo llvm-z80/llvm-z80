@@ -1,0 +1,208 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=peephole-opt %s -o - \
+# RUN:   | FileCheck %s
+#
+# A test of a byte against zero is dropped where the instruction that computed
+# the byte left the flags the test's readers want. CPL, RES and SET, selected
+# without flags since their value was all that was wanted, are put back into
+# the XOR, AND and OR that set them.
+
+--- |
+  define void @after_logic() { ret void }
+  define void @after_dec() { ret void }
+  define void @dec_carry_read() { ret void }
+  define void @flags_overwritten() { ret void }
+  define void @cpl_to_xor() { ret void }
+  define void @res_to_and() { ret void }
+  define void @res_flags_read_between() { ret void }
+...
+---
+# XOR says of its result everything OR A would.
+# CHECK-LABEL: name: after_logic
+# CHECK:     XOR_Ac_r
+# CHECK-NOT: TST_Ac
+name:            after_logic
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a, $b
+
+    %0:gr8 = COPY $a
+    %1:gr8 = COPY $b
+    %2:ac = COPY %0
+    %3:ac = XOR_Ac_r %2, %1, implicit-def $flags
+    %4:gr8 = COPY %3
+    %5:ac = COPY %4
+    TST_Ac %5, implicit-def $flags
+    JP_NZ_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# DEC in any register sets Z for the value it leaves, which is all a jump on
+# Z asks.
+# CHECK-LABEL: name: after_dec
+# CHECK:     DEC_r
+# CHECK-NOT: TST_Ac
+name:            after_dec
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $b
+
+    %0:gr8 = COPY $b
+    %1:gr8 = DEC_r %0, implicit-def $flags
+    %2:ac = COPY %1
+    TST_Ac %2, implicit-def $flags
+    JP_NZ_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# DEC leaves the carry alone, which OR A would clear for the jump that reads it.
+# CHECK-LABEL: name: dec_carry_read
+# CHECK: TST_Ac
+name:            dec_carry_read
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $b
+
+    %0:gr8 = COPY $b
+    %1:gr8 = DEC_r %0, implicit-def $flags
+    %2:ac = COPY %1
+    TST_Ac %2, implicit-def $flags
+    JP_C_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# A compare between the XOR and the test has overwritten what the XOR said.
+# CHECK-LABEL: name: flags_overwritten
+# CHECK: TST_Ac
+name:            flags_overwritten
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a, $b
+
+    %0:gr8 = COPY $a
+    %1:gr8 = COPY $b
+    %2:ac = COPY %0
+    %3:ac = XOR_Ac_r %2, %1, implicit-def $flags
+    %4:gr8 = COPY %3
+    %5:ac = COPY %1
+    CP_Ac_n %5, 5, implicit-def $flags
+    %6:ac = COPY %4
+    TST_Ac %6, implicit-def $flags
+    JP_NZ_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# CPL sets no Z; XOR 0xFF computes the same byte and does.
+# CHECK-LABEL: name: cpl_to_xor
+# CHECK:     XOR_Ac_n {{%[0-9]+}}, 255
+# CHECK-NOT: CPL_Ac
+# CHECK-NOT: TST_Ac
+name:            cpl_to_xor
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a
+
+    %0:gr8 = COPY $a
+    %1:ac = COPY %0
+    %2:ac = CPL_Ac %1, implicit-def $flags
+    %3:gr8 = COPY %2
+    %4:ac = COPY %3
+    TST_Ac %4, implicit-def $flags
+    JP_Z_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# RES leaves the flags alone; AND with the other bits computes the same byte,
+# in A, and sets them.
+# CHECK-LABEL: name: res_to_and
+# CHECK:     AND_Ac_n {{%[0-9]+}}, 127
+# CHECK-NOT: RES_b_r
+# CHECK-NOT: TST_Ac
+name:            res_to_and
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $b
+
+    %0:gr8 = COPY $b
+    %1:gr8 = RES_b_r 7, %0
+    %2:ac = COPY %1
+    TST_Ac %2, implicit-def $flags
+    JP_NZ_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
+---
+# Turned into AND, the RES would overwrite the carry SBC A,A still reads.
+# CHECK-LABEL: name: res_flags_read_between
+# CHECK: RES_b_r
+# CHECK: TST_Ac
+name:            res_flags_read_between
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $a, $b
+
+    %0:gr8 = COPY $a
+    %1:gr8 = COPY $b
+    %2:ac = COPY %0
+    CP_Ac_n %2, 5, implicit-def $flags
+    %3:gr8 = RES_b_r 7, %1
+    %4:ac = SBC_Ac_Ac implicit-def $flags, implicit $flags
+    %5:ac = COPY %3
+    TST_Ac %5, implicit-def $flags
+    JP_NZ_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.1:
+    RET
+
+  bb.2:
+    RET
+...
