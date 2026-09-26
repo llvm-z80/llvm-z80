@@ -7,8 +7,6 @@ void test_func(char c) {
     external_call();
 }
 
-// CHECK:        EXTERN	_external_call
-
 // CHECK:        SECTION code_compiler
 // CHECK-NEXT:   GLOBAL	_test_func
 // CHECK-LABEL: _test_func:
@@ -74,7 +72,10 @@ int global_bss[4];
 // CHECK-LABEL: _global_bss:
 // CHECK-NEXT:   DEFS	8
 
-// 8. Verify no ELF directives or sections anywhere in output
+// 8. EXTERN directives for externally referenced symbols (emitted at end of file)
+// CHECK:        EXTERN	_external_call
+
+// 9. Verify no ELF directives or sections anywhere in output
 // CHECK-NOT:   .text
 // CHECK-NOT:   .data
 // CHECK-NOT:   .bss
@@ -84,3 +85,4 @@ int global_bss[4];
 // CHECK-NOT:   .ident
 // CHECK-NOT:   .note.GNU-stack
 // CHECK-NOT:   .p2align
+

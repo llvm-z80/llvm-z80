@@ -285,6 +285,10 @@ protected:
   /// ".globl".
   const char *GlobalDirective = "\t.globl\t";
 
+  /// This is the directive used to declare an external entity. Defaults to
+  /// ".extern".
+  const char *ExternDirective = "\t.extern\t";
+
   /// True if the expression
   ///   .long f - g
   /// uses a relocation but it can be suppressed by writing
@@ -622,6 +626,7 @@ public:
   bool getAlignmentIsInBytes() const { return AlignmentIsInBytes; }
   unsigned getTextAlignFillValue() const { return TextAlignFillValue; }
   const char *getGlobalDirective() const { return GlobalDirective; }
+  const char *getExternDirective() const { return ExternDirective; }
 
   bool doesSetDirectiveSuppressReloc() const {
     return SetDirectiveSuppressesReloc;

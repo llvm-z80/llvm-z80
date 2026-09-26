@@ -201,6 +201,7 @@ Z80MCAsmInfoZ80ASM::Z80MCAsmInfoZ80ASM(const Triple &TT,
   // Labels and symbols: InternalSymbolPrefix = "L" ensures compiler-generated
   // labels (such as LBB0_1) have no leading dot, as dots are syntax tokens in z80asm.
   GlobalDirective = "\tGLOBAL\t";
+  ExternDirective = "\tEXTERN\t";
   InternalSymbolPrefix = "L";
 
   initializeAtSpecifiers(AtSpecifiers);

@@ -79,6 +79,8 @@ public:
   void emitGlobalVariable(const GlobalVariable *GV) override;
 
   void emitJumpTableInfo() override;
+
+  void emitEndOfAsmFile(Module &M) override;
 };
 
 // Simple pseudo-instructions have their lowering (with expansion to real
@@ -285,6 +287,65 @@ void Z80AsmPrinter::emitJumpTableInfo() {
   }
   if (!JTInDiffSection)
     OutStreamer->emitDataRegion(MCDR_DataRegionEnd);
+}
+
+// Emits external symbol directives at the end of the asm file.
+//
+// WHAT: For z80asm, emits `\tEXTERN\t<symbol>` for all undefined, non-temporary
+//       symbols referenced in the translation unit.
+// WHY:  Unlike ELF assemblers which treat any unresolved symbol as an external
+//       reference implicitly, z88dk-z80asm requires explicit `EXTERN <sym>`
+//       directives for the librarian/linker to pull in referenced modules from
+//       libraries.
+//
+// NOTE: This follows the same design as PowerPC/AIX (PPCAIXAsmPrinter) using
+//       `MCSA_Extern`. It would make sense in the future to lift this logic
+//       directly into the shared `AsmPrinter::doFinalization` base class
+//       guarded by `MAI.getExternDirective() != nullptr`.
+//
+// Worked example:
+//   A module calls `external_call()` and `__divsint()`. Neither is defined
+//   in the module, but both exist in OutContext.getSymbols().
+//   This method collects them, sorts them deterministically by name, and emits:
+//     EXTERN  __divsint
+//     EXTERN  _external_call
+void Z80AsmPrinter::emitEndOfAsmFile(Module &M) {
+  if (!MAI.isZ80ASM())
+    return;
+
+  // Collect all undefined, non-temporary symbols that were referenced.
+  SmallVector<MCSymbol *, 16> ExternSymbols;
+  for (const auto &Entry : OutContext.getSymbols()) {
+    MCSymbol *Sym = Entry.getValue().Symbol;
+    if (!Sym)
+      continue;
+
+    // Skip defined symbols (functions, globals, constants defined in this TU).
+    if (Sym->isDefined())
+      continue;
+
+    // Skip temporary assembler labels (e.g. branch labels, string literals).
+    if (Sym->isTemporary())
+      continue;
+
+    // Skip ELF section-begin symbols (e.g. .rodata, .debug_info, .text).
+    // MCObjectFileInfo::initELFMCObjectFileInfo() creates MCSymbols for every
+    // ELF section.  These appear undefined and non-temporary in
+    // OutContext.getSymbols(), but they are not real external references.
+    // All C-mangled z80asm externals start with '_'; section names start with '.'.
+    if (Sym->getName().starts_with("."))
+      continue;
+
+    ExternSymbols.push_back(Sym);
+  }
+
+  // Sort deterministically for reproducible assembly output.
+  llvm::sort(ExternSymbols, [](const MCSymbol *LHS, const MCSymbol *RHS) {
+    return LHS->getName() < RHS->getName();
+  });
+
+  for (MCSymbol *Sym : ExternSymbols)
+    OutStreamer->emitSymbolAttribute(Sym, MCSA_Extern);
 }
 
 } // namespace

@@ -1,12 +1,10 @@
 ; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=z80asm < %s | FileCheck %s
 
-; CHECK:        EXTERN	_ext_var
-; CHECK:        EXTERN	_foo
-
 ; 1. Function in code_compiler section with GLOBAL directive and branch label
 ; CHECK:        SECTION code_compiler
 ; CHECK-NEXT:   GLOBAL	_test_branch
 ; CHECK-LABEL: _test_branch:
+; CHECK:        ld	de,(_ext_var)
 ; CHECK:        jr	nz,LBB0_2
 ; CHECK:        call	_foo
 ; CHECK:        LBB0_2:
@@ -16,15 +14,15 @@
 ; CHECK-NOT:   .type
 @ext_var = external global i16
 declare void @foo()
-define void @test_branch(i1 %c) {
+define i16 @test_branch(i1 %c) {
 entry:
   %v = load i16, ptr @ext_var
   br i1 %c, label %t, label %f
 t:
   call void @foo()
-  ret void
+  ret i16 %v
 f:
-  ret void
+  ret i16 %v
 }
 
 ; 2. Data sections and directives
@@ -58,7 +56,11 @@ f:
 ; CHECK-NEXT:   DEFM	"test\000"
 @.str = private unnamed_addr constant [5 x i8] c"test\00", align 1
 
-; 5. Verify no ELF directives or sections
+; 5. EXTERN directives for externally referenced symbols (emitted at end of file)
+; CHECK:        EXTERN	_ext_var
+; CHECK:        EXTERN	_foo
+
+; 6. Verify no ELF directives or sections
 ; CHECK-NOT:   .text
 ; CHECK-NOT:   .data
 ; CHECK-NOT:   .bss

@@ -914,7 +914,7 @@ bool MCAsmStreamer::emitSymbolAttribute(MCSymbol *Symbol,
   case MCSA_Protected:      OS << "\t.protected\t";       break;
   case MCSA_Reference:      OS << "\t.reference\t";       break;
   case MCSA_Extern:
-    OS << "\t.extern\t";
+    OS << MAI->getExternDirective();
     break;
   case MCSA_Weak:           OS << MAI->getWeakDirective(); break;
   case MCSA_WeakDefinition:
@@ -1065,7 +1065,7 @@ void MCAsmStreamer::emitXCOFFSymbolLinkageWithVisibility(
     OS << MAI->getWeakDirective();
     break;
   case MCSA_Extern:
-    OS << "\t.extern\t";
+    OS << MAI->getExternDirective();
     break;
   case MCSA_LGlobal:
     OS << "\t.lglobl\t";
