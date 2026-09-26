@@ -27,6 +27,7 @@ void initializeZ80PostLegalizerCombinerPass(PassRegistry &);
 void initializeZ80ExpandPseudoPass(PassRegistry &);
 void initializeZ80FixupImplicitDefsPass(PassRegistry &);
 void initializeZ80IndexIVPass(PassRegistry &);
+void initializeZ80NarrowMemAccessPass(PassRegistry &);
 void initializeZ80PreEmitPeepholePass(PassRegistry &);
 void initializeZ80LowerSelectPass(PassRegistry &);
 void initializeZ80ShiftRotateChainPass(PassRegistry &);

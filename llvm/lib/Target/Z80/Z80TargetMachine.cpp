@@ -46,6 +46,7 @@
 #include "Z80IndexIV.h"
 #include "Z80LowerSelect.h"
 #include "Z80MachineFunctionInfo.h"
+#include "Z80NarrowMemAccess.h"
 #include "Z80NonReentrant.h"
 #include "Z80PostRACompareMerge.h"
 #include "Z80PreEmitPeephole.h"
@@ -71,6 +72,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80FixupImplicitDefsPass(PR);
   initializeZ80PreEmitPeepholePass(PR);
   initializeZ80LowerSelectPass(PR);
+  initializeZ80NarrowMemAccessPass(PR);
   initializeZ80ShiftRotateChainPass(PR);
   initializeZ80PostRACompareMergePass(PR);
   initializeZ80NonReentrantPass(PR);
@@ -232,9 +234,12 @@ void Z80PassConfig::addIRPasses() {
     addPass(createZ80NonReentrantPass(getZ80TargetMachine()));
 
   TargetPassConfig::addIRPasses();
-  // Clean up after LSR in particular.
-  if (getOptLevel() != CodeGenOptLevel::None)
+  if (getOptLevel() != CodeGenOptLevel::None) {
+    // Clean up after LSR in particular.
     addPass(createInstructionCombiningPass());
+    // After the combiner, which turns small memcpys into wide integers.
+    addPass(createZ80NarrowMemAccessPass());
+  }
 }
 
 bool Z80PassConfig::addPreISel() { return false; }

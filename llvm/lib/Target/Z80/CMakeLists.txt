@@ -43,6 +43,7 @@ add_llvm_target(Z80CodeGen
   Z80LegalizerInfo.cpp
   Z80LowerSelect.cpp
   Z80MCInstLower.cpp
+  Z80NarrowMemAccess.cpp
   Z80NonReentrant.cpp
   Z80PostRACompareMerge.cpp
   Z80PreEmitPeephole.cpp
