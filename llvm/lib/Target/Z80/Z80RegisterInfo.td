@@ -165,6 +165,10 @@ class Z80Reg16Class<dag RegList>: Z80RegClass<[i16], 8, RegList>;
 // These can be used with most 8-bit operations
 def GR8 : Z80Reg8Class<(add B, C, D, E, H, L, A)>;
 
+// Single-register class containing only B.  Used by Z80SplitDjnzCounters
+// to constrain the per-loop DJNZ counter vreg to B by class.
+def BReg : Z80Reg8Class<(add B)>;
+
 //===----------------------------------------------------------------------===//
 //  16-bit register classes
 //===----------------------------------------------------------------------===//

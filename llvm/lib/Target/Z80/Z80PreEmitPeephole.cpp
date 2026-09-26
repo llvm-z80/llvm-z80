@@ -68,8 +68,15 @@ STATISTIC(NumHLPostIncLoads, "Number of 16-bit HL loads rewritten through HL+");
 STATISTIC(NumSlotForwarded,
           "Number of SM83 SP-relative slot accesses forwarded");
 STATISTIC(NumStoreForwarded, "Number of stores forwarded to a following load");
+STATISTIC(NumDjnz,
+          "Number of decrement-and-branch sequences folded to DJNZ");
 
 using namespace llvm;
+
+static cl::opt<bool> EnableDjnzPeephole(
+    "z80-djnz-peephole",
+    cl::desc("Fold decrement-and-branch sequences to DJNZ"),
+    cl::init(true), cl::Hidden);
 
 // Custom DenseMapInfo for IX offsets.  The default DenseMapInfo<int8_t> uses
 // -1 and -2 as sentinel values, which collide with valid IX offsets.
@@ -1214,6 +1221,128 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
 
   if (Changed)
     recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+// --- Peephole: DEC B; JR NZ -> DJNZ (Z80 only) ---
+// Folds 'DEC B; JR NZ' and 'LD A, B; DEC A; LD B, A; [OR A;] JR NZ' into DJNZ
+// when FLAGS is dead after the branch.
+static bool optimizeDJNZ(MachineBasicBlock &MBB,
+                         const TargetInstrInfo *TII,
+                         const TargetRegisterInfo *TRI,
+                         const Z80Subtarget &STI) {
+  if (!EnableDjnzPeephole || !STI.hasZ80())
+    return false;
+
+  bool Changed = false;
+  const auto MIE = MBB.end();
+
+  // Pattern 1: DEC B; JR NZ -> DJNZ
+  for (auto MII = MBB.begin(); MII != MIE;) {
+    if (!isIncDec8(*MII, Z80::DEC_r, Z80::B)) {
+      ++MII;
+      continue;
+    }
+    auto NextIt = MBB.SkipPHIsLabelsAndDebug(std::next(MII));
+    if (NextIt == MIE || NextIt->getOpcode() != Z80::JR_NZ_e) {
+      ++MII;
+      continue;
+    }
+    // Skip if branch target is not a valid MBB.
+    if (!NextIt->getOperand(0).isMBB()) {
+      ++MII;
+      continue;
+    }
+    // Skip if FLAGS is live after branch (DJNZ preserves flags, DEC B sets them).
+    if (!isRegDeadAfter(std::next(NextIt), MBB, TRI, Z80::FLAGS)) {
+      ++MII;
+      continue;
+    }
+    MachineBasicBlock *TargetMBB = NextIt->getOperand(0).getMBB();
+    DebugLoc DL = MII->getDebugLoc();
+    LLVM_DEBUG(dbgs() << "  DEC B; JR NZ -> DJNZ\n");
+    auto EraseEnd = std::next(NextIt);
+    MII = MBB.erase(MII, EraseEnd);
+    BuildMI(MBB, MII, DL, TII->get(Z80::DJNZ_e)).addMBB(TargetMBB);
+    ++NumDjnz;
+    Changed = true;
+  }
+
+  // Pattern 2: LD A, B; DEC A; LD B, A; [OR A;] JR NZ -> DJNZ
+  for (auto MII = MBB.begin(); MII != MIE;) {
+    if (!isIncDec8(*MII, Z80::DEC_r, Z80::A)) {
+      ++MII;
+      continue;
+    }
+    if (MII == MBB.begin()) {
+      ++MII;
+      continue;
+    }
+    auto I0 = std::prev(MII);
+    while (I0 != MBB.begin() && (I0->isDebugInstr() || I0->isLabel() || I0->isPHI()))
+      --I0;
+    if (!isLD8(*I0, Z80::A, Z80::B)) {
+      ++MII;
+      continue;
+    }
+
+    auto I1 = MII;
+    auto I2 = MBB.SkipPHIsLabelsAndDebug(std::next(I1));
+    if (I2 == MIE || !isLD8(*I2, Z80::B, Z80::A)) {
+      ++MII;
+      continue;
+    }
+    auto I3 = MBB.SkipPHIsLabelsAndDebug(std::next(I2));
+    if (I3 == MIE) {
+      ++MII;
+      continue;
+    }
+    auto IBranch = I3;
+    if (IBranch->getOpcode() == Z80::OR_r &&
+        IBranch->getOperand(0).getReg() == Z80::A) {
+      IBranch = MBB.SkipPHIsLabelsAndDebug(std::next(IBranch));
+      if (IBranch == MIE) {
+        ++MII;
+        continue;
+      }
+    }
+    if (IBranch->getOpcode() != Z80::JR_NZ_e || !IBranch->getOperand(0).isMBB()) {
+      ++MII;
+      continue;
+    }
+    // Skip if A is live after branch (DJNZ doesn't update A).
+    if (!isRegDeadAfter(std::next(IBranch), MBB, TRI, Z80::A)) {
+      ++MII;
+      continue;
+    }
+    // Skip if FLAGS is live after branch (DJNZ preserves flags, DEC A sets them).
+    if (!isRegDeadAfter(std::next(IBranch), MBB, TRI, Z80::FLAGS)) {
+      ++MII;
+      continue;
+    }
+    // Skip if B is modified in body before I1 (LD B, A is an essential reload).
+    bool BClobberedInBody = false;
+    for (auto It = MBB.begin(); It != I0; ++It) {
+      if (It->modifiesRegister(Z80::B, TRI)) {
+        BClobberedInBody = true;
+        break;
+      }
+    }
+    if (BClobberedInBody) {
+      ++MII;
+      continue;
+    }
+
+    MachineBasicBlock *TargetMBB = IBranch->getOperand(0).getMBB();
+    DebugLoc DL = I1->getDebugLoc();
+    LLVM_DEBUG(dbgs() << "  LD A,B; DEC A; LD B,A; [OR A;] JR NZ -> DJNZ\n");
+    auto EraseEnd = std::next(IBranch);
+    MII = MBB.erase(I0, EraseEnd);
+    BuildMI(MBB, MII, DL, TII->get(Z80::DJNZ_e)).addMBB(TargetMBB);
+    ++NumDjnz;
+    Changed = true;
+  }
+
   return Changed;
 }
 
@@ -2490,6 +2619,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
       Changed |= materializeIXConstantStores(MBB, TII, TRI);
     Changed |= foldSingleBitMask(MBB, TII, TRI);
     Changed |= directIncDec(MBB, TII, TRI);
+    Changed |= optimizeDJNZ(MBB, TII, TRI, STI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
     Changed |= elidePushPopAcrossStretch(MBB, TII, TRI);
   }
