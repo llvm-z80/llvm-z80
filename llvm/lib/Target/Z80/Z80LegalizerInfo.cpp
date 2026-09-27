@@ -295,13 +295,15 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S128);
 
-  // Combined div+rem: lower back to separate G_UDIV/G_UREM (or G_SDIV/G_SREM).
-  // Z80's division runtime returns both quotient and remainder in one call:
-  //   Z80:  __(u)divmodhi4: HL÷DE → DE=quot, HL=rem
-  //   SM83: __(u)divmodhi4: DE÷BC → BC=quot, HL=rem
-  // Custom-lower i16 G_UDIVREM/G_SDIVREM to a single runtime call.
-  // i8 and others fall back to separate div+rem.
-  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM}).customFor({S16}).lower();
+  // Combined div+rem: one runtime call returns both results.
+  //   i16: __(u)divmodhi4, selected in ISel; quotient and remainder come back
+  //        in registers (Z80 HL÷DE → DE, HL; SM83 DE÷BC → BC, HL).
+  //   i32: __(u)divmodsi4 in legalizeCustom; the quotient is returned and the
+  //        remainder stored through a pointer.
+  // Other widths are split back into div and rem.
+  getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM})
+      .customFor({S16, S32})
+      .lower();
 
   // Comparisons
   // G_ICMP produces a boolean result - we widen it to S8 since Z80 has
@@ -911,9 +913,36 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   }
 
   case TargetOpcode::G_UDIVREM:
-  case TargetOpcode::G_SDIVREM:
-    // Pass through to ISel — the runtime call returns both quot and rem.
+  case TargetOpcode::G_SDIVREM: {
+    // i16 is selected in ISel.
+    Register QuotReg = MI.getOperand(0).getReg();
+    if (MRI.getType(QuotReg).getSizeInBits() != 32)
+      return true;
+
+    // quotient = __(u)divmodsi4(dividend, divisor, &remainder), with a
+    // byte-aligned slot for the remainder as for G_FMODF.
+    bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
+    Register RemReg = MI.getOperand(1).getReg();
+    MachineFunction &MF = MIRBuilder.getMF();
+    LLVMContext &Ctx = MF.getFunction().getContext();
+    Type *I32Ty = Type::getInt32Ty(Ctx);
+    int FI = MF.getFrameInfo().CreateStackObject(4, Align(1),
+                                                 /*isSpillSlot=*/false);
+    auto Slot = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
+    if (Helper.createLibcall(
+            IsSigned ? "__divmodsi4" : "__udivmodsi4", {QuotReg, I32Ty, 0},
+            {{MI.getOperand(2).getReg(), I32Ty, 0},
+             {MI.getOperand(3).getReg(), I32Ty, 1},
+             {Slot.getReg(0), PointerType::get(Ctx, 0), 2}},
+            CallingConv::C, LocObserver, &MI) != LegalizerHelper::Legalized)
+      return false;
+    auto *MMO =
+        MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
+                                MachineMemOperand::MOLoad, 4, Align(1));
+    MIRBuilder.buildLoad(RemReg, Slot, *MMO);
+    MI.eraseFromParent();
     return true;
+  }
 
   case TargetOpcode::G_VASTART: {
     // Store the address of the first vararg into the va_list pointer.
