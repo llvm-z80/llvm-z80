@@ -185,9 +185,12 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Carry-chain operations for multi-precision arithmetic
   // G_UADDO: unsigned add with overflow (returns result + overflow flag)
   // G_UADDE: unsigned add with carry in (for chaining)
-  // These are used when narrowing 32-bit+ operations
+  // These are used when narrowing 32-bit+ operations. An odd width is widened
+  // to a power of two first, as for G_ADD, so that it splits into whole
+  // pairs rather than leaving a 1-bit piece on top.
   getActionDefinitionsBuilder({G_UADDO, G_SADDO})
       .legalFor({{S16, S1}})
+      .widenScalarToNextPow2(0)
       .clampScalar(0, S16, S16)
       .minScalar(1, S1);
 
@@ -202,6 +205,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   getActionDefinitionsBuilder({G_USUBO, G_SSUBO})
       .legalFor({{S16, S1}})
+      .widenScalarToNextPow2(0)
       .clampScalar(0, S16, S16)
       .minScalar(1, S1);
 

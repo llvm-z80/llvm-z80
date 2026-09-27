@@ -285,6 +285,7 @@ void Z80PassConfig::addPreGlobalInstructionSelect() {
 
 bool Z80PassConfig::addGlobalInstructionSelect() {
   addPass(new InstructionSelectLegacy());
+  addPass(createZ80DanglingDebugCleanupPass());
   return false;
 }
 

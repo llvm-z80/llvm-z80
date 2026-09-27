@@ -235,8 +235,11 @@ def CCR : RegisterClass<"Z80", [i8], 8, (add FLAGS)> {
 // All 8-bit storage locations
 def Anyi8 : Z80Reg8Class<(add GR8)>;
 
-// All 16-bit storage locations
-def Anyi16 : Z80Reg16Class<(add BC, DE, HL, IX, IY, SP)>;
+// All 16-bit storage locations. SP holds the stack, not a value: it is
+// reserved, so no value is allocated to it, and leaving it out keeps a copy
+// to or from SP from being folded into a spill slot access, which has no
+// form for SP.
+def Anyi16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;
 
 //===----------------------------------------------------------------------===//
 //  Fake registers for multi-word values

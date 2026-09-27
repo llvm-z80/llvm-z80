@@ -99,7 +99,13 @@ Z80InstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
   // of a pair copy also defines the pair, and a caller tracks a copy by the
   // operands named here alone, so it would not see that erasing such a move
   // drops that definition with it.
-  if (MI.getOpcode() == Z80::LD_r_r && MI.implicit_operands().empty())
+  //
+  // Nor is a move whose source is undef. It copies no value, but copy
+  // propagation still finds a later copy of the same registers redundant
+  // against it. It then clears the undef without counting the read, and
+  // deletes the copy that gave the source its value as unread.
+  if (MI.getOpcode() == Z80::LD_r_r && MI.implicit_operands().empty() &&
+      !MI.getOperand(1).isUndef())
     return DestSourcePair(MI.getOperand(0), MI.getOperand(1));
   return std::nullopt;
 }
@@ -1049,7 +1055,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     assert(Offset >= -128 && Offset + 1 <= 127 &&
            "Large offset should have been expanded in eliminateFrameIndex");
 
-    // SP is not in GR16 register class, so it should never reach here.
+    // SP is in neither operand class, GR16 or Anyi16, so it never gets here.
     if (SrcReg == Z80::SP)
       llvm_unreachable("SP cannot be spilled via SPILL_GR16");
 
@@ -1104,7 +1110,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     assert(Offset >= -128 && Offset + 1 <= 127 &&
            "Large offset should have been expanded in eliminateFrameIndex");
 
-    // SP is not in GR16 register class, so it should never reach here.
+    // SP is in neither operand class, GR16 or Anyi16, so it never gets here.
     if (DestReg == Z80::SP)
       llvm_unreachable("SP cannot be reloaded via RELOAD_GR16");
 

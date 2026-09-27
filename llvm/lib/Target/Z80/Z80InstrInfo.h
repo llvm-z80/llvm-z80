@@ -378,6 +378,9 @@ inline bool hasLiveValue(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                          MCRegister Reg, const TargetRegisterInfo *TRI) {
   for (MachineBasicBlock::iterator I = MI; I != MBB.begin();) {
     --I;
+    // A debug value names the register without giving it a value.
+    if (I->isDebugInstr())
+      continue;
     bool LiveDef = false, Def = false, Use = false, Killed = false;
     for (const MachineOperand &MO : I->operands()) {
       if (!MO.isReg() || !MO.getReg().isPhysical() ||

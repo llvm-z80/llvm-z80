@@ -75,6 +75,70 @@ struct IXOffsetInfo {
   static bool isEqual(int LHS, int RHS) { return LHS == RHS; }
 };
 
+// --- Debug instructions stay out of the patterns ---
+//
+// The peepholes here match runs of instructions and scan for what each one
+// reads and writes. A debug instruction emits nothing, but it sits among the
+// instructions it describes and names their registers: under -g it would
+// split a run or count as a read, and the code would change with it. So the
+// pass sets debug instructions aside while it runs and puts each one back
+// after the instruction it followed, the point from which it describes the
+// program. When that instruction is erased, the place passes back to the one
+// before it.
+namespace {
+class ParkedDebugInstrs : public MachineFunction::Delegate {
+  MachineFunction &MF;
+  // The debug instructions to go back in after an instruction, in order, and
+  // those that came before the first instruction of a block.
+  DenseMap<MachineInstr *, SmallVector<MachineInstr *, 2>> After;
+  DenseMap<MachineBasicBlock *, SmallVector<MachineInstr *, 2>> AtStart;
+
+public:
+  explicit ParkedDebugInstrs(MachineFunction &MF) : MF(MF) {
+    for (MachineBasicBlock &MBB : MF) {
+      MachineInstr *Prev = nullptr;
+      for (MachineInstr &MI : make_early_inc_range(MBB)) {
+        if (!MI.isDebugInstr()) {
+          Prev = &MI;
+          continue;
+        }
+        auto &Parked = Prev ? After[Prev] : AtStart[&MBB];
+        Parked.push_back(MBB.remove(&MI));
+      }
+    }
+    MF.setDelegate(this);
+  }
+
+  ~ParkedDebugInstrs() override {
+    MF.resetDelegate(this);
+    for (auto &[MI, DIs] : After) {
+      auto Pos = std::next(MI->getIterator());
+      for (MachineInstr *DI : DIs)
+        MI->getParent()->insert(Pos, DI);
+    }
+    for (auto &[MBB, DIs] : AtStart) {
+      auto Pos = MBB->begin();
+      for (MachineInstr *DI : DIs)
+        MBB->insert(Pos, DI);
+    }
+  }
+
+  void MF_HandleInsertion(MachineInstr &) override {}
+
+  // Called while the instruction is still in its block.
+  void MF_HandleRemoval(MachineInstr &MI) override {
+    auto It = After.find(&MI);
+    if (It == After.end())
+      return;
+    SmallVector<MachineInstr *, 2> DIs = std::move(It->second);
+    After.erase(It);
+    MachineInstr *Prev = MI.getPrevNode();
+    auto &Dest = Prev ? After[Prev] : AtStart[MI.getParent()];
+    Dest.append(DIs.begin(), DIs.end());
+  }
+};
+} // namespace
+
 // --- Asking an instruction what it is ---
 //
 // Most instructions here name their registers as operands, so a peephole
@@ -1110,6 +1174,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
   const auto *TII = STI.getInstrInfo();
   const auto *TRI = STI.getRegisterInfo();
   bool Changed = false;
+  ParkedDebugInstrs Parked(MF);
 
   for (MachineBasicBlock &MBB : MF) {
     // The peepholes written inline below move reads past the point where

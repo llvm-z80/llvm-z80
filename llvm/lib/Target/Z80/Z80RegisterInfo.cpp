@@ -681,6 +681,18 @@ static void emitSlotAddr(MachineBasicBlock &MBB,
                      PreserveFlags);
 }
 
+// Move an address computed in HL into DE with EX DE,HL. The swap hands DE's
+// old contents to HL, where nothing reads them: HL is restored or dead
+// after the address is taken.
+static void emitAddrToDE(MachineBasicBlock &MBB,
+                         MachineBasicBlock::iterator InsertBefore,
+                         const DebugLoc &DL, const TargetInstrInfo &TII,
+                         const TargetRegisterInfo *TRI) {
+  MachineInstr *Ex = BuildMI(MBB, InsertBefore, DL, TII.get(Z80::EX_DE_HL));
+  Ex->findRegisterUseOperand(Z80::DE, TRI)->setIsUndef();
+  Ex->findRegisterDefOperand(Z80::HL, TRI)->setIsDead();
+}
+
 // Expand SPILL_GR8 with SP-relative addressing.
 static void expandSpillGR8SPRelative(bool IsStatic, MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator MI,
@@ -1306,7 +1318,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
             Z80::buildLD8(MBB, MI, DL, TII, Z80::D, Z80::H);
             Z80::buildLD8(MBB, MI, DL, TII, Z80::E, Z80::L);
           } else {
-            BuildMI(MBB, MI, DL, TII.get(Z80::EX_DE_HL));
+            emitAddrToDE(MBB, MI, DL, TII, this);
           }
         } else if (DstReg == Z80::BC) {
           Z80::buildLD8(MBB, MI, DL, TII, Z80::B, Z80::H);
@@ -1359,7 +1371,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       if (NeedSaveHL)
         emitHLSavePush(MBB, MI, DL, TII);
       emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, Z80::DE, PreserveFlags);
-      BuildMI(MBB, MI, DL, TII.get(Z80::EX_DE_HL));
+      emitAddrToDE(MBB, MI, DL, TII, this);
       if (NeedSaveHL)
         BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
     } else if (DstReg == Z80::BC) {
