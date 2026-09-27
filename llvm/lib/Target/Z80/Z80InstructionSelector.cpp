@@ -3889,8 +3889,10 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
   case TargetOpcode::G_UDIVREM:
   case TargetOpcode::G_SDIVREM: {
     // Fused divrem: one runtime call returns both quotient and remainder.
-    // Z80:  __udivhi3: HL=dividend, DE=divisor → DE=quot, HL=rem
-    // SM83: __udivhi3: DE=dividend, BC=divisor → BC=quot, HL=rem
+    // The ...hi3 routines promise only the quotient, so this calls the
+    // ...hi4 pair, which names the remainder as a result too.
+    // Z80:  __(u)divmodhi4: HL=dividend, DE=divisor → DE=quot, HL=rem
+    // SM83: __(u)divmodhi4: DE=dividend, BC=divisor → BC=quot, HL=rem
     Register QuotReg = MI.getOperand(0).getReg();
     Register RemReg = MI.getOperand(1).getReg();
     Register LHSReg = MI.getOperand(2).getReg();
@@ -3937,7 +3939,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return false;
 
     bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
-    const char *FuncName = IsSigned ? "__divhi3" : "__udivhi3";
+    const char *FuncName = IsSigned ? "__divmodhi4" : "__udivmodhi4";
     Module *M = const_cast<Module *>(MF.getFunction().getParent());
     FunctionCallee Func = M->getOrInsertFunction(
         FuncName, FunctionType::get(Type::getInt16Ty(M->getContext()),

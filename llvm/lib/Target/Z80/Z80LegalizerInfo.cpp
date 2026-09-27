@@ -297,8 +297,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
 
   // Combined div+rem: lower back to separate G_UDIV/G_UREM (or G_SDIV/G_SREM).
   // Z80's division runtime returns both quotient and remainder in one call:
-  //   Z80:  __udivhi3: HL÷DE → DE=quot, HL=rem
-  //   SM83: __udivhi3: DE÷BC → BC=quot, HL=rem
+  //   Z80:  __(u)divmodhi4: HL÷DE → DE=quot, HL=rem
+  //   SM83: __(u)divmodhi4: DE÷BC → BC=quot, HL=rem
   // Custom-lower i16 G_UDIVREM/G_SDIVREM to a single runtime call.
   // i8 and others fall back to separate div+rem.
   getActionDefinitionsBuilder({G_UDIVREM, G_SDIVREM}).customFor({S16}).lower();
