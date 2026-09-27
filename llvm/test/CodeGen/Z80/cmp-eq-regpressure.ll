@@ -2,7 +2,7 @@
 ; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s -o /dev/null
 ;
 ; Test that 16-bit EQ/NE comparisons work under register pressure.
-; The XOR_CMP_EQ16/NE16 pseudo operands must be constrained to GR16
+; The pairs the equality test reads must be constrained to GR16
 ; so the register allocator can assign valid registers.
 
 define i8 @cmp_eq_chain(i16 %a, i16 %b) {

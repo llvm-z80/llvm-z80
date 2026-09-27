@@ -18,6 +18,7 @@
 #include "Z80InstrInfo.h"
 #include "Z80OpcodeUtils.h"
 #include "Z80Subtarget.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -158,6 +159,93 @@ Z80RegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
   if (RC->hasSuperClass(&Z80::Anyi16RegClass))
     return &Z80::Anyi16RegClass;
   return RC;
+}
+
+// Joining a register into Ac holds its value in A for the whole of its live
+// range. That only pays where the value is in A at each of its reads and
+// writes anyway: a chain of accumulator operations, each copied into the
+// next. A value some of whose reads or writes do not need A, such as a byte
+// of a pair or an operand of INC, is left to the allocator, which puts it in
+// A where A is free and elsewhere where it is not; the ranges in Ac are
+// assigned first. And a join is taken only when no other value held in A,
+// physical or in Ac, is live anywhere in the range: otherwise the allocator
+// has to split it again, the copies it inserts go wherever it finds room
+// rather than where the value was headed, and where no split frees A it runs
+// out of registers.
+//
+// The joins taken keep the ranges in Ac apart. A range within one block then
+// meets another in Ac only through a def or a use inside it: one that
+// spanned it would meet the register on the other side of the copy as well.
+// So there the instructions in the range stand for every value that could be
+// in A; a range across blocks is held against each register in Ac instead.
+bool Z80RegisterInfo::shouldCoalesce(
+    MachineInstr *MI, const TargetRegisterClass *SrcRC, unsigned SubReg,
+    const TargetRegisterClass *DstRC, unsigned DstSubReg,
+    const TargetRegisterClass *NewRC, LiveIntervals &LIS) const {
+  if (!Z80::AcRegClass.hasSubClassEq(NewRC) || SrcRC == DstRC)
+    return true;
+
+  const MachineRegisterInfo &MRI = MI->getMF()->getRegInfo();
+  Register Dst = MI->getOperand(0).getReg();
+  Register Src = MI->getOperand(1).getReg();
+  Register Narrowed =
+      Z80::AcRegClass.hasSubClassEq(MRI.getRegClass(Dst)) ? Src : Dst;
+  const LiveInterval &LI = LIS.getInterval(Narrowed);
+
+  for (MCRegUnit Unit : regunits(Z80::A))
+    if (LIS.getRegUnit(Unit).overlaps(LI))
+      return false;
+
+  // Accumulator operands have registers of their own, reached by copies, so
+  // a value that is in A at each read and write has only copies to and from
+  // A besides the one being joined.
+  auto InA = [&](Register Reg) {
+    if (Reg.isPhysical())
+      return Reg == Z80::A;
+    const TargetRegisterClass *RC = MRI.getRegClassOrNull(Reg);
+    return RC && Z80::AcRegClass.hasSubClassEq(RC);
+  };
+  for (const MachineInstr &UseMI : MRI.reg_nodbg_instructions(Narrowed)) {
+    if (&UseMI == MI)
+      continue;
+    if (!UseMI.isFullCopy())
+      return false;
+    const MachineOperand &Other = UseMI.getOperand(0).getReg() == Narrowed
+                                      ? UseMI.getOperand(1)
+                                      : UseMI.getOperand(0);
+    if (!InA(Other.getReg()))
+      return false;
+  }
+
+  auto MeetsInA = [&](Register Reg) {
+    const TargetRegisterClass *RC = MRI.getRegClassOrNull(Reg);
+    return Reg != Src && Reg != Dst && RC &&
+           Z80::AcRegClass.hasSubClassEq(RC) && LIS.hasInterval(Reg) &&
+           LIS.getInterval(Reg).overlaps(LI);
+  };
+
+  MachineBasicBlock *MBB = MI->getParent();
+  if (LI.size() != 1 || LIS.getMBBFromIndex(LI.beginIndex()) != MBB ||
+      LI.endIndex() > LIS.getMBBEndIdx(MBB)) {
+    for (unsigned I = 0, E = MRI.getNumVirtRegs(); I != E; ++I)
+      if (MeetsInA(Register::index2VirtReg(I)))
+        return false;
+    return true;
+  }
+
+  MachineBasicBlock::iterator I = MBB->begin();
+  if (MachineInstr *First = LIS.getInstructionFromIndex(LI.beginIndex()))
+    I = First;
+  for (; I != MBB->end(); ++I) {
+    if (I->isDebugOrPseudoInstr())
+      continue;
+    if (LIS.getInstructionIndex(*I) >= LI.endIndex())
+      break;
+    for (const MachineOperand &MO : I->operands())
+      if (MO.isReg() && MO.getReg().isVirtual() && MeetsInA(MO.getReg()))
+        return false;
+  }
+  return true;
 }
 
 bool Z80RegisterInfo::saveScavengerRegister(MachineBasicBlock &MBB,
@@ -593,6 +681,18 @@ static void emitSlotAddr(MachineBasicBlock &MBB,
                      PreserveFlags);
 }
 
+// Move an address computed in HL into DE with EX DE,HL. The swap hands DE's
+// old contents to HL, where nothing reads them: HL is restored or dead
+// after the address is taken.
+static void emitAddrToDE(MachineBasicBlock &MBB,
+                         MachineBasicBlock::iterator InsertBefore,
+                         const DebugLoc &DL, const TargetInstrInfo &TII,
+                         const TargetRegisterInfo *TRI) {
+  MachineInstr *Ex = BuildMI(MBB, InsertBefore, DL, TII.get(Z80::EX_DE_HL));
+  Ex->findRegisterUseOperand(Z80::DE, TRI)->setIsUndef();
+  Ex->findRegisterDefOperand(Z80::HL, TRI)->setIsDead();
+}
+
 // Expand SPILL_GR8 with SP-relative addressing.
 static void expandSpillGR8SPRelative(bool IsStatic, MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator MI,
@@ -999,10 +1099,10 @@ static bool rewriteStaticSlotAccess(MachineBasicBlock::iterator MI,
     break;
   }
 
-  case Z80::ALU_A_FI: {
+  case Z80::ALU_Ac_FI: {
     // The address load leaves the flags alone, so the memory-operand form
     // of the operation applies directly.
-    unsigned Op = MI->getOperand(0).getImm();
+    unsigned Op = Z80::getAluFIOp(*MI);
     bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);
     if (NeedSaveHL)
       emitHLSavePush(MBB, MI, DL, TII);
@@ -1218,7 +1318,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
             Z80::buildLD8(MBB, MI, DL, TII, Z80::D, Z80::H);
             Z80::buildLD8(MBB, MI, DL, TII, Z80::E, Z80::L);
           } else {
-            BuildMI(MBB, MI, DL, TII.get(Z80::EX_DE_HL));
+            emitAddrToDE(MBB, MI, DL, TII, this);
           }
         } else if (DstReg == Z80::BC) {
           Z80::buildLD8(MBB, MI, DL, TII, Z80::B, Z80::H);
@@ -1271,7 +1371,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       if (NeedSaveHL)
         emitHLSavePush(MBB, MI, DL, TII);
       emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, Z80::DE, PreserveFlags);
-      BuildMI(MBB, MI, DL, TII.get(Z80::EX_DE_HL));
+      emitAddrToDE(MBB, MI, DL, TII, this);
       if (NeedSaveHL)
         BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
     } else if (DstReg == Z80::BC) {
@@ -1378,8 +1478,8 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     // compensate for the extra stack entries between SP and the target slot.
     // Without a frame pointer there is no IX+d to fold into, so unfold back
     // to the reload and the register form the selection replaced.
-    if (Opc == Z80::ALU_A_FI) {
-      unsigned Op = MI->getOperand(0).getImm();
+    if (Opc == Z80::ALU_Ac_FI) {
+      unsigned Op = Z80::getAluFIOp(*MI);
       auto NextIt = std::next(MI);
       Register TempReg = Z80::B;
       for (MCPhysReg R : {Z80::B, Z80::C, Z80::D, Z80::E})
@@ -1449,8 +1549,8 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
   int64_t MaxOffset = Is16BitFI ? Offset + 1 : Offset;
 
   if (Offset >= -128 && MaxOffset <= 127) {
-    if (Opc == Z80::ALU_A_FI) {
-      unsigned Op = MI->getOperand(0).getImm();
+    if (Opc == Z80::ALU_Ac_FI) {
+      unsigned Op = Z80::getAluFIOp(*MI);
       BuildMI(MBB, MI, DL, TII.get(Z80::getAluIXdOpcode(Op)))
           .addImm(Offset)
           .cloneMemRefs(*MI);
@@ -1571,8 +1671,8 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     return false;
   }
 
-  if (Opc == Z80::ALU_A_FI) {
-    unsigned Op = MI->getOperand(0).getImm();
+  if (Opc == Z80::ALU_Ac_FI) {
+    unsigned Op = Z80::getAluFIOp(*MI);
     auto NextIt = std::next(MI);
     Register TempReg =
         !isRegLiveAt(Z80::BC, MBB, NextIt, this) ? Z80::BC : Z80::DE;

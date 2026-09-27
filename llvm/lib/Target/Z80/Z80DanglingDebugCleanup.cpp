@@ -29,6 +29,13 @@ namespace {
 // RegBankSelect maps debug operands like any other, and no 8/16-bit bank can
 // carry the wide dangling type. The value no longer exists, so mark it as
 // unavailable instead.
+//
+// Selection leaves the same behind. It erases a definition folded into its
+// users or found dead, and keeps a debug use of it only where it can rewrite
+// the use in terms of the operands. The rest still name a register with no
+// definition and no class, which the dead lane analysis then reads as undef,
+// and an undef use of a register with no class is invalid. The pass runs
+// again after selection for those.
 class Z80DanglingDebugCleanup : public MachineFunctionPass {
 public:
   static char ID;
@@ -48,7 +55,7 @@ public:
     };
     for (MachineBasicBlock &MBB : MF)
       for (MachineInstr &MI : MBB) {
-        if (!MI.isDebugInstr() || none_of(MI.debug_operands(), IsDangling))
+        if (!MI.isDebugValueLike() || none_of(MI.debug_operands(), IsDangling))
           continue;
         // A location with an unavailable operand cannot be evaluated at all,
         // so the canonical form marks the whole value undef.

@@ -64,7 +64,8 @@ define i16 @test_ssubsat(i16 %a, i16 %b) {
 ; Test: three-way signed comparison
 define i8 @test_scmp(i16 %a, i16 %b) {
 ; CHECK-LABEL: _test_scmp:
-; CHECK:       sbc hl,de
+; CHECK:       xor #128
+; CHECK:       sbc a,{{[a-l]}}
 ; CHECK:       ret
   %r = call i8 @llvm.scmp.i8.i16(i16 %a, i16 %b)
   ret i8 %r

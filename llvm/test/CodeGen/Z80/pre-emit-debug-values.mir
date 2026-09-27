@@ -1,0 +1,58 @@
+# RUN: llc -mtriple=z80 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
+#
+# The pre-emit peepholes run with debug instructions set aside, so a debug
+# value neither splits a run they match nor counts as a read. Each goes back
+# after the instruction it followed, even when a later one is rewritten.
+
+--- |
+  define void @fold_across_debug() !dbg !3 { ret void }
+  define void @rewrite_after_debug() !dbg !8 { ret void }
+
+  !llvm.dbg.cu = !{!0}
+  !llvm.module.flags = !{!2}
+  !0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, emissionKind: FullDebug)
+  !1 = !DIFile(filename: "t.c", directory: "/")
+  !2 = !{i32 2, !"Debug Info Version", i32 3}
+  !3 = distinct !DISubprogram(name: "fold_across_debug", scope: !1, file: !1, line: 1, type: !4, spFlags: DISPFlagDefinition, unit: !0)
+  !4 = !DISubroutineType(types: !{})
+  !5 = !DILocalVariable(name: "x", scope: !3, file: !1, line: 1, type: !6)
+  !6 = !DIBasicType(name: "unsigned char", size: 8, encoding: DW_ATE_unsigned_char)
+  !7 = !DILocation(line: 1, scope: !3)
+  !8 = distinct !DISubprogram(name: "rewrite_after_debug", scope: !1, file: !1, line: 2, type: !4, spFlags: DISPFlagDefinition, unit: !0)
+  !9 = !DILocalVariable(name: "y", scope: !8, file: !1, line: 2, type: !6)
+  !10 = !DILocation(line: 2, scope: !8)
+...
+---
+# The reload of C still folds into the XOR with a debug value naming C
+# between them.
+# CHECK-LABEL: name: fold_across_debug
+# CHECK:      DBG_VALUE $c
+# CHECK-NEXT: $a = LD_r_IXd 7
+# CHECK-NEXT: XOR_IXd 10
+name:            fold_across_debug
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    $c = LD_r_IXd 10
+    DBG_VALUE $c, $noreg, !5, !DIExpression(), debug-location !7
+    $a = LD_r_IXd 7
+    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    RET implicit $a
+...
+---
+# LD A,0 becomes XOR A, built in its place; the debug value stays ahead of
+# it, after the copy it followed.
+# CHECK-LABEL: name: rewrite_after_debug
+# CHECK:      $c = LD_r_r killed $b
+# CHECK-NEXT: DBG_VALUE $c
+# CHECK-NEXT: XOR_r
+name:            rewrite_after_debug
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $b
+    $c = LD_r_r $b
+    DBG_VALUE $c, $noreg, !9, !DIExpression(), debug-location !10
+    $a = LD_r_n 0
+    RET implicit $a, implicit $c
+...

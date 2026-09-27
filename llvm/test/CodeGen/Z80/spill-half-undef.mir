@@ -2,11 +2,24 @@
 #
 # A pair the register allocator filled in one half only still spills whole, and
 # nothing in the operands says which half is empty. Splitting the spill into
-# byte stores must not claim that the empty half was read.
+# byte stores must not claim that the empty half was read. A debug value that
+# names the empty half does not give it a value either.
 
 --- |
   define void @never_defined() { ret void }
   define void @already_killed() { ret void }
+  define void @debug_read() !dbg !3 { ret void }
+
+  !llvm.dbg.cu = !{!0}
+  !llvm.module.flags = !{!2}
+  !0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, emissionKind: FullDebug)
+  !1 = !DIFile(filename: "t.c", directory: "/")
+  !2 = !{i32 2, !"Debug Info Version", i32 3}
+  !3 = distinct !DISubprogram(name: "debug_read", scope: !1, file: !1, line: 1, type: !4, spFlags: DISPFlagDefinition, unit: !0)
+  !4 = !DISubroutineType(types: !{})
+  !5 = !DILocalVariable(name: "x", scope: !3, file: !1, line: 1, type: !6)
+  !6 = !DIBasicType(name: "unsigned char", size: 8, encoding: DW_ATE_unsigned_char)
+  !7 = !DILocation(line: 1, scope: !3)
 ...
 ---
 name:            never_defined
@@ -39,5 +52,22 @@ body:             |
 ...
 ---
 # CHECK-LABEL: name: already_killed
+# CHECK:      LD_HLind_r $c, implicit $hl
+# CHECK:      LD_HLind_r undef $b, implicit $hl
+---
+name:            debug_read
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a
+    renamable $c = COPY $a
+    DBG_VALUE $b, $noreg, !5, !DIExpression(), debug-location !7
+    SPILL_GR16 renamable $bc, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    RET
+...
+---
+# CHECK-LABEL: name: debug_read
 # CHECK:      LD_HLind_r $c, implicit $hl
 # CHECK:      LD_HLind_r undef $b, implicit $hl

@@ -42,26 +42,18 @@ STATISTIC(NumZeroLogicElided, "Number of no-op logic operations removed");
 STATISTIC(NumCopiesFolded, "Number of copies folded into frame accesses");
 STATISTIC(NumDeadReloads, "Number of dead frame reloads erased");
 STATISTIC(NumPairReloads, "Number of reloads redirected into a register pair");
-STATISTIC(NumIncDec, "Number of increments/decrements applied in place");
 STATISTIC(NumPopPushElided, "Number of POP/PUSH pairs elided");
 STATISTIC(NumPushPopElided, "Number of PUSH/POP pairs elided");
 STATISTIC(NumPostIncFused, "Number of accesses fused into post-increment form");
 STATISTIC(NumConstStores, "Number of constant stores materialized through A");
-STATISTIC(NumSingleBitMasks, "Number of single-bit masks folded to RES");
 STATISTIC(NumIXConstStores,
           "Number of constant stores materialized through IX");
 STATISTIC(NumPopPushPairs, "Number of POP/PUSH pairs on the same pair removed");
-STATISTIC(NumDecInPlace,
-          "Number of load/decrement/store sequences done in place");
-STATISTIC(NumCplFolds, "Number of XOR 0xFF folded to CPL");
 STATISTIC(NumZeroAFolds, "Number of LD A,0 folded to XOR A");
-STATISTIC(NumAluImmMerges, "Number of consecutive ALU immediates merged");
 STATISTIC(NumImm16Stores,
           "Number of 16-bit immediate stores routed through the slot");
 STATISTIC(NumLDHLStepped,
           "Number of consecutive LDHL SP addresses stepped with INC/DEC");
-STATISTIC(NumCmpImmFolds,
-          "Number of constants folded into a 16-bit XOR compare");
 STATISTIC(NumPostIncLoads,
           "Number of loads rewritten to the post-increment form");
 STATISTIC(NumHLPostIncLoads, "Number of 16-bit HL loads rewritten through HL+");
@@ -82,6 +74,70 @@ struct IXOffsetInfo {
   }
   static bool isEqual(int LHS, int RHS) { return LHS == RHS; }
 };
+
+// --- Debug instructions stay out of the patterns ---
+//
+// The peepholes here match runs of instructions and scan for what each one
+// reads and writes. A debug instruction emits nothing, but it sits among the
+// instructions it describes and names their registers: under -g it would
+// split a run or count as a read, and the code would change with it. So the
+// pass sets debug instructions aside while it runs and puts each one back
+// after the instruction it followed, the point from which it describes the
+// program. When that instruction is erased, the place passes back to the one
+// before it.
+namespace {
+class ParkedDebugInstrs : public MachineFunction::Delegate {
+  MachineFunction &MF;
+  // The debug instructions to go back in after an instruction, in order, and
+  // those that came before the first instruction of a block.
+  DenseMap<MachineInstr *, SmallVector<MachineInstr *, 2>> After;
+  DenseMap<MachineBasicBlock *, SmallVector<MachineInstr *, 2>> AtStart;
+
+public:
+  explicit ParkedDebugInstrs(MachineFunction &MF) : MF(MF) {
+    for (MachineBasicBlock &MBB : MF) {
+      MachineInstr *Prev = nullptr;
+      for (MachineInstr &MI : make_early_inc_range(MBB)) {
+        if (!MI.isDebugInstr()) {
+          Prev = &MI;
+          continue;
+        }
+        auto &Parked = Prev ? After[Prev] : AtStart[&MBB];
+        Parked.push_back(MBB.remove(&MI));
+      }
+    }
+    MF.setDelegate(this);
+  }
+
+  ~ParkedDebugInstrs() override {
+    MF.resetDelegate(this);
+    for (auto &[MI, DIs] : After) {
+      auto Pos = std::next(MI->getIterator());
+      for (MachineInstr *DI : DIs)
+        MI->getParent()->insert(Pos, DI);
+    }
+    for (auto &[MBB, DIs] : AtStart) {
+      auto Pos = MBB->begin();
+      for (MachineInstr *DI : DIs)
+        MBB->insert(Pos, DI);
+    }
+  }
+
+  void MF_HandleInsertion(MachineInstr &) override {}
+
+  // Called while the instruction is still in its block.
+  void MF_HandleRemoval(MachineInstr &MI) override {
+    auto It = After.find(&MI);
+    if (It == After.end())
+      return;
+    SmallVector<MachineInstr *, 2> DIs = std::move(It->second);
+    After.erase(It);
+    MachineInstr *Prev = MI.getPrevNode();
+    auto &Dest = Prev ? After[Prev] : AtStart[MI.getParent()];
+    Dest.append(DIs.begin(), DIs.end());
+  }
+};
+} // namespace
 
 // --- Asking an instruction what it is ---
 //
@@ -228,12 +284,6 @@ static Register getAluRegSrc(const MachineInstr &MI, unsigned &IXdOpc) {
     return Register();
   IXdOpc = Opc;
   return Src;
-}
-
-/// Whether \p MI increments or decrements \p Reg. \p Opc is Z80::INC_r or
-/// Z80::DEC_r.
-static bool isIncDec8(const MachineInstr &MI, unsigned Opc, Register Reg) {
-  return MI.getOpcode() == Opc && MI.getOperand(0).getReg() == Reg;
 }
 
 /// Whether \p MI increments or decrements \p Pair. \p Opc is Z80::INC_rr or
@@ -583,104 +633,6 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
     MII = std::next(SetHi);
     MBB.erase(LoadHi, MII);
     ++NumPairReloads;
-    Changed = true;
-  }
-  if (Changed)
-    recomputeLivenessFlags(MBB);
-  return Changed;
-}
-
-// LD A,r; AND n; LD r,A is four bytes for what RES does in two, when the
-// mask clears a single bit. RES writes no flags, so the ones the AND wrote
-// have to be dead.
-static bool foldSingleBitMask(MachineBasicBlock &MBB,
-                              const TargetInstrInfo *TII,
-                              const TargetRegisterInfo *TRI) {
-  bool Changed = false;
-  for (auto MII = MBB.begin(); MII != MBB.end();) {
-    auto And = MII++;
-    if (And->getOpcode() != Z80::AND_n || !And->getOperand(0).isImm())
-      continue;
-    const unsigned Cleared = ~And->getOperand(0).getImm() & 0xFF;
-    if (!isPowerOf2_32(Cleared))
-      continue;
-    if (And == MBB.begin())
-      continue;
-
-    auto In = std::prev(And);
-    auto Out = std::next(And);
-    if (Out == MBB.end() || !isLD8(*In) || !isLD8(*Out))
-      continue;
-    Register Reg = In->getOperand(1).getReg();
-    if (In->getOperand(0).getReg() != Z80::A || Reg == Z80::A ||
-        Out->getOperand(0).getReg() != Reg ||
-        Out->getOperand(1).getReg() != Z80::A)
-      continue;
-
-    auto After = std::next(Out);
-    if (!isRegDeadAfter(After, MBB, TRI, Z80::FLAGS) ||
-        !isRegDeadAfter(After, MBB, TRI, Z80::A))
-      continue;
-
-    LLVM_DEBUG(dbgs() << "  Single-bit mask through A: " << *And);
-    BuildMI(MBB, In, And->getDebugLoc(), TII->get(Z80::RES_b_r), Reg)
-        .addImm(Log2_32(Cleared))
-        .addReg(Reg);
-    MBB.erase(In);
-    MBB.erase(And);
-    MII = MBB.erase(Out);
-    ++NumSingleBitMasks;
-    Changed = true;
-  }
-  return Changed;
-}
-
-// --- Increment a register where it lives ---
-//
-// LD A,r; INC/DEC A; LD r,A round-trips through A for a plain increment.
-// INC r produces the same value and the same flags, in one byte. Valid on
-// both targets; needs A dead afterward, since the round trip left the new
-// value in A as a side effect.
-static bool directIncDec(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
-                         const TargetRegisterInfo *TRI) {
-  bool Changed = false;
-  for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
-    auto Next = std::next(MII);
-    Register R = getLD8Src(*MII, Z80::A);
-    if (!R || Next == MIE) {
-      MII = Next;
-      continue;
-    }
-    bool IsInc = isIncDec8(*Next, Z80::INC_r, Z80::A);
-    if (!IsInc && !isIncDec8(*Next, Z80::DEC_r, Z80::A)) {
-      MII = Next;
-      continue;
-    }
-    // A register the field cannot name has no INC r form to fold into. A
-    // itself does, so a round trip through A of A is folded like any other;
-    // it is only the index registers this turns away.
-    if (!Z80::isEncodableGR8(R)) {
-      MII = Next;
-      continue;
-    }
-    auto Third = std::next(Next);
-    if (Third == MIE || getLD8Dst(*Third, Z80::A) != R) {
-      MII = Next;
-      continue;
-    }
-    auto After = std::next(Third);
-    if (!isRegDeadAfter(After, MBB, TRI, Z80::A)) {
-      MII = Next;
-      continue;
-    }
-    LLVM_DEBUG(dbgs() << "  Direct inc/dec: " << *MII);
-    Z80::buildIncDec8(MBB, MII, MII->getDebugLoc(), *TII,
-                      IsInc ? Z80::INC_r : Z80::DEC_r, R);
-    MBB.erase(MII);
-    MBB.erase(Next);
-    MBB.erase(Third);
-    MII = After;
-    ++NumIncDec;
     Changed = true;
   }
   if (Changed)
@@ -1222,6 +1174,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
   const auto *TII = STI.getInstrInfo();
   const auto *TRI = STI.getRegisterInfo();
   bool Changed = false;
+  ParkedDebugInstrs Parked(MF);
 
   for (MachineBasicBlock &MBB : MF) {
     // The peepholes written inline below move reads past the point where
@@ -1280,94 +1233,6 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
         ++MII;
     }
 
-    // --- Peephole: LD A,r; DEC A; LD r,A; OR A; JR NZ → DEC r; JR NZ ---
-    // Replaces a 5-instruction decrement-and-branch sequence (28T, 6B) with
-    // DEC r; JR NZ (14T, 3B). DEC r sets Z flag correctly for JR NZ, and
-    // stays within the analyzable branch framework. Works on Z80 and SM83.
-    for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
-         MII != MIE;) {
-      // Match: LD A,r (identify counter register r)
-      Register CounterReg = getLD8Src(*MII, Z80::A);
-      if (!CounterReg.isValid() || CounterReg == Z80::A ||
-          !Z80::isEncodableGR8(CounterReg)) {
-        ++MII;
-        continue;
-      }
-      auto I1 = MII;
-      auto I2 = std::next(I1);
-      if (I2 == MIE) {
-        ++MII;
-        continue;
-      }
-      auto I3 = std::next(I2);
-      if (I3 == MIE) {
-        ++MII;
-        continue;
-      }
-      auto I4 = std::next(I3);
-      if (I4 == MIE) {
-        ++MII;
-        continue;
-      }
-      auto I5 = std::next(I4);
-      if (I5 == MIE) {
-        ++MII;
-        continue;
-      }
-
-      // Match: DEC A; LD r,A; OR A; JR NZ,target
-      if (!isIncDec8(*I2, Z80::DEC_r, Z80::A) ||
-          !isLD8(*I3, CounterReg, Z80::A) || !isAlu8(*I4, Z80::OR_r, Z80::A) ||
-          I5->getOpcode() != Z80::JR_NZ_e) {
-        ++MII;
-        continue;
-      }
-
-      // The original sequence leaves A = r-1. The replacement doesn't
-      // touch A, so we must verify A is dead after the sequence.
-      if (!isRegDeadAfter(std::next(I5), MBB, TRI, Z80::A)) {
-        ++MII;
-        continue;
-      }
-
-      MachineBasicBlock *TargetMBB = I5->getOperand(0).getMBB();
-      DebugLoc DL = I1->getDebugLoc();
-
-      LLVM_DEBUG(dbgs() << "  Loop counter peephole: LD A,"
-                        << printReg(CounterReg, TRI) << " sequence → DEC "
-                        << printReg(CounterReg, TRI) << "; JR NZ\n");
-      I5->eraseFromParent();
-      I4->eraseFromParent();
-      I3->eraseFromParent();
-      I2->eraseFromParent();
-      MII = MBB.erase(I1);
-      Z80::buildIncDec8(MBB, MII, DL, *TII, Z80::DEC_r, CounterReg);
-      BuildMI(MBB, MII, DL, TII->get(Z80::JR_NZ_e)).addMBB(TargetMBB);
-      ++NumDecInPlace;
-      Changed = BlockChanged = true;
-    }
-
-    // --- Peephole: XOR #0xFF → CPL ---
-    // CPL (1 byte) is equivalent to XOR #0xFF (2 bytes) for the A register
-    // value, but sets flags differently (CPL: H=1,N=1, others unchanged;
-    // XOR: S,Z,P from result, H=1,N=0,C=0). Safe only when FLAGS is dead.
-    for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
-         MII != MIE;) {
-      MachineInstr &MI = *MII;
-      if (MI.getOpcode() == Z80::XOR_n && MI.getOperand(0).getImm() == 0xFF) {
-        auto After = std::next(MII);
-        if (isRegDeadAfter(After, MBB, TRI, Z80::FLAGS)) {
-          LLVM_DEBUG(dbgs() << "  XOR #0xFF → CPL: " << MI);
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(Z80::CPL));
-          MII = MBB.erase(MII);
-          ++NumCplFolds;
-          Changed = BlockChanged = true;
-          continue;
-        }
-      }
-      ++MII;
-    }
-
     // --- Peephole: LD A,#0 → XOR A ---
     // XOR A (1 byte) sets A to 0 just like LD A,#0 (2 bytes), but also
     // sets FLAGS (Z=1, S=0, H=0, P=1, N=0, C=0). Safe when FLAGS is dead.
@@ -1385,26 +1250,6 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
           Changed = BlockChanged = true;
           continue;
         }
-      }
-      ++MII;
-    }
-
-    // --- Peephole: ALU #imm; ALU #imm → ALU #imm ---
-    // When the same immediate ALU instruction appears consecutively, the
-    // second is redundant for idempotent operations (AND, OR).
-    // Most common case: AND #1; AND #1 after SBC A,A; AND #1 sequences.
-    for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
-         MII != MIE;) {
-      MachineInstr &MI = *MII;
-      auto NextIt = std::next(MII);
-      if (NextIt != MIE && MI.getOpcode() == NextIt->getOpcode() &&
-          (MI.getOpcode() == Z80::AND_n || MI.getOpcode() == Z80::OR_n) &&
-          MI.getOperand(0).getImm() == NextIt->getOperand(0).getImm()) {
-        LLVM_DEBUG(dbgs() << "  Removing redundant: " << *NextIt);
-        NextIt->eraseFromParent();
-        ++NumAluImmMerges;
-        Changed = BlockChanged = true;
-        continue;
       }
       ++MII;
     }
@@ -1564,156 +1409,6 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
                            Diff == 1 ? Z80::INC_rr : Z80::DEC_rr, Z80::HL);
         It->eraseFromParent();
         ++NumLDHLStepped;
-        Changed = BlockChanged = true;
-      }
-    }
-
-    // --- Peephole: fold constant into XOR compare (CMP_Z16 + imm) ---
-    // When a XOR-based 16-bit compare uses a constant loaded into a register
-    // pair, fold the constant into XOR immediate instructions.
-    // LD rr,#imm; LD A,X; XOR rhi; LD B,A; LD A,Y; XOR rlo; OR B
-    // → LD A,X; XOR #hi; LD B,A; LD A,Y; XOR #lo; OR B
-    // Saves 1 byte (9B → 8B) per occurrence and frees the register pair.
-    // Applies to both Z80 (XOR_CMP_Z16 for i32/i64) and SM83 (SM83_CMP_Z16).
-    {
-      for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
-           MII != MIE;) {
-        MachineInstr &MI = *MII;
-        Register Pair = getLD16nDst(MI);
-        bool IsBC = Pair == Z80::BC;
-        bool IsDE = Pair == Z80::DE;
-        if (!IsBC && !IsDE) {
-          ++MII;
-          continue;
-        }
-        if (!MI.getOperand(1).isImm()) {
-          ++MII;
-          continue;
-        }
-
-        // Match 7 consecutive instructions.
-        auto I2 = std::next(MII);
-        if (I2 == MIE) {
-          ++MII;
-          continue;
-        }
-        // I2: LD A,X (load high byte of compared value)
-        Register I2Src = getLD8Src(*I2, Z80::A);
-        if (!I2Src.isValid() && !isLoadHL(*I2, Z80::A)) {
-          ++MII;
-          continue;
-        }
-
-        auto I3 = std::next(I2);
-        if (I3 == MIE) {
-          ++MII;
-          continue;
-        }
-        if (!isAlu8(*I3, Z80::XOR_r, IsBC ? Z80::B : Z80::D)) {
-          ++MII;
-          continue;
-        }
-
-        auto I4 = std::next(I3);
-        if (I4 == MIE || !isLD8(*I4, Z80::B, Z80::A)) {
-          ++MII;
-          continue;
-        }
-
-        auto I5 = std::next(I4);
-        if (I5 == MIE) {
-          ++MII;
-          continue;
-        }
-        // I5: LD A,Y (load low byte of compared value)
-        Register I5Src = getLD8Src(*I5, Z80::A);
-        if (!I5Src.isValid() && !isLoadHL(*I5, Z80::A)) {
-          ++MII;
-          continue;
-        }
-
-        auto I6 = std::next(I5);
-        if (I6 == MIE) {
-          ++MII;
-          continue;
-        }
-        if (!isAlu8(*I6, Z80::XOR_r, IsBC ? Z80::C : Z80::E)) {
-          ++MII;
-          continue;
-        }
-
-        auto I7 = std::next(I6);
-        if (I7 == MIE || !isAlu8(*I7, Z80::OR_r, Z80::B)) {
-          ++MII;
-          continue;
-        }
-
-        // Ensure lhs registers don't overlap with the constant pair.
-        MCPhysReg PairReg = IsBC ? Z80::BC : Z80::DE;
-        if (I2Src.isValid() && TRI->regsOverlap(I2Src, PairReg)) {
-          ++MII;
-          continue;
-        }
-        if (I5Src.isValid() && TRI->regsOverlap(I5Src, PairReg)) {
-          ++MII;
-          continue;
-        }
-
-        // The constant pair must be dead after OR B.
-        // For BC: B is overwritten by LD B,A (I4) with the XOR result (same
-        // value in both original and folded code), so only C matters.
-        // For DE: neither D nor E is overwritten, so both must be dead.
-        if (IsBC) {
-          if (!isRegDeadAfter(std::next(I7), MBB, TRI, Z80::C)) {
-            ++MII;
-            continue;
-          }
-        } else {
-          if (!isRegDeadAfter(std::next(I7), MBB, TRI, Z80::DE)) {
-            ++MII;
-            continue;
-          }
-        }
-
-        int64_t Imm = MI.getOperand(1).getImm();
-        int64_t HiByte = (Imm >> 8) & 0xFF;
-        int64_t LoByte = Imm & 0xFF;
-        LLVM_DEBUG(dbgs() << "  Folding CMP_Z16 constant: " << MI);
-
-        // Handle XOR rhi: replace with XOR #hi, or remove if hi == 0.
-        if (HiByte != 0) {
-          BuildMI(MBB, *I3, I3->getDebugLoc(), TII->get(Z80::XOR_n))
-              .addImm(HiByte);
-        } else {
-          // XOR #0 is identity. Also fold LD A,X; LD B,A → LD B,X.
-          // I2 is LD A,X, I4 is LD B,A. With XOR removed, this is LD B,X.
-          bool Folded = false;
-          if (I2Src.isValid()) {
-            // Skip LD B,B (self-move NOP when I2Src == B).
-            if (I2Src != Z80::B)
-              Z80::buildLD8(MBB, *I2, I2->getDebugLoc(), *TII, Z80::B, I2Src);
-            Folded = true;
-          } else if (isLoadHL(*I2, Z80::A)) {
-            Z80::buildLoadHL(MBB, *I2, I2->getDebugLoc(), *TII, Z80::B);
-            Folded = true;
-          }
-          if (Folded) {
-            I2->eraseFromParent();
-            I4->eraseFromParent();
-          }
-        }
-        I3->eraseFromParent();
-
-        // Handle XOR rlo: replace with XOR #lo, or remove if lo == 0.
-        if (LoByte != 0) {
-          BuildMI(MBB, *I6, I6->getDebugLoc(), TII->get(Z80::XOR_n))
-              .addImm(LoByte);
-        }
-        I6->eraseFromParent();
-
-        // Remove LD rr,#imm
-        MII = MBB.erase(MII);
-        ++NumCmpImmFolds;
         Changed = BlockChanged = true;
       }
     }
@@ -2488,8 +2183,6 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // which is the level that takes those.
     if (!STI.hasSM83() && MF.getFunction().hasMinSize())
       Changed |= materializeIXConstantStores(MBB, TII, TRI);
-    Changed |= foldSingleBitMask(MBB, TII, TRI);
-    Changed |= directIncDec(MBB, TII, TRI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
     Changed |= elidePushPopAcrossStretch(MBB, TII, TRI);
   }
