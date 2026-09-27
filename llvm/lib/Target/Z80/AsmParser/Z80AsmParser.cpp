@@ -32,8 +32,6 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCParser/AsmLexer.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
@@ -42,6 +40,7 @@
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/SourceMgr.h"
 
 #include <memory>
 
@@ -257,6 +256,7 @@ private:
   MCRegister parseRegisterName(StringRef Name);
   MCRegister tryParseRegisterName();
   bool tryParseRegisterOperand(OperandVector &Operands);
+  bool tryParseShadowAF(OperandVector &Operands);
   bool parseOperand(OperandVector &Operands, StringRef Mnemonic);
   bool parseParenOperand(OperandVector &Operands);
   bool parseSDASZ80Indexed(OperandVector &Operands, const MCExpr *Disp,
@@ -346,43 +346,30 @@ MCRegister Z80AsmParser::tryParseRegisterName() {
   return parseRegisterName(Name);
 }
 
-bool Z80AsmParser::tryParseRegisterOperand(OperandVector &Operands) {
-  // Z80 shadow accumulator-flags register operand "af'" — only valid
-  // Z80 syntax that uses an apostrophe in a register-position token.
-  // The AsmLexer treats "'" as a single-quoted string opener, so
-  // "af'\n..." would otherwise be mis-tokenised as identifier "af"
-  // plus an unterminated string. Detect the pattern via a raw byte
-  // peek, push it as a Token operand (matching the auto-generated
-  // MCK_af_39_ class for the "af'" literal in EX_AF_AF's AsmString),
-  // and reposition the lexer past the apostrophe so the caller's
-  // Parser.Lex() does not invoke LexSingleQuote on it.
-  // See ravn/llvm-z80#81.
-  if (Parser.getTok().is(AsmToken::Identifier) &&
-      Parser.getTok().getString().equals_insensitive("af")) {
-    SMLoc EndLoc = Parser.getTok().getEndLoc();
-    const char *Past = EndLoc.getPointer();
-    if (Past && *Past == '\'') {
-      SMLoc S = Parser.getTok().getLoc();
-      SourceMgr &SrcMgr = Parser.getSourceManager();
-      unsigned BufID = SrcMgr.FindBufferContainingLoc(EndLoc);
-      if (BufID) {
-        StringRef Buf = SrcMgr.getMemoryBuffer(BufID)->getBuffer();
-        getLexer().setBuffer(Buf, Past + 1);
-      }
-      // Use the canonical lowercase form "af'" (matchTokenString is
-      // case-sensitive). Source-buffer-backed StringRef would change
-      // case if the user wrote "AF'", so use a fixed-string literal
-      // instead — the StringRef into a `static const char[]` lives
-      // for the program's lifetime, satisfying CreateToken's
-      // pointed-to-data-must-be-stable contract.
-      static const char AfPrimeStr[] = "af'";
-      Operands.push_back(
-          Z80Operand::CreateToken(StringRef(AfPrimeStr, 3), S));
-      Parser.Lex(); // Eat the "af" identifier; CurPtr is past "'"
-      return false;
-    }
-  }
+// `af'` in `ex af,af'`: the lexer would read the apostrophe as the start of a
+// character constant, so skip it here and hand the matcher the literal token.
+// If this is ever merged upstream, an AsmLexer option like
+// AllowApostropheInIdentifier would be the better fix.
+bool Z80AsmParser::tryParseShadowAF(OperandVector &Operands) {
+  const AsmToken &Tok = Parser.getTok();
+  if (!Tok.is(AsmToken::Identifier) ||
+      !Tok.getString().equals_insensitive("af"))
+    return true;
+  const char *Apostrophe = Tok.getEndLoc().getPointer();
+  if (*Apostrophe != '\'')
+    return true;
 
+  SourceMgr &SM = Parser.getSourceManager();
+  unsigned Buffer = SM.FindBufferContainingLoc(Tok.getEndLoc());
+  if (!Buffer)
+    return true;
+  Operands.push_back(Z80Operand::CreateToken("af'", Tok.getLoc()));
+  getLexer().setBuffer(SM.getMemoryBuffer(Buffer)->getBuffer(), Apostrophe + 1);
+  Parser.Lex(); // Eat `af`; lexing resumes after the apostrophe.
+  return false;
+}
+
+bool Z80AsmParser::tryParseRegisterOperand(OperandVector &Operands) {
   MCRegister Reg = tryParseRegisterName();
 
   if (!Reg)
@@ -557,7 +544,7 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
 
   // Try register
   if (getLexer().is(AsmToken::Identifier)) {
-    if (!tryParseRegisterOperand(Operands))
+    if (!tryParseShadowAF(Operands) || !tryParseRegisterOperand(Operands))
       return false;
 
     // Not a register — check for condition code tokens (nz, z, nc, po, pe, p,
