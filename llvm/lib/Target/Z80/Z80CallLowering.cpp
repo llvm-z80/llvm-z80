@@ -55,6 +55,12 @@ static Register widenToPhysRegWidth(MachineIRBuilder &MIRBuilder,
   return MIRBuilder.buildZExt(LLT::scalar(8), VReg).getReg(0);
 }
 
+/// INC SP leaves the F byte below the stack.
+static void pushByteInA(MachineIRBuilder &MIRBuilder) {
+  Z80::markUndefUse(MIRBuilder.buildInstr(Z80::PUSH_AF), Z80::FLAGS);
+  MIRBuilder.buildInstr(Z80::INC_SP);
+}
+
 /// \p ArrivesZeroExtended records a caller's zeroext promise, which lets the
 /// combiner drop the mask the narrowing G_TRUNC would otherwise leave.
 static void copyFromPhysReg(MachineIRBuilder &MIRBuilder,
@@ -1090,8 +1096,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                             LLT::scalar(8), Align(1));
         MIRBuilder.buildLoad(ByteReg, AddrReg, *MMO);
         MIRBuilder.buildCopy(Z80::A, ByteReg);
-        MIRBuilder.buildInstr(Z80::PUSH_AF);
-        MIRBuilder.buildInstr(Z80::INC_SP);
+        pushByteInA(MIRBuilder);
       }
 
       // Push 16-bit words from high to low
@@ -1123,8 +1128,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
     if (BitWidth <= 8 && !PushForward) {
       // Push i8 as 1 byte: PUSH AF + INC SP (matches SDCC's push af;inc sp)
       MIRBuilder.buildCopy(Z80::A, widenToPhysRegWidth(MIRBuilder, MRI, VReg));
-      MIRBuilder.buildInstr(Z80::PUSH_AF);
-      MIRBuilder.buildInstr(Z80::INC_SP);
+      pushByteInA(MIRBuilder);
     } else if (BitWidth <= 8) {
       // __smallc gives the byte a whole slot; only its low half is the value,
       // so SDCC is content to push whatever H happens to hold.
