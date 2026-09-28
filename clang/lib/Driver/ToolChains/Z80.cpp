@@ -266,6 +266,11 @@ void Z80ToolChain::addClangTargetOptions(const ArgList &DriverArgs,
   // Disable PHI node folding to keep if-else as branches.
   CC1Args.push_back("-mllvm");
   CC1Args.push_back("-two-entry-phi-node-folding-threshold=0");
+
+  // Load PRE in loops keeps loaded values in registers across iterations,
+  // which only adds spills with three register pairs.
+  CC1Args.push_back("-mllvm");
+  CC1Args.push_back("-enable-load-in-loop-pre=false");
 }
 
 void Z80ToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
