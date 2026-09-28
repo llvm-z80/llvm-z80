@@ -201,11 +201,13 @@ def RETN : InstED8<"retn", 0x45>, InstReturn;
 // IN A,(n)
 def IN_A_n : Inst16<"in a,", 0xDB, PortMode> {
   let AsmString = "in a, ( $imm )";
+  let Defs = [A];
 }
 
 // OUT (n),A
 def OUT_n_A : Inst16<"out", 0xD3, PortMode> {
   let AsmString = "out ( $imm ), a";
+  let Uses = [A];
 }
 
 // IN r,(C) - ED prefixed (sets flags)
