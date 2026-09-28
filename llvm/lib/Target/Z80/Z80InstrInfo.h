@@ -630,6 +630,9 @@ public:
                                       LiveIntervals *LIS = nullptr,
                                       VirtRegMap *VRM = nullptr) const override;
 
+  bool shouldHoist(const MachineInstr &MI,
+                   const MachineLoop *FromLoop) const override;
+
   unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
 
   //===--------------------------------------------------------------------===//

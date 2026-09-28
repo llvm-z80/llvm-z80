@@ -1754,6 +1754,13 @@ Z80InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
       .getInstr();
 }
 
+// MachineLICM hoists rematerializable instructions regardless of pressure, and
+// with three pairs the allocator then spills something else to keep them.
+bool Z80InstrInfo::shouldHoist(const MachineInstr &MI,
+                               const MachineLoop *FromLoop) const {
+  return !isAsCheapAsAMove(MI);
+}
+
 unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
 
