@@ -147,6 +147,10 @@ clang_tablegen(BuiltinsX86.inc -gen-clang-builtins
   SOURCE BuiltinsX86.td
   TARGET ClangBuiltinsX86)
 
+clang_tablegen(BuiltinsZ80.inc -gen-clang-builtins
+  SOURCE BuiltinsZ80.td
+  TARGET ClangBuiltinsZ80)
+
 clang_tablegen(BuiltinsX86_64.inc -gen-clang-builtins
   SOURCE BuiltinsX86_64.td
   TARGET ClangBuiltinsX86_64)
