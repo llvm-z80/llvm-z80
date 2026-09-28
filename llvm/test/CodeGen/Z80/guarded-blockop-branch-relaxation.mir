@@ -1,0 +1,135 @@
+# RUN: llc -mtriple=z80 -run-pass=branch-relaxation,z80-branch-cleanup %s -o - | FileCheck %s
+
+# Guarded block-operation pseudos are still opaque when BranchRelaxation
+# computes branch distances, so their getInstSizeInBytes entries are
+# load-bearing.  Each function below puts a conditional branch exactly one
+# byte beyond JR range: 122 bytes of padding plus a 6-byte guarded LDIR/LDDR.
+# If a pseudo is under-sized, the branch incorrectly remains JR_Z_e instead of JP_Z_nn.
+
+--- |
+  target triple = "z80"
+
+  define void @guarded_ldir_boundary() { ret void }
+  define void @guarded_lddr_boundary() { ret void }
+...
+---
+name: guarded_ldir_boundary
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $bc, $de, $hl
+    JR_Z_e %bb.2, implicit $flags
+
+  bb.1:
+    liveins: $bc, $de, $hl
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    NOP
+    NOP
+    LDIR_GUARDED implicit-def dead $a, implicit-def dead $hl, implicit-def dead $de, implicit-def dead $bc, implicit-def $flags, implicit $hl, implicit $de, implicit $bc
+
+  bb.2:
+    RET implicit $sp
+...
+---
+name: guarded_lddr_boundary
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $bc, $de, $hl
+    JR_Z_e %bb.2, implicit $flags
+
+  bb.1:
+    liveins: $bc, $de, $hl
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    $bc = LD_rr_nn 0
+    NOP
+    NOP
+    LDDR_GUARDED implicit-def dead $a, implicit-def dead $hl, implicit-def dead $de, implicit-def dead $bc, implicit-def $flags, implicit $hl, implicit $de, implicit $bc
+
+  bb.2:
+    RET implicit $sp
+...
+
+# CHECK-LABEL: name: guarded_ldir_boundary
+# CHECK:       JP_Z_nn %bb.2
+# CHECK-NOT:   JR_Z_e %bb.2
+# CHECK-LABEL: name: guarded_lddr_boundary
+# CHECK:       JP_Z_nn %bb.2
+# CHECK-NOT:   JR_Z_e %bb.2

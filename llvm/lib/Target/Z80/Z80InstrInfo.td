@@ -987,6 +987,13 @@ def LDIR_GUARDED : Z80Pseudo<(outs), (ins)> {
   // As on LDIR itself: passes that track memory invalidate on this.
   let hasSideEffects = 1;
 }
+def LDDR_GUARDED : Z80Pseudo<(outs), (ins)> {
+  let Uses = [HL, DE, BC];
+  let Defs = [HL, DE, BC, A, FLAGS];
+  let mayLoad = true;
+  let mayStore = true;
+  let hasSideEffects = 1;
+}
 
 let Constraints = "$dst = $lhs", Defs = [FLAGS] in {
 // 8-bit unsigned saturating add pseudo.
