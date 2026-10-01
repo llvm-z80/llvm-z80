@@ -1,0 +1,169 @@
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=z80-pre-emit-peephole %s -o - | FileCheck %s
+#
+# A frame address computed between a compare and its branch needs the flags
+# saved around it; computed before the compare, it does not.
+
+--- |
+  define void @hoist() { ret void }
+  define void @across_push() { ret void }
+  define void @hl_in_the_way() { ret void }
+  define void @stop_at_add_sp() { ret void }
+  define void @empty_save() { ret void }
+  define void @save_around_inc_hl() { ret void }
+...
+---
+name:            hoist
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    liveins: $e, $sp
+    $a = LD_r_r $e
+    CP_n 5, implicit-def $flags, implicit $a
+    PUSH_AF implicit $a, implicit $flags
+    LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
+    POP_AF implicit-def $a, implicit-def $flags
+    $c = LD_r_HLind implicit $hl
+    JR_NZ_e %bb.0, implicit $flags
+
+  bb.1:
+    liveins: $c
+    RET implicit $c
+
+# CHECK-LABEL: name: hoist
+# CHECK:      $a = LD_r_r $e
+# CHECK-NEXT: LDHL_SP_e 4
+# CHECK-NEXT: CP_n 5
+# CHECK-NEXT: $c = LD_r_HLind
+# CHECK-NEXT: JR_NZ_e
+
+...
+---
+name:            across_push
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    liveins: $e, $bc, $sp
+    $a = LD_r_r $e
+    CP_n 5, implicit-def $flags, implicit $a
+    PUSH_BC implicit $bc, implicit-def $sp, implicit $sp
+    PUSH_AF implicit $a, implicit $flags
+    LDHL_SP_e 8, implicit-def $hl, implicit-def $flags, implicit $sp
+    POP_AF implicit-def $a, implicit-def $flags
+    $d = LD_r_HLind implicit $hl
+    POP_BC implicit-def $bc, implicit-def $sp, implicit $sp
+    JR_NZ_e %bb.0, implicit $flags
+
+  bb.1:
+    liveins: $bc, $d
+    RET implicit $bc, implicit $d
+
+# Above the PUSH BC the slot is two bytes nearer. The save of BC, left with
+# nothing in between that writes BC, goes as well.
+
+# CHECK-LABEL: name: across_push
+# CHECK:      LDHL_SP_e 4
+# CHECK-NEXT: CP_n 5
+# CHECK-NEXT: $d = LD_r_HLind
+# CHECK-NEXT: JR_NZ_e
+
+...
+---
+name:            hl_in_the_way
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    liveins: $e, $l, $sp
+    $a = LD_r_r $e
+    CP_n 5, implicit-def $flags, implicit $a
+    $c = LD_r_r $l
+    PUSH_AF implicit $a, implicit $flags
+    LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
+    POP_AF implicit-def $a, implicit-def $flags
+    $b = LD_r_HLind implicit $hl
+    JR_NZ_e %bb.0, implicit $flags
+
+  bb.1:
+    liveins: $bc
+    RET implicit $bc
+
+# CHECK-LABEL: name: hl_in_the_way
+# CHECK:      PUSH_AF
+# CHECK-NEXT: LDHL_SP_e 6
+# CHECK-NEXT: POP_AF
+
+...
+---
+name:            stop_at_add_sp
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    liveins: $a, $sp
+    ADD_SP_e 254, implicit-def $sp, implicit-def $flags, implicit $sp
+    PUSH_AF implicit $a, implicit $flags
+    LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
+    POP_AF implicit-def $a, implicit-def $flags
+    $c = LD_r_HLind implicit $hl
+    JR_NZ_e %bb.0, implicit $flags
+
+  bb.1:
+    liveins: $c
+    RET implicit $c
+
+# ADD SP,e moves SP by more than getSPAdjust reports.
+
+# CHECK-LABEL: name: stop_at_add_sp
+# CHECK:      ADD_SP_e 254
+# CHECK-NEXT: PUSH_AF
+# CHECK-NEXT: LDHL_SP_e 6
+# CHECK-NEXT: POP_AF
+
+...
+---
+name:            empty_save
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    liveins: $e
+    $a = LD_r_r $e
+    CP_n 5, implicit-def $flags, implicit $a
+    PUSH_AF implicit $a, implicit $flags
+    POP_AF implicit-def $a, implicit-def $flags
+    JR_NZ_e %bb.0, implicit $flags
+
+  bb.1:
+    RET
+
+# CHECK-LABEL: name: empty_save
+# CHECK:      CP_n 5
+# CHECK-NEXT: JR_NZ_e
+
+...
+---
+name:            save_around_inc_hl
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    liveins: $e, $hl
+    $a = LD_r_r $e
+    CP_n 5, implicit-def $flags, implicit $a
+    PUSH_AF implicit $a, implicit $flags
+    $hl = INC_rr $hl
+    POP_AF implicit-def $a, implicit-def $flags
+    $c = LD_r_HLind implicit $hl
+    JR_NZ_e %bb.0, implicit $flags
+
+  bb.1:
+    liveins: $c
+    RET implicit $c
+
+# CHECK-LABEL: name: save_around_inc_hl
+# CHECK:      CP_n 5
+# CHECK-NEXT: $hl = INC_rr
+# CHECK-NEXT: $c = LD_r_HLind
+...

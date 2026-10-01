@@ -44,6 +44,8 @@ STATISTIC(NumDeadReloads, "Number of dead frame reloads erased");
 STATISTIC(NumPairReloads, "Number of reloads redirected into a register pair");
 STATISTIC(NumPopPushElided, "Number of POP/PUSH pairs elided");
 STATISTIC(NumPushPopElided, "Number of PUSH/POP pairs elided");
+STATISTIC(NumFlagSavesHoisted,
+          "Number of flag saves removed by computing the address first");
 STATISTIC(NumPostIncFused, "Number of accesses fused into post-increment form");
 STATISTIC(NumConstStores, "Number of constant stores materialized through A");
 STATISTIC(NumIXConstStores,
@@ -719,6 +721,7 @@ static bool elidePushPopAcrossStretch(MachineBasicBlock &MBB,
       {Z80::PUSH_BC, Z80::POP_BC, Z80::BC},
       {Z80::PUSH_DE, Z80::POP_DE, Z80::DE},
       {Z80::PUSH_HL, Z80::POP_HL, Z80::HL},
+      {Z80::PUSH_AF, Z80::POP_AF, Z80::AF},
   };
   bool Changed = false;
   for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
@@ -726,12 +729,17 @@ static bool elidePushPopAcrossStretch(MachineBasicBlock &MBB,
     for (const auto &P : Pairs) {
       if (MII->getOpcode() != P.PushOpc)
         continue;
+      // FLAGS is not a subregister of AF.
+      auto Clobbers = [&](const MachineInstr &J) {
+        return J.modifiesRegister(P.Reg, TRI) ||
+               (P.Reg == Z80::AF && J.modifiesRegister(Z80::FLAGS, TRI));
+      };
       SmallVector<MachineInstr *, 8> Rebase;
       unsigned Budget = 16;
       for (auto J = Next; J != MIE && Budget--; ++J) {
-        // LDHL SP,e writes HL, so it is only rebasable when HL is not the
-        // pair being saved: for that one, the pop is what puts it back.
-        if (J->getOpcode() == Z80::LDHL_SP_e && P.Reg != Z80::HL) {
+        // LDHL SP,e writes HL and the flags, so it is only rebasable when
+        // neither is being saved: for those, the pop is what puts it back.
+        if (J->getOpcode() == Z80::LDHL_SP_e && !Clobbers(*J)) {
           if (SignExtend64<8>(J->getOperand(0).getImm()) < 2)
             break;
           Rebase.push_back(&*J);
@@ -753,7 +761,7 @@ static bool elidePushPopAcrossStretch(MachineBasicBlock &MBB,
         // reads what it already holds. Push and pop model their SP movement
         // through getSPAdjust rather than operands, so ask both ways.
         if (J->isCall() || J->isBranch() || J->isTerminator() ||
-            J->isInlineAsm() || J->modifiesRegister(P.Reg, TRI) ||
+            J->isInlineAsm() || Clobbers(*J) ||
             TII->getSPAdjust(*J) != 0 || J->readsRegister(Z80::SP, TRI) ||
             J->modifiesRegister(Z80::SP, TRI))
           break;
@@ -1003,6 +1011,70 @@ static bool materializeIXConstantStores(MachineBasicBlock &MBB,
                       << (Saving - Cost) << "B\n");
   }
 
+  if (Changed)
+    recomputeLivenessFlags(MBB);
+  return Changed;
+}
+
+// A frame access between the instruction that sets the flags and the one that
+// reads them keeps its LDHL SP,e inside PUSH AF / POP AF. Computed before the
+// flags are set, the address needs no save.
+static bool hoistLDHLOutOfFlagSave(MachineBasicBlock &MBB,
+                                   const TargetInstrInfo *TII,
+                                   const TargetRegisterInfo *TRI) {
+  bool Changed = false;
+  for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
+    auto LDHL = std::next(MII);
+    if (MII->getOpcode() != Z80::PUSH_AF || LDHL == MIE ||
+        LDHL->getOpcode() != Z80::LDHL_SP_e || std::next(LDHL) == MIE ||
+        std::next(LDHL)->getOpcode() != Z80::POP_AF) {
+      ++MII;
+      continue;
+    }
+    auto Pop = std::next(LDHL);
+
+    LivePhysRegs Live(*TRI);
+    Live.addLiveOutsNoPristines(MBB);
+    for (auto I = MBB.end(); I != MII;)
+      Live.stepBackward(*--I);
+
+    // The displacement counted the saved AF.
+    int64_t Disp = SignExtend64<8>(LDHL->getOperand(0).getImm() & 0xFF) - 2;
+    MachineBasicBlock::iterator At = MII;
+    bool Found = false;
+    while (At != MBB.begin()) {
+      MachineInstr &Prev = *std::prev(At);
+      int Adj = TII->getSPAdjust(Prev);
+      if (Prev.isCall() || Prev.isInlineAsm() ||
+          Prev.readsRegister(Z80::HL, TRI) ||
+          Prev.modifiesRegister(Z80::HL, TRI) ||
+          (!Adj && (Prev.readsRegister(Z80::SP, TRI) ||
+                    Prev.modifiesRegister(Z80::SP, TRI))))
+        break;
+      Live.stepBackward(Prev);
+      Disp -= Adj;
+      --At;
+      if (!Live.contains(Z80::FLAGS)) {
+        Found = true;
+        break;
+      }
+    }
+    if (!Found || Disp < 0 || Disp > 127) {
+      ++MII;
+      continue;
+    }
+
+    LLVM_DEBUG(dbgs() << "  Flag save: hoisting " << *LDHL);
+    BuildMI(MBB, At, LDHL->getDebugLoc(), TII->get(Z80::LDHL_SP_e))
+        .addImm(Disp & 0xFF);
+    auto After = std::next(Pop);
+    MBB.erase(Pop);
+    MBB.erase(LDHL);
+    MBB.erase(MII);
+    MII = After;
+    ++NumFlagSavesHoisted;
+    Changed = true;
+  }
   if (Changed)
     recomputeLivenessFlags(MBB);
   return Changed;
@@ -2170,6 +2242,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
   // address-reuse rewrite must not obscure those first.
   for (MachineBasicBlock &MBB : MF) {
     if (STI.hasSM83()) {
+      Changed |= hoistLDHLOutOfFlagSave(MBB, TII, TRI);
       Changed |= reuseLDHLAddress(MBB, TII, TRI);
       // After address reuse: it creates the INC HL neighbors these fuse with.
       Changed |= materializeConstantStores(MBB, TII, TRI);
