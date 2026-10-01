@@ -27,6 +27,7 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/CodeGen.h"
@@ -131,6 +132,12 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
   // take the trade; -enable-machine-outliner still overrides both.
   this->Options.EnableMachineOutliner = true;
   this->Options.SupportsDefaultOutlining = true;
+
+  // z80asm has neither PIC nor an address-significance table.
+  if (getMCAsmInfo().isZ88DK()) {
+    this->RM = Reloc::Static;
+    this->Options.EmitAddrsig = false;
+  }
 }
 
 const Z80Subtarget *

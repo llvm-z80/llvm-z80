@@ -1619,6 +1619,10 @@ void MCAsmStreamer::emitAlignmentDirective(uint64_t ByteAlignment,
                                            std::optional<int64_t> Value,
                                            unsigned ValueSize,
                                            unsigned MaxBytesToEmit) {
+  // z80asm aligns only relative to the module start, which is not enough.
+  if (MAI->isZ88DK())
+    return;
+
   if (MAI->isAIX()) {
     if (!isPowerOf2_64(ByteAlignment))
       report_fatal_error("Only power-of-two alignments are supported "

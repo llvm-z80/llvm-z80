@@ -21,6 +21,7 @@
 #include "Z80RegisterInfo.h"
 #include "Z80Subtarget.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/BinaryFormat/Z80Flags.h"
 #include "llvm/CodeGen/AsmPrinter.h"
@@ -77,6 +78,8 @@ public:
   void emitGlobalVariable(const GlobalVariable *GV) override;
 
   void emitJumpTableInfo() override;
+
+  void emitEndOfAsmFile(Module &M) override;
 };
 
 // Simple pseudo-instructions have their lowering (with expansion to real
@@ -176,6 +179,30 @@ void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
     }
   }
 
+  if (MAI.isZ88DK()) {
+    if (GV->hasInitializer() && GV->getAlign() && *GV->getAlign() > 1)
+      OutContext.reportWarning(SMLoc(), "alignment of '" + GV->getName() +
+                                            "' is ignored in the z88dk format");
+
+    // z80asm has no .local/.comm, so define such globals in the BSS section.
+    if (GV->hasLocalLinkage() || GV->hasCommonLinkage()) {
+      const TargetLoweringObjectFile &TLOF = getObjFileLowering();
+      SectionKind Kind = TargetLoweringObjectFile::getKindForGlobal(GV, TM);
+      if (Kind.isCommon() ||
+          (Kind.isBSSLocal() &&
+           TLOF.SectionForGlobal(GV, Kind, TM) == TLOF.getBSSSection())) {
+        MCSymbol *GVSym = getSymbol(GV);
+        OutStreamer->switchSection(TLOF.getBSSSection());
+        if (!GV->hasLocalLinkage())
+          OutStreamer->emitSymbolAttribute(GVSym, MCSA_Global);
+        OutStreamer->emitLabel(GVSym);
+        OutStreamer->emitZeros(
+            std::max<uint64_t>(GV->getGlobalSize(GV->getDataLayout()), 1));
+        return;
+      }
+    }
+  }
+
   // Default handling for other globals
   AsmPrinter::emitGlobalVariable(GV);
 }
@@ -227,6 +254,33 @@ void Z80AsmPrinter::emitJumpTableInfo() {
   }
   if (!JTInDiffSection)
     OutStreamer->emitDataRegion(MCDR_DataRegionEnd);
+}
+
+// z80asm needs every symbol defined elsewhere to be declared EXTERN.
+void Z80AsmPrinter::emitEndOfAsmFile(Module &M) {
+  if (!MAI.isZ88DK() || !OutStreamer->hasRawTextSupport())
+    return;
+
+  // Intrinsic declarations get symbols too, but nothing references them.
+  SmallPtrSet<const MCSymbol *, 8> Intrinsics;
+  for (const Function &F : M)
+    if (F.isIntrinsic())
+      Intrinsics.insert(getSymbol(&F));
+
+  // Section symbols are the only names that start with '.'.
+  SmallVector<const MCSymbol *, 16> Externs;
+  for (const auto &Entry : OutContext.getSymbols()) {
+    const MCSymbol *Sym = Entry.getValue().Symbol;
+    if (Sym && Sym->isUndefined() && !Sym->isTemporary() &&
+        !Sym->getName().starts_with(".") && !Intrinsics.contains(Sym))
+      Externs.push_back(Sym);
+  }
+
+  llvm::sort(Externs, [](const MCSymbol *L, const MCSymbol *R) {
+    return L->getName() < R->getName();
+  });
+  for (const MCSymbol *Sym : Externs)
+    OutStreamer->emitRawText("\tEXTERN\t" + Sym->getName());
 }
 
 } // namespace

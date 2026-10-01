@@ -19,6 +19,10 @@ public:
   void Initialize(MCContext &ctx, const TargetMachine &TM) override;
   MCSection *getExplicitSectionGlobal(const GlobalObject *GO, SectionKind Kind,
                                       const TargetMachine &TM) const override;
+  MCSymbol *getTargetSymbol(const GlobalValue *GV,
+                            const TargetMachine &TM) const override;
+  void getNameWithPrefix(SmallVectorImpl<char> &OutName, const GlobalValue *GV,
+                         const TargetMachine &TM) const override;
 };
 
 } // end namespace llvm
