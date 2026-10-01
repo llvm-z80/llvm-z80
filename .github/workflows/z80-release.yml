@@ -86,7 +86,7 @@ jobs:
           - platform: Windows-X64
             os: windows-2022
             cache: sccache
-            cmake-flags: -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+            cmake-flags: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DLLVM_USE_LINKER=lld
     steps:
       - name: Keep line endings as committed
         if: runner.os == 'Windows'
