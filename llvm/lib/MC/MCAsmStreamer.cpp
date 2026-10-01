@@ -914,7 +914,7 @@ bool MCAsmStreamer::emitSymbolAttribute(MCSymbol *Symbol,
   case MCSA_Protected:      OS << "\t.protected\t";       break;
   case MCSA_Reference:      OS << "\t.reference\t";       break;
   case MCSA_Extern:
-    OS << MAI->getExternDirective();
+    OS << "\t.extern\t";
     break;
   case MCSA_Weak:           OS << MAI->getWeakDirective(); break;
   case MCSA_WeakDefinition:
@@ -1065,7 +1065,7 @@ void MCAsmStreamer::emitXCOFFSymbolLinkageWithVisibility(
     OS << MAI->getWeakDirective();
     break;
   case MCSA_Extern:
-    OS << MAI->getExternDirective();
+    OS << "\t.extern\t";
     break;
   case MCSA_LGlobal:
     OS << "\t.lglobl\t";
@@ -1443,35 +1443,6 @@ void MCAsmStreamer::emitBytes(StringRef Data) {
     return true;
   };
 
-  unsigned MaxLen = MAI->getMaxAsciiLength();
-  if (MaxLen != 0 && Data.size() > MaxLen &&
-      (MAI->getAsciiDirective() || MAI->getAscizDirective())) {
-    while (!Data.empty()) {
-      size_t ChunkSize = std::min<size_t>(Data.size(), MaxLen);
-      StringRef Chunk = Data.substr(0, ChunkSize);
-      Data = Data.substr(ChunkSize);
-      // For the final chunk, if the entire string ends with NUL and .asciz is
-      // supported, emitAsString will use .asciz for that final chunk.
-      // All earlier chunks (or strings without trailing NUL) will not end with
-      // 0 (unless that specific chunk byte happens to be 0, but Data.back()
-      // only applies if it is truly the final null terminator of the whole string).
-      if (Data.empty()) {
-        emitAsString(Chunk);
-      } else {
-        // Not the final chunk; must emit as .ascii (even if Chunk ends in 0,
-        // it is not the string's terminator).
-        if (MAI->getAsciiDirective()) {
-          OS << MAI->getAsciiDirective();
-          PrintQuotedString(Chunk, OS);
-          EmitEOL();
-        } else {
-          emitAsString(Chunk);
-        }
-      }
-    }
-    return;
-  }
-
   if (Data.size() != 1 && emitAsString(Data))
     return;
 
@@ -1648,8 +1619,8 @@ void MCAsmStreamer::emitAlignmentDirective(uint64_t ByteAlignment,
                                            std::optional<int64_t> Value,
                                            unsigned ValueSize,
                                            unsigned MaxBytesToEmit) {
-  // z80asm does not support alignment directives; Z80 has no alignment requirements.
-  if (MAI->isZ80ASM())
+  // z80asm aligns only relative to the module start, which is not enough.
+  if (MAI->isZ88DK())
     return;
 
   if (MAI->isAIX()) {
@@ -2752,15 +2723,11 @@ void MCAsmStreamer::emitRelocDirective(const MCExpr &Offset, StringRef Name,
 }
 
 void MCAsmStreamer::emitAddrsig() {
-  if (MAI->isZ80ASM())
-    return;
   OS << "\t.addrsig";
   EmitEOL();
 }
 
 void MCAsmStreamer::emitAddrsigSym(const MCSymbol *Sym) {
-  if (MAI->isZ80ASM())
-    return;
   OS << "\t.addrsig_sym ";
   Sym->print(OS, MAI);
   EmitEOL();

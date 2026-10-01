@@ -114,7 +114,7 @@ protected:
   bool IsHLASM = false;
 
   bool IsSDCC = false;
-  bool IsZ80ASM = false;
+  bool IsZ88DK = false;
 
   /// This is the maximum possible length of an instruction, which is needed to
   /// compute the size of an inline asm.  Defaults to 4.
@@ -233,11 +233,6 @@ protected:
   /// doesn't support this, it can be set to null.  Defaults to "\t.asciz\t"
   const char *AscizDirective = "\t.asciz\t";
 
-  /// If non-zero, maximum number of bytes to emit in a single .ascii or .asciz
-  /// directive. Longer strings or byte arrays are split into multiple directives
-  /// to avoid exceeding assembler line buffer limits. Defaults to 0 (unlimited).
-  unsigned MaxAsciiLength = 0;
-
   /// Form used for character literals in the assembly syntax.  Useful for
   /// producing strings as byte lists.  If a target does not use or support
   /// this, it shall be set to ACLS_Unknown.  Defaults to ACLS_Unknown.
@@ -284,10 +279,6 @@ protected:
   /// This is the directive used to declare a global entity. Defaults to
   /// ".globl".
   const char *GlobalDirective = "\t.globl\t";
-
-  /// This is the directive used to declare an external entity. Defaults to
-  /// ".extern".
-  const char *ExternDirective = "\t.extern\t";
 
   /// True if the expression
   ///   .long f - g
@@ -549,7 +540,7 @@ public:
   bool isAIX() const { return IsAIX; }
   bool isHLASM() const { return IsHLASM; }
   bool isSDCC() const { return IsSDCC; }
-  bool isZ80ASM() const { return IsZ80ASM; }
+  bool isZ88DK() const { return IsZ88DK; }
   bool isMachO() const { return HasSubsectionsViaSymbols; }
   bool hasCOFFAssociativeComdats() const { return HasCOFFAssociativeComdats; }
   bool hasCOFFComdatConstants() const { return HasCOFFComdatConstants; }
@@ -619,14 +610,12 @@ public:
   const char *getZeroDirective() const { return ZeroDirective; }
   const char *getAsciiDirective() const { return AsciiDirective; }
   const char *getAscizDirective() const { return AscizDirective; }
-  unsigned getMaxAsciiLength() const { return MaxAsciiLength; }
   AsmCharLiteralSyntax characterLiteralSyntax() const {
     return CharacterLiteralSyntax;
   }
   bool getAlignmentIsInBytes() const { return AlignmentIsInBytes; }
   unsigned getTextAlignFillValue() const { return TextAlignFillValue; }
   const char *getGlobalDirective() const { return GlobalDirective; }
-  const char *getExternDirective() const { return ExternDirective; }
 
   bool doesSetDirectiveSuppressReloc() const {
     return SetDirectiveSuppressesReloc;

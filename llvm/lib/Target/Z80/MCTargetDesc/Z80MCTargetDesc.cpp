@@ -68,9 +68,8 @@ static MCSubtargetInfo *createZ80MCSubtargetInfo(const Triple &TT,
 static MCAsmInfo *createZ80MCAsmInfo(const MCRegisterInfo &MRI,
                                      const Triple &TT,
                                      const MCTargetOptions &Options) {
-  if (Z80AsmFormat.getNumOccurrences() &&
-      Z80AsmFormat == Z80AsmFormat_Z80ASM)
-    return new Z80MCAsmInfoZ80ASM(TT, Options);
+  if (Z80AsmFormat.getNumOccurrences() && Z80AsmFormat == Z80AsmFormat_Z88DK)
+    return new Z80MCAsmInfoZ88DK(TT, Options);
 
   bool UseSDASZ80 = TT.getEnvironment() == Triple::SDCC;
   if (Z80AsmFormat.getNumOccurrences())

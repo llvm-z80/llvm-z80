@@ -53,6 +53,14 @@ void Z80MCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
     OS << '-';
   }
 
+  // Spell byte-of-address operators as arithmetic for z80asm.
+  if (MAI->isZ88DK() && (Kind == VK_ADDR16_LO || Kind == VK_ADDR16_HI)) {
+    OS << '(';
+    MAI->printExpr(OS, *getSubExpr());
+    OS << (Kind == VK_ADDR16_LO ? ") & 0xff" : ") >> 8");
+    return;
+  }
+
   OS << getName() << '(';
   MAI->printExpr(OS, *getSubExpr());
   OS << ')';
