@@ -1,6 +1,7 @@
 The following people have contributed to LLVM-Z80:
 
-Chanung Park (Kiroo, @zlfn) (ung@zlfn.space) — Z80/SM83 backend, runtime libraries
+Chanung Park (Kiroo) (ung@zlfn.space)
+Thorbjørn Ravn Andersen (tra@ravnand.dk)
 Alex Jokela (alex@camulus.com) — Initial Z80 backend port
 
 The LLVM-Z80 project incorporates code from the LLVM-MOS project
