@@ -1,0 +1,289 @@
+name: Z80 release packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or branch to build (e.g. llvmz80-23.1.1-r1)"
+        required: true
+        type: string
+      draft-release:
+        description: "Open a draft release with the packages (ref must be an llvmz80-* tag)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # Force JS actions onto Node 24 (Node 20 is deprecated on GHA runners)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    name: Resolve ref
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.vars.outputs.sha }}
+      name: ${{ steps.vars.outputs.name }}
+      prev-tag: ${{ steps.vars.outputs.prev-tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+          sparse-checkout: .github
+
+      - id: vars
+        env:
+          REF: ${{ inputs.ref }}
+          DRAFT: ${{ inputs.draft-release }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          tags=$(git ls-remote --tags --refs origin 'llvmz80-*' | sed 's|.*refs/tags/||' | sort -V)
+          if grep -qxF "$REF" <<< "$tags"; then
+            name=$REF
+            prev=$(awk -v t="$REF" '$0 == t { print p; exit } { p = $0 }' <<< "$tags")
+          elif [ "$DRAFT" = true ]; then
+            echo "::error::draft-release needs an llvmz80-* tag, not '$REF'"
+            exit 1
+          else
+            # A snapshot carries its commit in the name, like make-release.sh.
+            name="llvmz80-$(tr -c 'A-Za-z0-9._\n-' '-' <<< "$REF")-g${sha:0:12}"
+            prev=
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "prev-tag=$prev" >> "$GITHUB_OUTPUT"
+          echo "Building $name from $sha"
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x86_64-linux
+            os: ubuntu-22.04
+            cache: ccache
+            cmake-flags: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DLLVM_USE_LINKER=lld
+          - platform: aarch64-linux
+            os: ubuntu-22.04-arm
+            cache: ccache
+            cmake-flags: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DLLVM_USE_LINKER=lld
+          - platform: arm64-macos
+            os: macos-14
+            cache: ccache
+            cmake-flags: -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          - platform: x86_64-windows
+            os: windows-2022
+            cache: sccache
+            cmake-flags: -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+    steps:
+      - name: Keep line endings as committed
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build clang lld
+
+      # Every package takes the SDCC-format runtime from this build.
+      - name: Install SDCC
+        if: matrix.platform == 'x86_64-linux'
+        env:
+          SDCC: sdcc-4.6.0
+        run: |
+          cd "$RUNNER_TEMP"
+          url=https://github.com/llvm-z80/sdcc/releases/download/$SDCC
+          curl -fsSL --retry 5 -O "$url/$SDCC-x86_64-linux.tar.xz" -O "$url/sha256sums.txt"
+          grep "  $SDCC-x86_64-linux.tar.xz\$" sha256sums.txt | sha256sum -c -
+          tar -xf "$SDCC-x86_64-linux.tar.xz"
+          echo "$RUNNER_TEMP/$SDCC/bin" >> "$GITHUB_PATH"
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
+        with:
+          key: z80-release-${{ matrix.platform }}
+          variant: ${{ matrix.cache }}
+          max-size: 1500M
+
+      - name: Configure and build
+        if: runner.os != 'Windows'
+        env:
+          LAUNCHER: ${{ matrix.cache }}
+          CMAKE_FLAGS: ${{ matrix.cmake-flags }}
+        run: |
+          cmake -G Ninja -S llvm -B build \
+            -C clang/cmake/caches/Z80Release.cmake \
+            -DCMAKE_C_COMPILER_LAUNCHER="$LAUNCHER" \
+            -DCMAKE_CXX_COMPILER_LAUNCHER="$LAUNCHER" \
+            -DLLVM_PARALLEL_LINK_JOBS=2 \
+            $CMAKE_FLAGS
+          ninja -C build
+
+      - name: Configure and build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          LAUNCHER: ${{ matrix.cache }}
+          CMAKE_FLAGS: ${{ matrix.cmake-flags }}
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          cmake -G Ninja -S llvm -B build `
+            -C clang/cmake/caches/Z80Release.cmake `
+            "-DCMAKE_C_COMPILER_LAUNCHER=$env:LAUNCHER" `
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=$env:LAUNCHER" `
+            -DLLVM_PARALLEL_LINK_JOBS=2 `
+            @($env:CMAKE_FLAGS -split ' ')
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ninja -C build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Install and smoke test
+        run: |
+          cmake --install build --prefix stage --strip
+          printf 'int main(void) { return 0; }\n' > smoke.c
+          for target in z80 sm83; do
+            stage/bin/clang --target=$target -O1 smoke.c -o smoke-$target.elf
+          done
+          # A tarball keeps the file modes that an artifact upload drops.
+          tar -cf stage.tar -C stage .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stage-${{ matrix.platform }}
+          path: stage.tar
+          retention-days: 7
+
+  package:
+    name: Package
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: stage-*
+          path: stages
+
+      - name: Assemble packages
+        env:
+          NAME: ${{ needs.prepare.outputs.name }}
+        run: |
+          mkdir -p pkg out
+          for dir in stages/stage-*; do
+            pkg=pkg/$NAME-${dir#stages/stage-}
+            mkdir -p "$pkg"
+            tar -xf "$dir/stage.tar" -C "$pkg"
+          done
+
+          # The runtime does not depend on the host, and only the x86_64-linux
+          # build has the SDCC tools for its .rel/.lib form.
+          linux=pkg/$NAME-x86_64-linux
+          for arch in z80 sm83; do
+            if [ ! -f "$linux/lib/$arch/${arch}_rt.lib" ]; then
+              echo "::error::x86_64-linux has no SDCC-format $arch runtime"
+              exit 1
+            fi
+          done
+          for pkg in pkg/*; do
+            if [ "$pkg" != "$linux" ]; then
+              rm -rf "$pkg/lib/z80" "$pkg/lib/sm83"
+              cp -R "$linux/lib/z80" "$linux/lib/sm83" "$pkg/lib/"
+            fi
+          done
+
+          cd pkg
+          for pkg in *; do
+            case $pkg in
+              *-windows) zip -qr "../out/$pkg.zip" "$pkg" ;;
+              *) XZ_OPT=-T0 tar -cJf "../out/$pkg.tar.xz" "$pkg" ;;
+            esac
+          done
+          cd ../out
+          sha256sum *.tar.xz *.zip > "$NAME-sha256sums.txt"
+          cat "$NAME-sha256sums.txt"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: out/
+          retention-days: 30
+
+  release:
+    name: Draft release
+    needs: [prepare, package]
+    if: inputs.draft-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: out
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.name }}
+          PREV_TAG: ${{ needs.prepare.outputs.prev-tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::$TAG already has a release, which is left as it is"
+            exit 1
+          fi
+
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG"
+          {
+            echo "## LLVM-Z80 ${TAG#llvmz80-} Release"
+            for entry in "x86_64-linux.tar.xz|Linux x86_64" \
+                         "aarch64-linux.tar.xz|Linux AArch64" \
+                         "arm64-macos.tar.xz|macOS arm64" \
+                         "x86_64-windows.zip|Windows x86_64"; do
+              file=$TAG-${entry%%|*}
+              if [ -f "out/$file" ]; then
+                echo "* [${entry#*|}]($url/$file)"
+              fi
+            done
+            echo "---"
+            echo
+            echo "_Write the changes here before publishing._"
+            echo
+            cat <<'EOF'
+          > Disclaimer: This build is provided "as-is" with no guarantee of stability.
+          While it should work correctly in most cases, I cannot guarantee it will fit every use case,
+          and you may run into issues with linking or external binary integration.
+          EOF
+            if [ -n "$PREV_TAG" ]; then
+              echo
+              echo "**Full Changelog**: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$PREV_TAG...$TAG"
+            fi
+          } > notes.md
+
+          gh release create "$TAG" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft --verify-tag \
+            --title "LLVM-Z80 ${TAG#llvmz80-}" \
+            --notes-file notes.md
