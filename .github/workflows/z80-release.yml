@@ -71,19 +71,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: x86_64-linux
+          - platform: Linux-X64
             os: ubuntu-22.04
             cache: ccache
             cmake-flags: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DLLVM_USE_LINKER=lld
-          - platform: aarch64-linux
+          - platform: Linux-ARM64
             os: ubuntu-22.04-arm
             cache: ccache
             cmake-flags: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DLLVM_USE_LINKER=lld
-          - platform: arm64-macos
+          - platform: macOS-ARM64
             os: macos-14
             cache: ccache
             cmake-flags: -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
-          - platform: x86_64-windows
+          - platform: Windows-X64
             os: windows-2022
             cache: sccache
             cmake-flags: -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
@@ -106,7 +106,7 @@ jobs:
 
       # Every package takes the SDCC-format runtime from this build.
       - name: Install SDCC
-        if: matrix.platform == 'x86_64-linux'
+        if: matrix.platform == 'Linux-X64'
         env:
           SDCC: sdcc-4.6.0
         run: |
@@ -181,6 +181,10 @@ jobs:
     name: Package
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -191,19 +195,20 @@ jobs:
         env:
           NAME: ${{ needs.prepare.outputs.name }}
         run: |
+          base=LLVM-Z80-${NAME#llvmz80-}
           mkdir -p pkg out
           for dir in stages/stage-*; do
-            pkg=pkg/$NAME-${dir#stages/stage-}
+            pkg=pkg/$base-${dir#stages/stage-}
             mkdir -p "$pkg"
             tar -xf "$dir/stage.tar" -C "$pkg"
           done
 
-          # The runtime does not depend on the host, and only the x86_64-linux
+          # The runtime does not depend on the host, and only the Linux-X64
           # build has the SDCC tools for its .rel/.lib form.
-          linux=pkg/$NAME-x86_64-linux
+          linux=pkg/$base-Linux-X64
           for arch in z80 sm83; do
             if [ ! -f "$linux/lib/$arch/${arch}_rt.lib" ]; then
-              echo "::error::x86_64-linux has no SDCC-format $arch runtime"
+              echo "::error::Linux-X64 has no SDCC-format $arch runtime"
               exit 1
             fi
           done
@@ -217,13 +222,14 @@ jobs:
           cd pkg
           for pkg in *; do
             case $pkg in
-              *-windows) zip -qr "../out/$pkg.zip" "$pkg" ;;
+              *-Windows-*) zip -qr "../out/$pkg.zip" "$pkg" ;;
               *) XZ_OPT=-T0 tar -cJf "../out/$pkg.tar.xz" "$pkg" ;;
             esac
           done
-          cd ../out
-          sha256sum *.tar.xz *.zip > "$NAME-sha256sums.txt"
-          cat "$NAME-sha256sums.txt"
+
+      - uses: actions/attest@v4
+        with:
+          subject-path: out/*
 
       - uses: actions/upload-artifact@v7
         with:
@@ -258,11 +264,11 @@ jobs:
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG"
           {
             echo "## LLVM-Z80 ${TAG#llvmz80-} Release"
-            for entry in "x86_64-linux.tar.xz|Linux x86_64" \
-                         "aarch64-linux.tar.xz|Linux AArch64" \
-                         "arm64-macos.tar.xz|macOS arm64" \
-                         "x86_64-windows.zip|Windows x86_64"; do
-              file=$TAG-${entry%%|*}
+            for entry in "Linux-X64.tar.xz|Linux x86_64" \
+                         "Linux-ARM64.tar.xz|Linux AArch64" \
+                         "macOS-ARM64.tar.xz|macOS arm64" \
+                         "Windows-X64.zip|Windows x86_64"; do
+              file=LLVM-Z80-${TAG#llvmz80-}-${entry%%|*}
               if [ -f "out/$file" ]; then
                 echo "* [${entry#*|}]($url/$file)"
               fi
