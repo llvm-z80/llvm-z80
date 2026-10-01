@@ -27,6 +27,7 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/CodeGen.h"
@@ -37,6 +38,7 @@
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80.h"
+#include "Z80AccumulatorCopies.h"
 #include "Z80BranchCleanup.h"
 #include "Z80CheckUnsupported.h"
 #include "Z80Combiner.h"
@@ -46,8 +48,8 @@
 #include "Z80IndexIV.h"
 #include "Z80LowerSelect.h"
 #include "Z80MachineFunctionInfo.h"
+#include "Z80NarrowMemAccess.h"
 #include "Z80NonReentrant.h"
-#include "Z80PostRACompareMerge.h"
 #include "Z80PreEmitPeephole.h"
 #include "Z80ShiftRotateChain.h"
 #include "Z80StaticFrameAlloc.h"
@@ -63,6 +65,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
 
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeGlobalISel(PR);
+  initializeZ80AccumulatorCopiesPass(PR);
   initializeZ80BranchCleanupPass(PR);
   initializeZ80CheckUnsupportedPass(PR);
   initializeZ80DanglingDebugCleanupPass(PR);
@@ -71,22 +74,11 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80FixupImplicitDefsPass(PR);
   initializeZ80PreEmitPeepholePass(PR);
   initializeZ80LowerSelectPass(PR);
+  initializeZ80NarrowMemAccessPass(PR);
   initializeZ80ShiftRotateChainPass(PR);
-  initializeZ80PostRACompareMergePass(PR);
   initializeZ80NonReentrantPass(PR);
   initializeZ80StaticFrameAllocPass(PR);
 }
-
-// Z80 data layout:
-// e = little endian
-// p:16:8 = 16-bit pointers with 8-bit alignment
-// i16:8 = 16-bit integers with 8-bit alignment
-// i32:8 = 32-bit integers with 8-bit alignment
-// f32:8 = 32-bit floats with 8-bit alignment
-// f64:8 = 64-bit floats with 8-bit alignment
-// n8:16 = native integer widths are 8 and 16 bits
-static const char *Z80DataLayout =
-    "e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-ve-n8:16";
 
 // On by default for both targets. On SM83 a wide slot costs a byte more in
 // static memory than on the stack, so frame lowering keeps a size build's
@@ -122,8 +114,9 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
                                    std::optional<Reloc::Model> RM,
                                    std::optional<CodeModel::Model> CM,
                                    CodeGenOptLevel OL, bool JIT)
-    : CodeGenTargetMachineImpl(T, Z80DataLayout, TT, selectZ80CPU(CPU, TT), FS,
-                               Options, getEffectiveRelocModel(RM),
+    : CodeGenTargetMachineImpl(T, TT.computeDataLayout(), TT,
+                               selectZ80CPU(CPU, TT), FS, Options,
+                               getEffectiveRelocModel(RM),
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
       SubTarget(TT, selectZ80CPU(CPU, TT).str(), FS.str(), *this) {
   this->TLOF = std::make_unique<Z80TargetObjectFile>();
@@ -139,6 +132,12 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
   // take the trade; -enable-machine-outliner still overrides both.
   this->Options.EnableMachineOutliner = true;
   this->Options.SupportsDefaultOutlining = true;
+
+  // z80asm has neither PIC nor an address-significance table.
+  if (getMCAsmInfo().isZ88DK()) {
+    this->RM = Reloc::Static;
+    this->Options.EmitAddrsig = false;
+  }
 }
 
 const Z80Subtarget *
@@ -219,6 +218,7 @@ public:
 
   // Register pressure is too high to work without optimized register
   // allocation.
+  void addPreRegAlloc() override;
   void addFastRegAlloc() override { addOptimizedRegAlloc(); }
   void addOptimizedRegAlloc() override;
 
@@ -242,9 +242,12 @@ void Z80PassConfig::addIRPasses() {
     addPass(createZ80NonReentrantPass(getZ80TargetMachine()));
 
   TargetPassConfig::addIRPasses();
-  // Clean up after LSR in particular.
-  if (getOptLevel() != CodeGenOptLevel::None)
+  if (getOptLevel() != CodeGenOptLevel::None) {
+    // Clean up after LSR in particular.
     addPass(createInstructionCombiningPass());
+    // After the combiner, which turns small memcpys into wide integers.
+    addPass(createZ80NarrowMemAccessPass());
+  }
 }
 
 bool Z80PassConfig::addPreISel() { return false; }
@@ -289,7 +292,14 @@ void Z80PassConfig::addPreGlobalInstructionSelect() {
 
 bool Z80PassConfig::addGlobalInstructionSelect() {
   addPass(new InstructionSelect());
+  addPass(createZ80DanglingDebugCleanupPass());
   return false;
+}
+
+void Z80PassConfig::addPreRegAlloc() {
+  // The machine SSA passes fold away the copies that give accumulator
+  // operands registers of their own; put them back before allocation.
+  addPass(createZ80AccumulatorCopiesPass());
 }
 
 void Z80PassConfig::addOptimizedRegAlloc() {
@@ -330,10 +340,6 @@ void Z80PassConfig::addPreSched2() {
 
   if (getOptLevel() != CodeGenOptLevel::None) {
     addPass(createZ80PreEmitPeepholePass());
-
-    // Remove redundant OR A / AND A when the Z flag is already valid
-    // from a preceding ALU instruction.
-    addPass(createZ80PostRACompareMerge());
 
     // The peepholes above rewrite slot accesses into register copies and leave
     // copies behind where they fold one instruction into another, so copy

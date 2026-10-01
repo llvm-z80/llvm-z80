@@ -51,9 +51,11 @@ Normalized values carry an implicit leading 1, so the significand is 24 bits.
 
 ### 32-bit integers
 
-`__divsi3` and friends use restoring division, tracking the remainder in the
-shadow registers (`exx`). First `i32` argument in `HLDE`, second on the stack at
-`IX+4..IX+7` once the frame is set up, result in `HLDE`.
+`__divsi3` and friends use restoring division. First `i32` argument in `HLDE`,
+second on the stack at `IX+4..IX+7` once the frame is set up, result in `HLDE`.
+
+Nothing here uses the shadow registers, which an interrupt handler does not
+save.
 
 ### 64-bit integers
 

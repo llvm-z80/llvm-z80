@@ -40,6 +40,7 @@
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/SourceMgr.h"
 
 #include <memory>
 
@@ -255,6 +256,7 @@ private:
   MCRegister parseRegisterName(StringRef Name);
   MCRegister tryParseRegisterName();
   bool tryParseRegisterOperand(OperandVector &Operands);
+  bool tryParseShadowAF(OperandVector &Operands);
   bool parseOperand(OperandVector &Operands, StringRef Mnemonic);
   bool parseParenOperand(OperandVector &Operands);
   bool parseSDASZ80Indexed(OperandVector &Operands, const MCExpr *Disp,
@@ -342,6 +344,29 @@ MCRegister Z80AsmParser::tryParseRegisterName() {
 
   StringRef Name = Parser.getTok().getString();
   return parseRegisterName(Name);
+}
+
+// `af'` in `ex af,af'`: the lexer would read the apostrophe as the start of a
+// character constant, so skip it here and hand the matcher the literal token.
+// If this is ever merged upstream, an AsmLexer option like
+// AllowApostropheInIdentifier would be the better fix.
+bool Z80AsmParser::tryParseShadowAF(OperandVector &Operands) {
+  const AsmToken &Tok = Parser.getTok();
+  if (!Tok.is(AsmToken::Identifier) ||
+      !Tok.getString().equals_insensitive("af"))
+    return true;
+  const char *Apostrophe = Tok.getEndLoc().getPointer();
+  if (*Apostrophe != '\'')
+    return true;
+
+  SourceMgr &SM = Parser.getSourceManager();
+  unsigned Buffer = SM.FindBufferContainingLoc(Tok.getEndLoc());
+  if (!Buffer)
+    return true;
+  Operands.push_back(Z80Operand::CreateToken("af'", Tok.getLoc()));
+  getLexer().setBuffer(SM.getMemoryBuffer(Buffer)->getBuffer(), Apostrophe + 1);
+  Parser.Lex(); // Eat `af`; lexing resumes after the apostrophe.
+  return false;
 }
 
 bool Z80AsmParser::tryParseRegisterOperand(OperandVector &Operands) {
@@ -519,7 +544,7 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
 
   // Try register
   if (getLexer().is(AsmToken::Identifier)) {
-    if (!tryParseRegisterOperand(Operands))
+    if (!tryParseShadowAF(Operands) || !tryParseRegisterOperand(Operands))
       return false;
 
     // Not a register — check for condition code tokens (nz, z, nc, po, pe, p,

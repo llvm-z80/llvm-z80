@@ -15,40 +15,6 @@ class Z80GenericInstruction : GenericInstruction {
   let hasSideEffects = false;
 }
 
-//===---------------------------------------------------------------------===//
-// Z80-specific comparison and branch operations
-//===---------------------------------------------------------------------===//
-
-// Compare two 8-bit values and branch based on condition.
-// Used to fuse G_ICMP + G_BRCOND into a single operation.
-def G_Z80_CMP_BR_EQ : Z80GenericInstruction {
-  let OutOperandList = (outs);
-  let InOperandList = (ins type0:$lhs, type0:$rhs, unknown:$target);
-  let isBranch = true;
-  let isTerminator = true;
-}
-
-def G_Z80_CMP_BR_NE : Z80GenericInstruction {
-  let OutOperandList = (outs);
-  let InOperandList = (ins type0:$lhs, type0:$rhs, unknown:$target);
-  let isBranch = true;
-  let isTerminator = true;
-}
-
-def G_Z80_CMP_BR_ULT : Z80GenericInstruction {
-  let OutOperandList = (outs);
-  let InOperandList = (ins type0:$lhs, type0:$rhs, unknown:$target);
-  let isBranch = true;
-  let isTerminator = true;
-}
-
-def G_Z80_CMP_BR_UGE : Z80GenericInstruction {
-  let OutOperandList = (outs);
-  let InOperandList = (ins type0:$lhs, type0:$rhs, unknown:$target);
-  let isBranch = true;
-  let isTerminator = true;
-}
-
 // 32-bit integer comparison via 8-bit SUB/SBC chain.
 // Avoids the expensive narrowScalar cascade (2x G_ICMP + G_SELECT).
 // The legalizer splits the i32 into two i16 halves and emits this.

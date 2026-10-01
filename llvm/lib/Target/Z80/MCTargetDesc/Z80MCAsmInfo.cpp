@@ -14,6 +14,8 @@
 #include "MCTargetDesc/Z80MCExpr.h"
 #include "Z80MCTargetDesc.h"
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/CommandLine.h"
@@ -24,9 +26,10 @@ namespace llvm {
 cl::opt<Z80AsmFormatTy> Z80AsmFormat(
     "z80-asm-format",
     cl::desc("Override Z80 assembly output format (default: auto from triple)"),
-    cl::values(clEnumValN(Z80AsmFormat_ELF, "elf", "ELF/GNU style"),
-               clEnumValN(Z80AsmFormat_SDASZ80, "sdasz80",
-                          "SDCC sdasz80 compatible")));
+    cl::values(
+        clEnumValN(Z80AsmFormat_ELF, "elf", "ELF/GNU style"),
+        clEnumValN(Z80AsmFormat_SDASZ80, "sdasz80", "SDCC sdasz80 compatible"),
+        clEnumValN(Z80AsmFormat_Z88DK, "z88dk", "z88dk (z80asm) compatible")));
 
 static const MCAsmInfo::AtSpecifier AtSpecifiers[] = {
     {Z80MCExpr::VK_IMM8, "z80_imm8"},
@@ -59,9 +62,10 @@ Z80MCAsmInfo::Z80MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   initializeAtSpecifiers(AtSpecifiers);
 }
 
-unsigned Z80MCAsmInfo::getMaxInstLength(const MCSubtargetInfo *STI) const {
+static unsigned getZ80MaxInstLength(const MCSubtargetInfo *STI,
+                                    unsigned Default) {
   if (!STI)
-    return MaxInstLength;
+    return Default;
 
   // Z80 max instruction length:
   // - Basic Z80: 4 bytes (prefix + opcode + 2 bytes operand)
@@ -69,6 +73,10 @@ unsigned Z80MCAsmInfo::getMaxInstLength(const MCSubtargetInfo *STI) const {
   if (STI->hasFeature(Z80::FeatureEZ80))
     return 6;
   return 4;
+}
+
+unsigned Z80MCAsmInfo::getMaxInstLength(const MCSubtargetInfo *STI) const {
+  return getZ80MaxInstLength(STI, MaxInstLength);
 }
 
 //===----------------------------------------------------------------------===//
@@ -122,11 +130,7 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
 }
 
 unsigned Z80MCAsmInfoSDCC::getMaxInstLength(const MCSubtargetInfo *STI) const {
-  if (!STI)
-    return MaxInstLength;
-  if (STI->hasFeature(Z80::FeatureEZ80))
-    return 6;
-  return 4;
+  return getZ80MaxInstLength(STI, MaxInstLength);
 }
 
 void Z80MCAsmInfoSDCC::printSwitchToSection(const MCSection &Section,
@@ -145,6 +149,77 @@ void Z80MCAsmInfoSDCC::printSwitchToSection(const MCSection &Section,
   else if (Name == ".rodata" || Name.starts_with(".rodata."))
     OS << "\t.area\t_CODE\n";
   // Silently ignore other sections (.note.GNU-stack, .comment, etc.)
+}
+
+//===----------------------------------------------------------------------===//
+// Z80MCAsmInfoZ88DK - z88dk (z80asm) compatible assembly format
+//===----------------------------------------------------------------------===//
+
+Z80MCAsmInfoZ88DK::Z80MCAsmInfoZ88DK(const Triple &TT,
+                                     const MCTargetOptions &Options)
+    : MCAsmInfo(Options) {
+  CodePointerSize = 2;
+  CalleeSaveStackSlotSize = 0;
+  SeparatorString = "\n";
+  CommentString = ";";
+  IsZ88DK = true;
+
+  HasDotTypeDotSizeDirective = false;
+  HasSingleParameterDotFile = false;
+
+  // With no 64-bit directive, MC splits such values into two DEFQ.
+  Data8bitsDirective = "\tDEFB\t";
+  Data16bitsDirective = "\tDEFW\t";
+  Data32bitsDirective = "\tDEFQ\t";
+  Data64bitsDirective = nullptr;
+  ZeroDirective = "\tDEFS\t";
+  // Strings reach Z80TargetAsmStreamer::emitRawBytes, which writes DEFM.
+  AsciiDirective = nullptr;
+  AscizDirective = nullptr;
+
+  GlobalDirective = "\tGLOBAL\t";
+  // Without a weak-reference directive every alias, local ones included, is
+  // made global. z80asm has no weak symbols, and GLOBAL is the closest form.
+  WeakRefDirective = "\tGLOBAL\t";
+  // Z80TargetObjectFile spells '.' in symbol names as '@'.
+  AllowAtInName = true;
+
+  initializeAtSpecifiers(AtSpecifiers);
+}
+
+StringRef Z80MCAsmInfoZ88DK::getSectionName(StringRef Name) {
+  auto IsSection = [&](StringRef Prefix) {
+    return Name == Prefix ||
+           (Name.starts_with(Prefix) && Name[Prefix.size()] == '.');
+  };
+  if (IsSection(".text"))
+    return "code_compiler";
+  if (IsSection(".data"))
+    return "data_compiler";
+  if (IsSection(".bss"))
+    return "bss_compiler";
+  if (IsSection(".rodata"))
+    return "rodata_compiler";
+
+  // A name z80asm can read, such as code_user, is passed through.
+  if (Name.empty() || !(isAlpha(Name[0]) || Name[0] == '_') ||
+      !all_of(Name, [](char C) { return isAlnum(C) || C == '_'; }))
+    return "";
+  return Name;
+}
+
+unsigned Z80MCAsmInfoZ88DK::getMaxInstLength(const MCSubtargetInfo *STI) const {
+  return getZ80MaxInstLength(STI, MaxInstLength);
+}
+
+void Z80MCAsmInfoZ88DK::printSwitchToSection(const MCSection &Section,
+                                             uint32_t Subsection,
+                                             const Triple &T,
+                                             raw_ostream &OS) const {
+  // Z80TargetAsmStreamer reports the sections that have no z88dk name.
+  StringRef Name = getSectionName(Section.getName());
+  if (!Name.empty())
+    OS << "\tSECTION\t" << Name << '\n';
 }
 
 } //  namespace llvm

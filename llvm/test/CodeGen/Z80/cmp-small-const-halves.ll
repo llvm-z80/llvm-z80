@@ -8,9 +8,10 @@
 
 ; CHECK-LABEL: name: eq_small_const
 ; CHECK:      COPY %{{[0-9]+}}.sub_hi
-; CHECK:      $a = COPY %{{[0-9]+}}.sub_lo
-; CHECK-NEXT: SUB_n 42
-; CHECK-NEXT: OR_r
+; CHECK:      [[LO:%[0-9]+]]:gr8 = COPY %{{[0-9]+}}.sub_lo
+; CHECK-NEXT: [[IN:%[0-9]+]]:ac = COPY [[LO]]
+; CHECK-NEXT: XOR_Ac_n [[IN]], 42
+; CHECK:      OR_Ac_r
 ; CHECK-NOT:  $hl = COPY
 
 define i16 @eq_small_const(i16 %v, i16 %a, i16 %b) {

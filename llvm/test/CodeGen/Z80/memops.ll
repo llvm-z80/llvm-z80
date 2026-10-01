@@ -69,12 +69,10 @@ define void @test_memmove_constant_forward() {
 ; SM83-NEXT:  call ___z80_memmove_builtin
 ; Copying down onto a lower address is safe forward, so this one stays LDIR
 ; and addresses the regions from their starts rather than their ends.
-; CHECK:       ld bc,#8
-; CHECK:       ld hl,#_memmove_buf
-; CHECK:       ld bc,#24
-; CHECK:       ld hl,#_memmove_buf
-; CHECK:       ld bc,#16
-; CHECK:       ldir
+; CHECK:       ld hl,#_memmove_buf+24
+; CHECK-NEXT:  ld de,#_memmove_buf+8
+; CHECK-NEXT:  ld bc,#16
+; CHECK-NEXT:  ldir
 ; CHECK-NOT:   lddr
   %dst = getelementptr i8, ptr @memmove_buf, i16 8
   %src = getelementptr i8, ptr @memmove_buf, i16 24
@@ -83,9 +81,7 @@ define void @test_memmove_constant_forward() {
 }
 
 ; Constant-size memmove with dst above src must use backward LDDR, reading
-; from src+size-1 and writing to dst+size-1.  Materialising an end pointer
-; goes through HL, so the two of them cannot both be built once one is already
-; there, the source end is parked in BC while the destination end is formed.
+; from src+size-1 and writing to dst+size-1.
 define void @test_memmove_constant_backward() {
 ; CHECK-LABEL: _test_memmove_constant_backward:
 ; SM83-LABEL: _test_memmove_constant_backward:
@@ -93,16 +89,13 @@ define void @test_memmove_constant_backward() {
 ; SM83-NEXT:  call ___z80_memmove_builtin
 ; A backward copy starts from the last byte of each region, so the two end
 ; pointers are one short of a full length past their bases: 8+15 and 24+15.
-; Getting either offset wrong, or picking LDIR, corrupts the overlap.  The
-; moves that put those values into HL and DE are register allocation and are
-; not pinned; the overlapping copy is executed for real by
+; Getting either offset wrong, or picking LDIR, corrupts the overlap. The
+; overlapping copy is executed for real by
 ; z80-utils/test-runner/testcases/clang/test_65_block_moves.c.
-; CHECK:       ld bc,#23
-; CHECK:       ld hl,#_memmove_buf
-; CHECK:       ld de,#39
-; CHECK:       ld hl,#_memmove_buf
-; CHECK:       ld bc,#16
-; CHECK:       lddr
+; CHECK:       ld hl,#_memmove_buf+23
+; CHECK-NEXT:  ld de,#_memmove_buf+39
+; CHECK-NEXT:  ld bc,#16
+; CHECK-NEXT:  lddr
 ; CHECK-NOT:   ldir
   %dst = getelementptr i8, ptr @memmove_buf, i16 24
   %src = getelementptr i8, ptr @memmove_buf, i16 8

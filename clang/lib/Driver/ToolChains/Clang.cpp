@@ -6211,7 +6211,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_mdouble_EQ)) {
-    if (TC.getArch() == llvm::Triple::avr)
+    if (TC.getArch() == llvm::Triple::avr ||
+        TC.getTriple().isZ80Family())
       A->render(Args, CmdArgs);
     else
       D.Diag(diag::err_drv_unsupported_opt_for_target)
