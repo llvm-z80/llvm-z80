@@ -843,6 +843,7 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
 - Clang now defines the GCC-compatible predefined macro `__SIG_ATOMIC_TYPE__`. (#GH213895)
 - Fix a crash in addUnsizedArray due assert not verifying we have a Base before doing checks on it. (#GH44212)
 - Fixed an assertion that could occur when rebuilding parenthesized list initialization expressions during template instantiation or AST transformation.
+- Fixed a crash when invoking clang with `--` followed by an empty file name. (#GH184718)
 
 #### Bug Fixes to Compiler Builtins
 
@@ -998,6 +999,7 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
 - Fixed a crash when passing one sized implicitly casted vector to a `abs` function. (#GH204777)
 - Fixed a crash when diagnosing an invalid out-of-line definition of a member class template. (#GH201490)
 - Fixed a crash in the parser when a missing semicolon after a tag definition is followed by a template-id not preceded by `::`. (#GH207992)
+- Fixed a crash when generating fake uses for parameters of bodyless destructors with `-fextend-variable-liveness`.
 
 ### OpenACC Specific Changes
 

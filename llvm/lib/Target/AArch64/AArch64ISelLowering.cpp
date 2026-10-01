@@ -10286,13 +10286,23 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
   // caller will deallocate the entire stack and the callee still expects its
   // arguments to begin at SP+0. Completely unused for non-tail calls.
   int FPDiff = 0;
+  const Align StackAlign = Subtarget->getFrameLowering()->getStackAlign();
 
   if (IsTailCall && !IsSibCall) {
     unsigned NumReusableBytes = FuncInfo->getBytesInStackArgArea();
 
-    // Since callee will pop argument stack as a tail call, we must keep the
-    // popped size 16-byte aligned.
-    NumBytes = alignTo(NumBytes, 16);
+    // In general, neither NumBytes nor NumReusableBytes is guaranteed to be
+    // aligned, so we round NumBytes up to the same residue mod StackAlign as
+    // NumReusableBytes, which keeps their difference (FPDiff) a multiple of
+    // StackAlign, and therefore preserve the required stack alignment going
+    // into the callee.  When the callee's convention can guarantee TCO,
+    // LowerFormalArguments will have force-aligned the stack arg area for us
+    // already, so we can count on our own alignment of NumBytes below to result
+    // in an aligned FPDiff.
+    assert((!DoesCalleeRestoreStack(CallConv, TailCallOpt) ||
+            isAligned(StackAlign, NumReusableBytes)) &&
+           "expected LowerFormalArguments to force-align stack arg area");
+    NumBytes += offsetToAlignment(NumBytes - NumReusableBytes, StackAlign);
 
     // FPDiff will be negative if this tail call requires more space than we
     // would automatically have in our incoming argument space. Positive if we
@@ -10304,12 +10314,12 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
     if (FPDiff < 0 && FuncInfo->getTailCallReservedStack() < (unsigned)-FPDiff)
       FuncInfo->setTailCallReservedStack(-FPDiff);
 
-    // The stack pointer must be 16-byte aligned at all times it's used for a
-    // memory operation, which in practice means at *all* times and in
+    // The stack pointer must be at least 16-byte aligned at all times it's used
+    // for a memory operation, which in practice means at *all* times and in
     // particular across call boundaries. Therefore our own arguments started at
-    // a 16-byte aligned SP and the delta applied for the tail call should
-    // satisfy the same constraint.
-    assert(FPDiff % 16 == 0 && "unaligned stack on tail call");
+    // an aligned SP and the delta applied for the tail call should satisfy the
+    // same constraint.
+    assert(isAligned(StackAlign, FPDiff) && "unaligned stack on tail call");
   }
 
   auto DescribeCallsite =
@@ -10856,8 +10866,9 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
       MF.getFunction().getParent()->getModuleFlag("import-call-optimization"))
     DAG.addCalledGlobal(Chain.getNode(), CalledGlobal, OpFlags);
 
-  uint64_t CalleePopBytes =
-      DoesCalleeRestoreStack(CallConv, TailCallOpt) ? alignTo(NumBytes, 16) : 0;
+  uint64_t CalleePopBytes = DoesCalleeRestoreStack(CallConv, TailCallOpt)
+                                ? alignTo(NumBytes, StackAlign)
+                                : 0;
 
   Chain = DAG.getCALLSEQ_END(Chain, NumBytes, CalleePopBytes, InGlue, DL);
   InGlue = Chain.getValue(1);
