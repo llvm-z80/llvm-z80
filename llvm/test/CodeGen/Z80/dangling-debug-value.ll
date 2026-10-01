@@ -4,6 +4,14 @@
 ; The legalizer scalarizes the wide vector away while #dbg_value still
 ; refers to it; the dangling debug operand must not reach RegBankSelect,
 ; whose 8/16-bit banks cannot carry the stale 256-bit type.
+;
+; In @g, selection folds the byval argument's frame address into the load
+; and erases its definition, while #dbg_declare still refers to it. The
+; debug operand must not be left on a register with no definition and no
+; class, which the dead lane analysis would then mark undef.
+;
+; In @h, the source label becomes a debug instruction that has no value
+; operands at all, which the cleanup must leave alone.
 
 source_filename = "/tmp/dbgv.c"
 target datalayout = "e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f32:8-f64:8-ve-n8:16"
@@ -33,6 +41,30 @@ do.end:                                           ; preds = %do.body
   %0 = bitcast <2 x i128> %rem to <16 x i16>, !dbg !38
   %conv = extractelement <16 x i16> %0, i64 0, !dbg !38
   ret i16 %conv, !dbg !39
+}
+
+%struct.S = type { i8, i8, i8, i8, i8, i8, i8, i8 }
+
+define dso_local zeroext i8 @g(ptr noundef readonly byval(%struct.S) align 1 captures(none) %s) local_unnamed_addr !dbg !40 {
+entry:
+    #dbg_declare(ptr %s, !45, !DIExpression(), !46)
+  %b = getelementptr inbounds nuw i8, ptr %s, i16 1, !dbg !47
+  %0 = load i8, ptr %b, align 1, !dbg !47
+  ret i8 %0, !dbg !47
+}
+
+define dso_local i16 @h(i16 noundef %x) local_unnamed_addr !dbg !50 {
+entry:
+  %z = icmp eq i16 %x, 0, !dbg !54
+  br i1 %z, label %set, label %out, !dbg !54
+
+set:
+  br label %out, !dbg !54
+
+out:
+  %r = phi i16 [ 3, %set ], [ %x, %entry ]
+    #dbg_label(!53, !54)
+  ret i16 %r, !dbg !54
 }
 
 attributes #0 = { nofree norecurse nosync nounwind memory(none) "frame-pointer"="all" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
@@ -82,3 +114,18 @@ attributes #0 = { nofree norecurse nosync nounwind memory(none) "frame-pointer"=
 !37 = !{!"llvm.loop.unroll.disable"}
 !38 = !DILocation(line: 4, column: 10, scope: !13, atomGroup: 5, atomRank: 2)
 !39 = !DILocation(line: 4, column: 3, scope: !13, atomGroup: 5, atomRank: 1)
+!40 = distinct !DISubprogram(name: "g", scope: !14, file: !14, line: 6, type: !41, scopeLine: 6, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0, retainedNodes: !44)
+!41 = !DISubroutineType(types: !42)
+!42 = !{!43, !48}
+!43 = !DIBasicType(name: "unsigned char", size: 8, encoding: DW_ATE_unsigned_char)
+!44 = !{!45}
+!45 = !DILocalVariable(name: "s", arg: 1, scope: !40, file: !14, line: 6, type: !48)
+!46 = !DILocation(line: 0, scope: !40)
+!47 = !DILocation(line: 6, column: 30, scope: !40)
+!48 = !DICompositeType(tag: DW_TAG_structure_type, name: "S", file: !14, line: 5, size: 64, elements: !49)
+!49 = !{}
+!50 = distinct !DISubprogram(name: "h", scope: !14, file: !14, line: 8, type: !51, scopeLine: 8, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0)
+!51 = !DISubroutineType(types: !52)
+!52 = !{!17, !17}
+!53 = !DILabel(scope: !50, name: "out", file: !14, line: 10)
+!54 = !DILocation(line: 10, scope: !50)

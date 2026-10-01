@@ -110,11 +110,13 @@ uint64_t Z80FrameLowering::staticFrameSize(const MachineFrameInfo &MFI) const {
 // on SM83 is `ld hl,nn` (three bytes) against the stack's `ldhl sp,e` (two).
 // A wide slot always takes that path; an eight-bit slot reached through the
 // accumulator's direct load/store does not, so only wide slots are counted.
+// A debug value naming a slot accesses nothing.
 static unsigned countWideFrameAccesses(const MachineFunction &MF) {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   unsigned N = 0;
   for (const MachineBasicBlock &MBB : MF)
-    for (const MachineInstr &MI : MBB)
+    for (const MachineInstr &MI :
+         instructionsWithoutDebug(MBB.begin(), MBB.end()))
       for (const MachineOperand &MO : MI.operands()) {
         if (!MO.isFI())
           continue;

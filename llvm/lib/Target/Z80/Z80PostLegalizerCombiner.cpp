@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutorImpl.h"
 #include "llvm/CodeGen/GlobalISel/GISelValueTracking.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
@@ -38,6 +39,42 @@ namespace {
 #define GET_GICOMBINER_TYPES
 #include "Z80GenPostLegalizeGICombiner.inc"
 #undef GET_GICOMBINER_TYPES
+
+// A global displaced by constants is one address the linker settles. Carried
+// in the global's own offset it stays a single constant, which the localizer
+// then materializes next to each use instead of keeping it live from where
+// the displacement was added. Runs after legalization so that the
+// displacements the legalizer adds when it splits a wide access fold too.
+bool matchFoldGlobalOffset(MachineInstr &MI, MachineRegisterInfo &MRI,
+                           std::pair<const GlobalValue *, int64_t> &MatchInfo) {
+  int64_t Offset = 0;
+  MachineInstr *Def = &MI;
+  while (Def && Def->getOpcode() == TargetOpcode::G_PTR_ADD) {
+    std::optional<int64_t> Disp =
+        getIConstantVRegSExtVal(Def->getOperand(2).getReg(), MRI);
+    if (!Disp)
+      return false;
+    Offset += *Disp;
+    Def = MRI.getVRegDef(Def->getOperand(1).getReg());
+  }
+  if (!Def || Def->getOpcode() != TargetOpcode::G_GLOBAL_VALUE)
+    return false;
+  const MachineOperand &GVOp = Def->getOperand(1);
+  // Pointer arithmetic wraps at the width of a pointer; a sum past it would
+  // leave an out-of-range addend in the relocation.
+  MatchInfo = {GVOp.getGlobal(),
+               static_cast<int16_t>(GVOp.getOffset() + Offset)};
+  return true;
+}
+
+void applyFoldGlobalOffset(
+    MachineInstr &MI, MachineIRBuilder &B,
+    const std::pair<const GlobalValue *, int64_t> &MatchInfo) {
+  B.setInstrAndDebugLoc(MI);
+  auto GV = B.buildGlobalValue(MI.getOperand(0).getReg(), MatchInfo.first);
+  GV->getOperand(1).setOffset(MatchInfo.second);
+  MI.eraseFromParent();
+}
 
 class Z80PostLegalizerCombinerImpl : public Combiner {
 protected:

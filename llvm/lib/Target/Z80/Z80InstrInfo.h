@@ -27,8 +27,13 @@ namespace llvm {
 class Z80Subtarget;
 
 namespace Z80 {
-/// Which operation an ALU_A_FI performs. Stored as its first operand.
+/// Which operation an ALU_Ac_FI performs.
 enum AluOp { ALU_ADD, ALU_SUB, ALU_AND, ALU_OR, ALU_XOR };
+
+/// The operation of an ALU_Ac_FI, stored after its accumulator operand.
+inline unsigned getAluFIOp(const MachineInstr &MI) {
+  return MI.getOperand(2).getImm();
+}
 
 /// The IX-indexed form of an ALU operation.
 inline unsigned getAluIXdOpcode(unsigned Op) {
@@ -373,6 +378,9 @@ inline bool hasLiveValue(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                          MCRegister Reg, const TargetRegisterInfo *TRI) {
   for (MachineBasicBlock::iterator I = MI; I != MBB.begin();) {
     --I;
+    // A debug value names the register without giving it a value.
+    if (I->isDebugInstr())
+      continue;
     bool LiveDef = false, Def = false, Use = false, Killed = false;
     for (const MachineOperand &MO : I->operands()) {
       if (!MO.isReg() || !MO.getReg().isPhysical() ||
@@ -607,6 +615,13 @@ public:
 
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
+  bool analyzeCompare(const MachineInstr &MI, Register &SrcReg,
+                      Register &SrcReg2, int64_t &Mask,
+                      int64_t &Value) const override;
+  bool optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
+                            Register SrcReg2, int64_t Mask, int64_t Value,
+                            const MachineRegisterInfo *MRI) const override;
+
   int getSPAdjust(const MachineInstr &MI) const override;
 
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
@@ -614,6 +629,9 @@ public:
                                       MachineInstr *&CopyMI,
                                       LiveIntervals *LIS = nullptr,
                                       VirtRegMap *VRM = nullptr) const override;
+
+  bool shouldHoist(const MachineInstr &MI,
+                   const MachineLoop *FromLoop) const override;
 
   unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
 

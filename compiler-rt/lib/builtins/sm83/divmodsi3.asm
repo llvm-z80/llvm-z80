@@ -6,8 +6,10 @@
 	.globl __neg32_on_stack
 	.globl ___divsi3
 	.globl ___modsi3
+	.globl __neg32_debc
 
 ;===------------------------------------------------------------------------===;
+; __neg32_debc - Negate DEBC (also used by divmodsi4.asm)
 ;===------------------------------------------------------------------------===;
 __neg32_debc:
 	ld	a, c

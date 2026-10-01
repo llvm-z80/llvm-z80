@@ -34,7 +34,9 @@ exit:
 
 ; Z80-LABEL: _eq32:
 ; Z80-NOT:  sbc a,a
-; Z80:      or c
+; Z80:      xor #254
+; Z80-NEXT: or {{[a-l]}}
+; Z80-NEXT: or {{[a-l]}}
 ; Z80-NEXT: jr nz,
 
 define void @ne64() {

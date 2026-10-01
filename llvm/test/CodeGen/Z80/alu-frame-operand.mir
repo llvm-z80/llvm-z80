@@ -18,7 +18,7 @@ stack:
 body:             |
   bb.0:
     liveins: $a, $ix
-    ALU_A_FI 0, %stack.1, 0, implicit-def $a, implicit-def $flags, implicit $a
+    $a = ALU_Ac_FI $a, 0, %stack.1, 0, implicit-def $flags
     RET implicit $a
 ...
 ---
@@ -33,7 +33,7 @@ stack:
 body:             |
   bb.0:
     liveins: $a, $sp
-    ALU_A_FI 2, %stack.0, 0, implicit-def $a, implicit-def $flags, implicit $a
+    $a = ALU_Ac_FI $a, 2, %stack.0, 0, implicit-def $flags
     RET implicit $a
 ...
 ---
