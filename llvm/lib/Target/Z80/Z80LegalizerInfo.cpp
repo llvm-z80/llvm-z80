@@ -29,9 +29,32 @@
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IntrinsicsZ80.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
+
+// Two DIFFERENT float runtimes exist for this target -- the ELF/standalone
+// path's own compiler-rt-style __addsf3 (register ABI, sdcccall(1): arg1
+// HLDE, arg2 stack) vs z88dk's math32 library (stack ABI, sdcccall(0): both
+// args on the stack). Only the z88dk path's __addsf3 is written for
+// sdcccall(0) (z88dk's cm32_sdcc_fsadd etc.); the ELF path's own __addsf3
+// (compiler-rt/lib/builtins/z80/addsf3.asm) still expects sdcccall(1) and
+// would silently read garbage operands if this were unconditional. This flag
+// is therefore OFF by default (safe for the shared/default ELF path) and is
+// meant to be turned on only by a caller that links against an sdcccall(0)
+// float runtime (e.g. z88dk's `zcc -compiler=llvmz80` passes
+// `-mllvm -z80-float-sdcccall0`).
+static cl::opt<bool> UseSDCCCall0ForF32Libcalls(
+    "z80-float-sdcccall0", cl::init(false), cl::Hidden,
+    cl::desc("Emit the f32 arithmetic and compare libcalls "
+             "(__addsf3/__subsf3/__mulsf3/__divsf3, __cmpsf2/__gtsf2/"
+             "__gesf2/__unordsf2, and their _fast nnan/ninf/nsz variants) "
+             "with CallingConv::Z80_SDCCCall0 instead of the default C ABI, "
+             "so they alias an sdcccall(0) float runtime (e.g. z88dk math32) "
+             "with zero glue code. Only safe when linking against such a "
+             "runtime, NOT the ELF path's own compiler-rt float runtime, "
+             "which expects the default C ABI (sdcccall(1))."));
 
 /// Check if all three fast-math flags (nnan, ninf, nsz) are set.
 /// If only some are set, emit a one-time remark so the user knows why the
@@ -564,14 +587,23 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   //   f64↔i32/i64: libcall (__fixdfsi, __fixdfdi, etc.) — unimplemented
   // i128 endpoints (__fixsfti, __floattisf, ...) follow the same
   // reference-compiles policy as the f64 routines.
+  // f32↔i32 is custom (selects the sdcccall(0) runtime bridge or the
+  // default-ABI compiler-rt libcall, same opt-in gate as arithmetic/compare —
+  // see -z80-float-sdcccall0 above). Carved out of the generic libcall path
+  // because .libcallForCartesianProduct picks its CallingConv via
+  // RuntimeLibcallsInfo (a table this backend does not customize), not a
+  // value we can gate locally; custom legalization reuses the same
+  // createLibcall(..., CC, ...) mechanism used for arithmetic and compares.
   getActionDefinitionsBuilder({G_FPTOSI, G_FPTOUI})
       .scalarize(0)
+      .customFor({{S32, S32}})
       .libcallForCartesianProduct({S32, S64, S128}, {S32, S64})
       .minScalar(0, S32)
       .minScalar(1, S32);
 
   getActionDefinitionsBuilder({G_SITOFP, G_UITOFP})
       .scalarize(0)
+      .customFor({{S32, S32}})
       .libcallForCartesianProduct({S32, S64}, {S32, S64, S128})
       .minScalar(0, S32)
       .minScalar(1, S32);
@@ -1057,9 +1089,12 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       llvm_unreachable("unexpected opcode");
     }
 
+    CallingConv::ID LibcallCC = UseSDCCCall0ForF32Libcalls
+                                     ? CallingConv::Z80_SDCCCall0
+                                     : CallingConv::C;
     auto Status = Helper.createLibcall(FuncName, {Dst, F32Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                       CallingConv::C, LocObserver, &MI);
+                                       LibcallCC, LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
       return false;
     MI.eraseFromParent();
@@ -1291,9 +1326,12 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
         return true;
       }
       Register UnordResult = MRI.createGenericVirtualRegister(S16);
+      CallingConv::ID LibcallCC = UseSDCCCall0ForF32Libcalls
+                                       ? CallingConv::Z80_SDCCCall0
+                                       : CallingConv::C;
       auto Status = Helper.createLibcall("__unordsf2", {UnordResult, I16Ty, 0},
                                          {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                         CallingConv::C, LocObserver, &MI);
+                                         LibcallCC, LocObserver, &MI);
       if (Status != LegalizerHelper::Legalized)
         return false;
       auto Zero = MIRBuilder.buildConstant(S16, 0);
@@ -1347,10 +1385,13 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       return false;
     }
 
+    CallingConv::ID LibcallCC = UseSDCCCall0ForF32Libcalls
+                                     ? CallingConv::Z80_SDCCCall0
+                                     : CallingConv::C;
     Register CmpResult = MRI.createGenericVirtualRegister(S16);
     auto Status = Helper.createLibcall(LibcallName, {CmpResult, I16Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                       CallingConv::C, LocObserver, &MI);
+                                       LibcallCC, LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
       return false;
 
@@ -1363,7 +1404,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       Register UnordResult = MRI.createGenericVirtualRegister(S16);
       auto UStatus = Helper.createLibcall("__unordsf2", {UnordResult, I16Ty, 0},
                                           {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                          CallingConv::C, LocObserver, &MI);
+                                          LibcallCC, LocObserver, &MI);
       if (UStatus != LegalizerHelper::Legalized)
         return false;
 
@@ -1383,6 +1424,65 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       }
     }
 
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case TargetOpcode::G_FPTOSI:
+  case TargetOpcode::G_FPTOUI:
+  case TargetOpcode::G_SITOFP:
+  case TargetOpcode::G_UITOFP: {
+    // Custom int<->f32 conversion libcalls, gated the same way as the f32
+    // arithmetic/compare libcalls: an sdcccall(0) float runtime's bridge
+    // aliases are written for that ABI; the ELF path's own compiler-rt
+    // __fixsfsi/__fixunssfsi/__floatsisf/__floatunsisf expect the default C
+    // ABI. Only the {i32,f32} pair reaches here — minScalar widens any
+    // narrower int operand to S32 before this case is hit (see the
+    // getActionDefinitionsBuilder rules above), matching how the
+    // arithmetic/compare libcalls always see S32-widened operands too.
+    MachineFunction &MF = MIRBuilder.getMF();
+    auto &Ctx = MF.getFunction().getContext();
+    Type *F32Ty = Type::getFloatTy(Ctx);
+    Type *I32Ty = Type::getInt32Ty(Ctx);
+    Register Dst = MI.getOperand(0).getReg();
+    Register Src = MI.getOperand(1).getReg();
+
+    CallingConv::ID F32LibcallCC = UseSDCCCall0ForF32Libcalls
+                                       ? CallingConv::Z80_SDCCCall0
+                                       : CallingConv::C;
+
+    const char *FuncName;
+    Type *DstTy, *SrcTy;
+    switch (MI.getOpcode()) {
+    case TargetOpcode::G_FPTOSI:
+      FuncName = "__fixsfsi";
+      DstTy = I32Ty;
+      SrcTy = F32Ty;
+      break;
+    case TargetOpcode::G_FPTOUI:
+      FuncName = "__fixunssfsi";
+      DstTy = I32Ty;
+      SrcTy = F32Ty;
+      break;
+    case TargetOpcode::G_SITOFP:
+      FuncName = "__floatsisf";
+      DstTy = F32Ty;
+      SrcTy = I32Ty;
+      break;
+    case TargetOpcode::G_UITOFP:
+      FuncName = "__floatunsisf";
+      DstTy = F32Ty;
+      SrcTy = I32Ty;
+      break;
+    default:
+      llvm_unreachable("unexpected opcode");
+    }
+
+    auto Status =
+        Helper.createLibcall(FuncName, {Dst, DstTy, 0}, {{Src, SrcTy, 0}},
+                             F32LibcallCC, LocObserver, &MI);
+    if (Status != LegalizerHelper::Legalized)
+      return false;
     MI.eraseFromParent();
     return true;
   }
