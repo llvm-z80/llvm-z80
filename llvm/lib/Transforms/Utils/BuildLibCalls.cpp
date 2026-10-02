@@ -31,6 +31,30 @@ using namespace llvm;
 
 #define DEBUG_TYPE "build-libcalls"
 
+// A target's C library may be built with a non-default calling convention
+// for its base symbols (e.g. z88dk's classic Z80 clib uses __smallc: stack
+// args, caller cleanup). When the middle-end synthesizes a libcall (e.g.
+// printf("foo\n") -> puts("foo") in SimplifyLibCalls) it creates the callee
+// declaration with the target's default C CC, so the emitted call bypasses
+// that library's actual ABI and reads/writes the wrong locations at runtime.
+// This flag makes getOrInsertLibFunc stamp CallingConv::Z80_SmallC on
+// freshly-created libfunc declarations on the z80 target, so the emit*
+// helpers -- which copy the callee's CC onto the call via
+// CI->setCallingConv(F->getCallingConv()) -- produce ABI-correct calls. It
+// is OFF by default (safe for a default-CC C library) and is intended to be
+// turned on only by a caller linking against a classic-ABI Z80 C library
+// (e.g. z88dk's `zcc -compiler=llvmz80` classic clib path). All classic
+// clib base symbols share this one convention, so a single uniform CC is
+// correct here; alternate faster entry points a header macro-redirects
+// source-level calls to are never what the middle-end synthesizes.
+static cl::opt<bool> StampZ80ClassicLibcCC(
+    "z80-classic-libc-cc", cl::init(false), cl::Hidden,
+    cl::desc("Stamp CallingConv::Z80_SmallC (__smallc) on middle-end-"
+             "synthesized C library calls on z80, so transforms like "
+             "printf(\"foo\\n\") -> puts(\"foo\") emit calls that honour a "
+             "classic-ABI C library instead of the default C CC. Only "
+             "correct when linking against such a library."));
+
 //- Infer Attributes ---------------------------------------------------------//
 
 STATISTIC(NumReadNone, "Number of functions inferred as readnone");
@@ -1522,6 +1546,17 @@ FunctionCallee llvm::getOrInsertLibFunc(Module *M, const TargetLibraryInfo &TLI,
   // of the caller to have called isLibFuncEmittable() first.
   Function *F = cast<Function>(C.getCallee());
   assert(F->getFunctionType() == T && "Function type does not match.");
+
+  // A classic-ABI Z80 C library (e.g. z88dk's __smallc) does not use the
+  // default C calling convention. Stamp the synthesized declaration with
+  // the classic-library CC so calls built on top of it (e.g. InstCombine's
+  // printf -> puts) match the real, linked implementation's ABI instead of
+  // silently corrupting args/return at runtime.
+  if (StampZ80ClassicLibcCC && M->getTargetTriple().isZ80() &&
+      F->isDeclaration() && !F->isVarArg() &&
+      F->getCallingConv() == CallingConv::C)
+    F->setCallingConv(CallingConv::Z80_SmallC);
+
   switch (TheLibFunc) {
   case LibFunc_fputc:
   case LibFunc_putchar:
