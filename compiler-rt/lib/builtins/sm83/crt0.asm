@@ -41,4 +41,7 @@ _bss_done:
 
 	call	_main
 _halt:
+_halt_loop:
 	halt
+	nop			; the HALT bug can run the byte after HALT twice
+	jr	_halt_loop

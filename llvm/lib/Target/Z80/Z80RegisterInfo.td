@@ -165,6 +165,15 @@ class Z80Reg16Class<dag RegList>: Z80RegClass<[i16], 8, RegList>;
 // These can be used with most 8-bit operations
 def GR8 : Z80Reg8Class<(add B, C, D, E, H, L, A)>;
 
+// The accumulator alone, for the operands of instructions that read or write
+// a byte in A. Its ranges have no choice of register, so they are allocated
+// first, local or not, and the values around them see where A is taken
+// before picking theirs.
+def Ac : Z80Reg8Class<(add A)> {
+  let AllocationPriority = 1;
+  let GlobalPriority = true;
+}
+
 //===----------------------------------------------------------------------===//
 //  16-bit register classes
 //===----------------------------------------------------------------------===//
@@ -226,8 +235,11 @@ def CCR : RegisterClass<"Z80", [i8], 8, (add FLAGS)> {
 // All 8-bit storage locations
 def Anyi8 : Z80Reg8Class<(add GR8)>;
 
-// All 16-bit storage locations
-def Anyi16 : Z80Reg16Class<(add BC, DE, HL, IX, IY, SP)>;
+// All 16-bit storage locations. SP holds the stack, not a value: it is
+// reserved, so no value is allocated to it, and leaving it out keeps a copy
+// to or from SP from being folded into a spill slot access, which has no
+// form for SP.
+def Anyi16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;
 
 //===----------------------------------------------------------------------===//
 //  Fake registers for multi-word values

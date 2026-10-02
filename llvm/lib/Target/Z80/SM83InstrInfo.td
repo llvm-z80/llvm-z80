@@ -107,30 +107,13 @@ def LD_A_HLD : Inst8<"ld a, (hl-)", 0x3A> {
 //  Pseudo Instructions
 //===----------------------------------------------------------------------===//
 
-// SM83 16-bit equality comparison (sets Z flag directly).
-// XOR both bytes, OR results — Z=1 if equal, Z=0 if not.
-// Used in fused compare-and-branch (Z80 uses SUB_HL_rr instead).
-def SM83_CMP_Z16 : Z80Pseudo<(outs), (ins GR16:$lhs, GR16:$rhs)> {
-  let Defs = [A, B, FLAGS];
-  let mayLoad = false;
-  let mayStore = false;
-}
-
-// Lightweight 16-bit zero test: LD A,lo; OR hi — sets Z if reg==0.
-// Only clobbers A (not B), reducing register pressure in loops.
-def SM83_CMP_ZERO16 : Z80Pseudo<(outs), (ins GR16:$src)> {
-  let Defs = [A, FLAGS];
-  let mayLoad = false;
-  let mayStore = false;
-}
-
 // SM83 signed 16-bit add with overflow detection.
 // HL = HL + rr, A = overflow (0 or 1).
 // SM83 has no P/V flag, so overflow is computed via sign bit comparison:
 //   overflow = (result_hi ^ lhs_hi) & (result_hi ^ rhs_hi), bit 7
 // Uses the "other" register pair (BC if rhs=DE, DE if rhs=BC) as temps.
-def SM83_SADDO_HL_rr : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs)> {
-  let Defs = [A, BC, DE, HL, FLAGS];
+def SM83_SADDO_HL_rr : Z80Pseudo<(outs Ac:$ov), (ins GR16_BCDE:$rhs)> {
+  let Defs = [BC, DE, HL, FLAGS];
   let Uses = [HL];
   let mayLoad = false;
   let mayStore = false;
@@ -139,8 +122,8 @@ def SM83_SADDO_HL_rr : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs)> {
 // SM83 signed 16-bit sub with overflow detection.
 // HL = HL - rr, A = overflow (0 or 1).
 // overflow = (result_hi ^ lhs_hi) & (lhs_hi ^ rhs_hi), bit 7
-def SM83_SSUBO_HL_rr : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs)> {
-  let Defs = [A, BC, DE, HL, FLAGS];
+def SM83_SSUBO_HL_rr : Z80Pseudo<(outs Ac:$ov), (ins GR16_BCDE:$rhs)> {
+  let Defs = [BC, DE, HL, FLAGS];
   let Uses = [HL];
   let mayLoad = false;
   let mayStore = false;

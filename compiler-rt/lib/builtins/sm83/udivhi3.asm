@@ -1,21 +1,30 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___udivhi3
+	.globl ___udivmodhi4
 
 ;===------------------------------------------------------------------------===;
 ; ___udivhi3 - 16-bit unsigned division (SM83)
+; ___udivmodhi4 - the same routine, named for both of its results
 ;
 ; Input:  DE = dividend, BC = divisor
 ; Output: BC = quotient, HL = remainder
 ; Algorithm: restoring division with 8-bit divisor fast path
+;
+; ___udivhi3 promises only the quotient. A quotient and a remainder of the
+; same operands are fused into one call to ___udivmodhi4.
 ;===------------------------------------------------------------------------===;
 ___udivhi3:
-	ld	a, b
-	or	a
+___udivmodhi4:
+	ld	a, c
+	and	#0x80
+	or	b
 	jr	nz, ___udivhi3_16bit
-	;; --- 8-bit divisor fast path (B == 0) ---
+	;; --- 8-bit divisor fast path (divisor < 128) ---
 	;; HL serves as dividend shift register and quotient accumulator.
-	;; E holds the 8-bit remainder. C is the divisor.
+	;; E holds the remainder. It is doubled before each trial subtraction,
+	;; so it has to stay below 128: a divisor of 128 or more goes the 16-bit
+	;; way. C is the divisor.
 	;; B is the loop counter (starts at 16).
 	ld	h, d
 	ld	l, e		; HL = dividend

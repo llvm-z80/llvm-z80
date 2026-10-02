@@ -218,16 +218,17 @@ bool Z80ExpandPseudo::expandVarShift(MachineBasicBlock &MBB, MachineInstr &MI,
   MBB.addSuccessor(LoopMBB);
   MBB.addSuccessor(TailMBB);
 
-  // LoopMBB: emit shift instruction(s).
+  // LoopMBB: emit shift instruction(s). The 8-bit shifts work in whichever
+  // register the value was given.
   switch (MI.getOpcode()) {
   case Z80::SHL8_VAR:
-    Z80::buildRotate8(LoopMBB, DL, TII, Z80::SLA_r, Z80::A);
+    Z80::buildRotate8(LoopMBB, DL, TII, Z80::SLA_r, MI.getOperand(0).getReg());
     break;
   case Z80::LSHR8_VAR:
-    Z80::buildRotate8(LoopMBB, DL, TII, Z80::SRL_r, Z80::A);
+    Z80::buildRotate8(LoopMBB, DL, TII, Z80::SRL_r, MI.getOperand(0).getReg());
     break;
   case Z80::ASHR8_VAR:
-    Z80::buildRotate8(LoopMBB, DL, TII, Z80::SRA_r, Z80::A);
+    Z80::buildRotate8(LoopMBB, DL, TII, Z80::SRA_r, MI.getOperand(0).getReg());
     break;
   case Z80::ROTL8_VAR:
     BuildMI(LoopMBB, DL, TII.get(Z80::RLCA));
@@ -642,7 +643,7 @@ bool Z80ExpandPseudo::expandSatArith8(MachineBasicBlock &MBB, MachineInstr &MI,
   MachineFunction *MF = MBB.getParent();
   DebugLoc DL = MI.getDebugLoc();
   unsigned Opc = MI.getOpcode();
-  Register SrcReg = MI.getOperand(0).getReg();
+  Register SrcReg = MI.getOperand(2).getReg();
 
   bool IsAdd = (Opc == Z80::UADDSAT8 || Opc == Z80::SADDSAT8);
   bool IsSigned = (Opc == Z80::SADDSAT8 || Opc == Z80::SSUBSAT8);

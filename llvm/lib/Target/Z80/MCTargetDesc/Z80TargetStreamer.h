@@ -44,6 +44,8 @@ private:
   void changeSection(const MCSection *CurSection, MCSection *Section,
                      uint32_t SubSection, raw_ostream &OS) override;
 
+  void emitRawBytes(StringRef Data) override;
+
   bool hasBSS() override { return HasBSS; }
   bool hasData() override { return HasData; }
   bool hasInitArray() override { return HasInitArray; }

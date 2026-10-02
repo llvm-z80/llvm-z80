@@ -12,8 +12,11 @@
 
 #include "Z80TargetStreamer.h"
 
+#include "Z80MCAsmInfo.h"
 #include "Z80MCELFStreamer.h"
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -22,15 +25,16 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbolELF.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Format.h"
 
 namespace llvm {
 
 Z80TargetStreamer::Z80TargetStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
 
 void Z80TargetStreamer::finish() {
-  // SDCC has its own CRT initialization mechanism.
+  // Non-ELF targets (sdasz80 and z88dk) have their own CRT initialization.
   const MCAsmInfo &MAI = Streamer.getContext().getAsmInfo();
-  if (MAI.isSDCC())
+  if (MAI.isSDCC() || MAI.isZ88DK())
     return;
   if (hasBSS())
     stronglyReference("__do_zero_bss",
@@ -71,11 +75,38 @@ static bool HasPrefix(StringRef Name, StringRef Prefix) {
 void Z80TargetAsmStreamer::changeSection(const MCSection *CurSection,
                                          MCSection *Section,
                                          uint32_t SubSection, raw_ostream &OS) {
+  // Without a z88dk name the contents would land in the previous section.
+  MCContext &Ctx = getStreamer().getContext();
+  if (Ctx.getAsmInfo().isZ88DK() &&
+      Z80MCAsmInfoZ88DK::getSectionName(Section->getName()).empty())
+    Ctx.reportError(SMLoc(), "section '" + Section->getName() +
+                                 "' cannot be emitted in the z88dk format");
   MCTargetStreamer::changeSection(CurSection, Section, SubSection, OS);
   HasBSS |= HasPrefix(Section->getName(), ".bss");
   HasData |= HasPrefix(Section->getName(), ".data");
   HasInitArray |= HasPrefix(Section->getName(), ".init_array");
   HasFiniArray |= HasPrefix(Section->getName(), ".fini_array");
+}
+
+void Z80TargetAsmStreamer::emitRawBytes(StringRef Data) {
+  if (!getStreamer().getContext().getAsmInfo().isZ88DK())
+    return MCTargetStreamer::emitRawBytes(Data);
+
+  // Short lines keep the output within the line buffers of z88dk tools.
+  constexpr size_t MaxChunk = 48;
+  for (size_t I = 0; I < Data.size(); I += MaxChunk) {
+    SmallString<256> Str;
+    raw_svector_ostream OS(Str);
+    OS << "\tDEFM\t\"";
+    for (unsigned char C : Data.substr(I, MaxChunk)) {
+      if (isPrint(C) && C != '"' && C != '\\')
+        OS << C;
+      else
+        OS << '\\' << format("%03o", C);
+    }
+    OS << '"';
+    getStreamer().emitRawText(OS.str());
+  }
 }
 
 void Z80TargetAsmStreamer::stronglyReference(MCSymbol *Sym) {

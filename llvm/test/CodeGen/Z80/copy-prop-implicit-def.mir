@@ -4,10 +4,16 @@
 # A byte move that also defines the pair it belongs to is not offered to copy
 # propagation: the destination named on it can be dead while the pair is not,
 # and erasing the move would take the pair's definition with it.
+#
+# Nor is a move whose source is undef. Taken as a copy, it would make the
+# later copy of the same registers look redundant; erasing that copy leaves
+# the undef move reading B, and the copy that gave B its value is deleted as
+# unread.
 
 --- |
   define void @plain_copy() { ret void }
   define void @pair_def_on_copy() { ret void }
+  define void @undef_source() { ret void }
 ...
 ---
 name:            plain_copy
@@ -30,6 +36,20 @@ body:             |
     RET implicit $h
 ...
 ---
+name:            undef_source
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $c, $hl
+
+    $b = LD_r_r $c
+    $c = LD_r_n 5
+    $a = LD_r_r undef $b
+    LD_HLind_r killed $a, implicit $hl
+    $a = LD_r_r killed $b
+    RET implicit $a, implicit $c
+...
+---
 # CHECK-LABEL: name: plain_copy
 # CHECK-NOT:  LD_r_r
 # CHECK:      RET
@@ -37,3 +57,8 @@ body:             |
 # CHECK-LABEL: name: pair_def_on_copy
 # CHECK:      $l = LD_r_r $a, implicit-def $h
 # CHECK-NEXT: RET
+
+# CHECK-LABEL: name: undef_source
+# CHECK:      $b = LD_r_r $c
+# CHECK:      $a = LD_r_r undef $b
+# CHECK:      $a = LD_r_r killed $b

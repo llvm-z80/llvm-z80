@@ -114,6 +114,7 @@ protected:
   bool IsHLASM = false;
 
   bool IsSDCC = false;
+  bool IsZ88DK = false;
 
   /// This is the maximum possible length of an instruction, which is needed to
   /// compute the size of an inline asm.  Defaults to 4.
@@ -539,6 +540,7 @@ public:
   bool isAIX() const { return IsAIX; }
   bool isHLASM() const { return IsHLASM; }
   bool isSDCC() const { return IsSDCC; }
+  bool isZ88DK() const { return IsZ88DK; }
   bool isMachO() const { return HasSubsectionsViaSymbols; }
   bool hasCOFFAssociativeComdats() const { return HasCOFFAssociativeComdats; }
   bool hasCOFFComdatConstants() const { return HasCOFFComdatConstants; }
