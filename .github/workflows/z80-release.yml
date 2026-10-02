@@ -32,6 +32,7 @@ jobs:
       sha: ${{ steps.vars.outputs.sha }}
       name: ${{ steps.vars.outputs.name }}
       prev-tag: ${{ steps.vars.outputs.prev-tag }}
+      tag: ${{ steps.vars.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,7 +47,9 @@ jobs:
         run: |
           sha=$(git rev-parse HEAD)
           tags=$(git ls-remote --tags --refs origin 'llvmz80-*' | sed 's|.*refs/tags/||' | sort -V)
+          tag=false
           if grep -qxF "$REF" <<< "$tags"; then
+            tag=true
             name=$REF
             prev=$(awk -v t="$REF" '$0 == t { print p; exit } { p = $0 }' <<< "$tags")
           elif [ "$DRAFT" = true ]; then
@@ -60,6 +63,7 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "prev-tag=$prev" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Building $name from $sha"
 
   build:
@@ -228,8 +232,21 @@ jobs:
           done
 
       - uses: actions/attest@v4
+        id: attest
+        if: needs.prepare.outputs.tag == 'true'
         with:
           subject-path: out/*
+
+      # One attestation covers every package. Each gets a copy, so it can be
+      # verified offline the way LLVM's packages are.
+      - name: Save the attestation next to each package
+        if: needs.prepare.outputs.tag == 'true'
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          for pkg in out/*.tar.xz out/*.zip; do
+            jq -c . "$BUNDLE" > "$pkg.jsonl"
+          done
 
       - uses: actions/upload-artifact@v7
         with:
@@ -264,24 +281,27 @@ jobs:
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG"
           {
             echo "## LLVM-Z80 ${TAG#llvmz80-} Release"
-            for entry in "Linux-X64.tar.xz|Linux x86_64" \
-                         "Linux-ARM64.tar.xz|Linux AArch64" \
-                         "macOS-ARM64.tar.xz|macOS arm64" \
-                         "Windows-X64.zip|Windows x86_64"; do
-              file=LLVM-Z80-${TAG#llvmz80-}-${entry%%|*}
+            for entry in "Linux-X64.tar.xz|Linux X64|xz archive" \
+                         "Linux-ARM64.tar.xz|Linux ARM64|xz archive" \
+                         "macOS-ARM64.tar.xz|macOS ARM64|xz archive" \
+                         "Windows-X64.zip|Windows X64|zip archive"; do
+              IFS='|' read -r suffix label kind <<< "$entry"
+              file=LLVM-Z80-${TAG#llvmz80-}-$suffix
               if [ -f "out/$file" ]; then
-                echo "* [${entry#*|}]($url/$file)"
+                echo "* $label: [$kind]($url/$file) ([signature]($url/$file.jsonl))"
               fi
             done
             echo "---"
             echo
             echo "_Write the changes here before publishing._"
             echo
-            cat <<'EOF'
-          > Disclaimer: This build is provided "as-is" with no guarantee of stability.
-          While it should work correctly in most cases, I cannot guarantee it will fit every use case,
-          and you may run into issues with linking or external binary integration.
-          EOF
+            echo "## Verifying Packages"
+            echo
+            echo "Verify a package and its \`.jsonl\` attestation with [gh](https://cli.github.com/manual/gh_attestation_verify):"
+            echo '```'
+            echo "gh attestation verify --repo $GITHUB_REPOSITORY <package>"
+            echo "gh attestation verify --repo $GITHUB_REPOSITORY <package> --bundle <package>.jsonl"
+            echo '```'
             if [ -n "$PREV_TAG" ]; then
               echo
               echo "**Full Changelog**: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$PREV_TAG...$TAG"
