@@ -766,13 +766,15 @@ bool Z80AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_MissingFeature:
     return missingFeature(IDLoc, ErrorInfo);
   case Match_InvalidOperand:
+  case Match_InvalidPCRel8:
+  case Match_InvalidAddr16:
     return invalidOperand(IDLoc, Operands, ErrorInfo);
   case Match_MnemonicFail:
     return Error(IDLoc, "invalid instruction");
   case Match_immediate:
     return Error(IDLoc, "immediate operand out of range");
   default:
-    return true;
+    return Error(IDLoc, "invalid instruction");
   }
 }
 
