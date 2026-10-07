@@ -31,6 +31,25 @@ _bss_loop:
 	jr	nz,_bss_loop
 _bss_done:
 
+	;; Copy the _INITIALIZER section to the start of the _INITIALIZED section.
+	;; It is expected that the _INITIALIZER section has the same size as the _INITIALIZED section.
+	;; Otherwise, we have a layout error.
+	ld	bc,#l__INITIALIZER
+	ld	a,b
+	or	a,c
+	jr	z,_init_done 		; skip if _INITIALIZER is empty
+	ld	hl,#s__INITIALIZER
+	ld	de,#s__INITIALIZED
+_init_loop:
+	ld	a,(hl+)				; a = (HL); HL++
+	ld	(de),a
+	inc de
+	dec	bc
+	ld	a,b
+	or	a,c
+	jr	nz,_init_loop
+_init_done:
+
 	;; main() has the hosted signature and the tests read argc: several put it
 	;; in an array or add to it, so leaving whatever the .bss loop left in the
 	;; argument register makes their result depend on where .bss ends. The
@@ -49,6 +68,9 @@ _halt:
 	halt
 
 	;; Declare _BSS area so sdldgb generates s__BSS and l__BSS symbols.
+	;; Same thing for _INITIALIZER and _INITIALIZED.
+	.area _INITIALIZER
+	.area _INITIALIZED
 	.area _BSS
 _exitcode:
 	.ds 2
