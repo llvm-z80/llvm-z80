@@ -45,6 +45,20 @@ const R_Z80_16: u32 = 4;
 const R_Z80_BYTE0: u32 = 7;
 const R_Z80_BYTE1: u32 = 8;
 
+/// The e_flags CPU value GNU binutils uses for an SDCC port or `--cpu` name,
+/// if it has one.
+fn cpu_flags(name: &str) -> Option<u32> {
+    match name {
+        "z80" => Some(0x01),
+        "z180" => Some(0x02),
+        "r800" => Some(0x03),
+        "ez80" | "ez80_z80" => Some(0x04),
+        "sm83" | "gbz80" => Some(0x05),
+        "z80n" => Some(0x06),
+        _ => None,
+    }
+}
+
 const R_BYTE: u8 = 0x01;
 const R_SYM: u8 = 0x02;
 const R_PCR: u8 = 0x04;
@@ -104,6 +118,7 @@ struct RawSymbol {
 
 struct RawModule {
     addr_bytes: usize,
+    cpu: Option<u32>,
     areas: Vec<RawArea>,
     symbols: Vec<RawSymbol>,
     tr_pairs: Vec<RawTRPair>,
@@ -150,6 +165,7 @@ struct ElfSymbol {
 }
 
 struct ElfModule {
+    e_flags: u32,
     sections: Vec<ElfSection>,
     symbols: Vec<ElfSymbol>,
 }
@@ -291,6 +307,7 @@ fn parse_hex_bytes(s: &str) -> Vec<u8> {
 
 fn parse_rel(text: &str) -> Result<RawModule, String> {
     let mut addr_bytes = 4usize;
+    let mut cpu = None;
     let mut areas: Vec<RawArea> = Vec::new();
     let mut symbols: Vec<RawSymbol> = Vec::new();
     let mut tr_pairs: Vec<RawTRPair> = Vec::new();
@@ -310,7 +327,15 @@ fn parse_rel(text: &str) -> Result<RawModule, String> {
                     addr_bytes = addr_bytes.clamp(2, 4);
                 }
             }
-            Some(b'H') | Some(b'O') | Some(b'M') => {}
+            Some(b'H') | Some(b'M') => {}
+            Some(b'O') => {
+                // SDCC records its target port here, e.g. "O -msm83 sdcccall(1)".
+                for opt in line[1..].split_whitespace() {
+                    if let Some(f) = opt.strip_prefix("-m").and_then(cpu_flags) {
+                        cpu = Some(f);
+                    }
+                }
+            }
             Some(b'S') => {
                 if line.len() < 4 {
                     continue;
@@ -392,6 +417,7 @@ fn parse_rel(text: &str) -> Result<RawModule, String> {
 
     Ok(RawModule {
         addr_bytes,
+        cpu,
         areas,
         symbols,
         tr_pairs,
@@ -813,7 +839,11 @@ fn transform(raw: &mut RawModule) -> ElfModule {
         sections[sec_idx].relocs = elf_relocs;
     }
 
-    ElfModule { sections, symbols }
+    ElfModule {
+        e_flags: raw.cpu.unwrap_or(0),
+        sections,
+        symbols,
+    }
 }
 
 // ── Phase 3: Emit ───────────────────────────────────────────────────────────
@@ -1059,7 +1089,7 @@ fn emit_elf(module: &ElfModule) -> Vec<u8> {
     push_u32(&mut buf, 0); // e_entry
     push_u32(&mut buf, 0); // e_phoff
     push_u32(&mut buf, sh_offset);
-    push_u32(&mut buf, 0); // e_flags
+    push_u32(&mut buf, module.e_flags);
     push_u16(&mut buf, elf_header_size as u16);
     push_u16(&mut buf, 0); // e_phentsize
     push_u16(&mut buf, 0); // e_phnum
@@ -1103,14 +1133,15 @@ fn emit_elf(module: &ElfModule) -> Vec<u8> {
 
 // ── Conversion entry points ─────────────────────────────────────────────────
 
-fn convert_rel_to_elf(data: &[u8]) -> Result<Vec<u8>, String> {
+fn convert_rel_to_elf(data: &[u8], cpu: Option<u32>) -> Result<Vec<u8>, String> {
     let text = std::str::from_utf8(data).map_err(|_| "invalid UTF-8 in .rel file")?;
     let mut raw = parse_rel(text)?;
+    raw.cpu = raw.cpu.or(cpu);
     let module = transform(&mut raw);
     Ok(emit_elf(&module))
 }
 
-fn convert_lib_to_ar(data: &[u8]) -> Result<Vec<u8>, String> {
+fn convert_lib_to_ar(data: &[u8], cpu: Option<u32>) -> Result<Vec<u8>, String> {
     let members = parse_ar(data)?;
     let mut out_members = Vec::new();
 
@@ -1122,7 +1153,7 @@ fn convert_lib_to_ar(data: &[u8]) -> Result<Vec<u8>, String> {
             .to_string_lossy()
             .into_owned();
 
-        match convert_rel_to_elf(&member.data) {
+        match convert_rel_to_elf(&member.data, cpu) {
             Ok(elf_data) => {
                 out_members.push(ArMember {
                     name: o_name,
@@ -1141,9 +1172,22 @@ fn convert_lib_to_ar(data: &[u8]) -> Result<Vec<u8>, String> {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let mut cpu = None;
+    let mut args: Vec<String> = Vec::new();
+    for arg in env::args() {
+        if let Some(name) = arg.strip_prefix("--cpu=") {
+            cpu = Some(cpu_flags(name).unwrap_or_else(|| {
+                eprintln!("error: unknown CPU '{}'", name);
+                process::exit(1);
+            }));
+        } else {
+            args.push(arg);
+        }
+    }
     if args.len() < 2 {
-        eprintln!("Usage: rel2elf <input.rel|input.lib> [output.o|output.a]");
+        eprintln!(
+            "Usage: rel2elf [--cpu=z80|z180|r800|ez80|sm83|z80n] <input.rel|input.lib> [output.o|output.a]"
+        );
         process::exit(1);
     }
 
@@ -1166,9 +1210,9 @@ fn main() {
     };
 
     let result = if is_ar {
-        convert_lib_to_ar(&data)
+        convert_lib_to_ar(&data, cpu)
     } else {
-        convert_rel_to_elf(&data)
+        convert_rel_to_elf(&data, cpu)
     };
 
     match result {
