@@ -28,17 +28,14 @@ use std::io::Write;
 use std::path::Path;
 use std::process;
 
-// Z80 ELF relocation types
+// Z80 ELF relocation types, numbered as in GNU binutils
 const R_Z80_NONE: u32 = 0;
-const R_Z80_IMM8: u32 = 1;
-const R_Z80_ADDR8: u32 = 2;
-const R_Z80_ADDR16: u32 = 3;
-const R_Z80_ADDR16_LO: u32 = 4;
-const R_Z80_ADDR16_HI: u32 = 5;
-const R_Z80_PCREL_8: u32 = 6;
-const R_Z80_FK_DATA_4: u32 = 13;
-const R_Z80_IMM16: u32 = 16;
-const R_SM83_LDH8: u32 = 19;
+const R_Z80_8: u32 = 1;
+const R_Z80_8_PCREL: u32 = 3;
+const R_Z80_16: u32 = 4;
+const R_Z80_32: u32 = 6;
+const R_Z80_BYTE0: u32 = 7;
+const R_Z80_BYTE1: u32 = 8;
 
 // ASxxxx relocation mode bits
 const R_BYTE: u8 = 0x01;
@@ -462,12 +459,12 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
             }
 
             let (size, mut mode) = match r_type {
-                R_Z80_ADDR16 | R_Z80_IMM16 => (2, 0u8),
-                R_Z80_ADDR8 | R_Z80_IMM8 | R_SM83_LDH8 => (1, R_BYTE),
-                R_Z80_PCREL_8 => (1, R_BYTE | R_PCR),
-                R_Z80_ADDR16_LO => (1, R_BYTE),
-                R_Z80_ADDR16_HI => (1, R_BYTE),
-                R_Z80_FK_DATA_4 => continue,
+                R_Z80_16 => (2, 0u8),
+                R_Z80_8 => (1, R_BYTE),
+                R_Z80_8_PCREL => (1, R_BYTE | R_PCR),
+                R_Z80_BYTE0 => (1, R_BYTE),
+                R_Z80_BYTE1 => (1, R_BYTE),
+                R_Z80_32 => continue,
                 _ => {
                     eprintln!(
                         "warning: unsupported relocation type {} at offset 0x{:04X}",
@@ -513,7 +510,10 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
 
             let byte_offset = (area_base_offset + r_offset) as usize;
 
-            let addend = if !is_sym_ref {
+            // sdld measures a PCR byte from the end of the field, while the
+            // ELF addend already holds that adjustment.
+            let pcr_bias = if r_type == R_Z80_8_PCREL { 1 } else { 0 };
+            let addend = pcr_bias + if !is_sym_ref {
                 let sym = symbols_table
                     .symbol(object::SymbolIndex(r_sym as usize))
                     .unwrap();

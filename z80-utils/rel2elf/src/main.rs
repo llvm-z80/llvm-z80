@@ -38,12 +38,12 @@ const STT_SECTION: u8 = 3;
 const SHN_UNDEF: u16 = 0;
 const SHN_ABS: u16 = 0xFFF1;
 
-const R_Z80_ADDR8: u32 = 2;
-const R_Z80_ADDR16: u32 = 3;
-const R_Z80_ADDR16_LO: u32 = 4;
-const R_Z80_ADDR16_HI: u32 = 5;
-const R_Z80_PCREL_8: u32 = 6;
-const R_SM83_LDH8: u32 = 19;
+// Z80 ELF relocation types, numbered as in GNU binutils
+const R_Z80_8: u32 = 1;
+const R_Z80_8_PCREL: u32 = 3;
+const R_Z80_16: u32 = 4;
+const R_Z80_BYTE0: u32 = 7;
+const R_Z80_BYTE1: u32 = 8;
 
 const R_BYTE: u8 = 0x01;
 const R_SYM: u8 = 0x02;
@@ -599,7 +599,7 @@ fn read_addend_unsigned(data: &[u8], offset: usize, is_byte: bool) -> u32 {
 fn is_byte_wide(r_type: u32) -> bool {
     matches!(
         r_type,
-        R_Z80_ADDR8 | R_Z80_ADDR16_LO | R_Z80_ADDR16_HI | R_Z80_PCREL_8 | R_SM83_LDH8
+        R_Z80_8 | R_Z80_BYTE0 | R_Z80_BYTE1 | R_Z80_8_PCREL
     )
 }
 
@@ -723,37 +723,18 @@ fn transform(raw: &mut RawModule) -> ElfModule {
             let is_sym = r_mode & R_SYM != 0;
             let is_pcr = r_mode & R_PCR != 0;
 
-            // Check HRAM reference
-            let is_hram = if is_sym {
-                let sym = &raw.symbols[r_index as usize];
-                sym.is_defined
-                    && sym
-                        .area_index
-                        .map_or(false, |ai| raw.areas[ai].name == "_HRAM")
-            } else {
-                raw.areas
-                    .get(r_index as usize)
-                    .map_or(false, |a| a.name == "_HRAM")
-            };
-
             // Determine ELF relocation type
             let r_type = if is_bytx {
                 if is_msb {
-                    R_Z80_ADDR16_HI
+                    R_Z80_BYTE1
                 } else {
-                    R_Z80_ADDR16_LO
+                    R_Z80_BYTE0
                 }
             } else {
                 match (is_byte, is_pcr) {
-                    (true, true) => R_Z80_PCREL_8,
-                    (true, false) if is_msb => R_Z80_ADDR16_HI,
-                    (true, false) => {
-                        if is_hram {
-                            R_SM83_LDH8
-                        } else {
-                            R_Z80_ADDR8
-                        }
-                    }
+                    (true, true) => R_Z80_8_PCREL,
+                    (true, false) if is_msb => R_Z80_BYTE1,
+                    (true, false) => R_Z80_8,
                     (false, true) => {
                         eprintln!(
                             "warning: unsupported 16-bit PC-relative relocation at offset 0x{:04X}",
@@ -761,7 +742,7 @@ fn transform(raw: &mut RawModule) -> ElfModule {
                         );
                         continue;
                     }
-                    (false, false) => R_Z80_ADDR16,
+                    (false, false) => R_Z80_16,
                 }
             };
 
@@ -807,6 +788,10 @@ fn transform(raw: &mut RawModule) -> ElfModule {
 
                 (sym_idx, addend)
             };
+
+            // sdld measures a PCR byte from the end of the field; the ELF
+            // addend carries that adjustment instead.
+            let addend = if r_type == R_Z80_8_PCREL { addend - 1 } else { addend };
 
             elf_relocs.push(ElfReloc {
                 offset: r_offset,

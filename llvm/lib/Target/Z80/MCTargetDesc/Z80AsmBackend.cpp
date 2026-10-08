@@ -45,7 +45,7 @@ Z80AsmBackend::createObjectTargetWriter() const {
 // MC measures a fixup to the byte it patches; a JR displacement is measured
 // from the end of the instruction and an SM83 LDH offset from 0xFF00. The
 // relaxation decision and the encoding both start here so they cannot drift
-// apart. lld::Z80::relocate makes the same adjustments.
+// apart.
 static uint64_t encodedValue(const MCFixup &Fixup, uint64_t Value) {
   if (Fixup.isPCRel())
     Value -= 1;
@@ -108,8 +108,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   // A resolved fixup is encoded directly and emits no relocation, so the
   // linker's range checks never see it; an out-of-range value would be
   // silently truncated (an LDH to a symbol outside 0xFF00-0xFFFF would
-  // quietly poke a different hardware register). Refuse loudly instead,
-  // mirroring the checks lld applies to the unresolved ones.
+  // quietly poke a different hardware register). Refuse loudly instead.
   if (IsResolved) {
     int64_t SVal = static_cast<int64_t>(Value);
     bool InRange = true;
@@ -149,7 +148,14 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
       getContext().reportError(Fixup.getLoc(), Msg);
   }
 
-  maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+  // As GNU as does, a JR or DJNZ relocation keeps the instruction-end
+  // adjustment in its addend.
+  MCValue RelocTarget = Target;
+  if (Fixup.isPCRel())
+    RelocTarget =
+        MCValue::get(Target.getAddSym(), Target.getSubSym(),
+                     Target.getConstant() - 1, Target.getSpecifier());
+  maybeAddReloc(F, Fixup, RelocTarget, Value, IsResolved);
 
   unsigned Kind = Fixup.getKind();
   unsigned NumBytes = 0;
