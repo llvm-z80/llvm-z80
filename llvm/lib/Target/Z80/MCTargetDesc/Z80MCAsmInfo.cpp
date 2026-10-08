@@ -45,7 +45,6 @@ constexpr EnumStringDef<MCAsmInfo::AtSpecifierKind> AtSpecifierDefs[] = {
     {{"z80_24segment"}, Z80MCExpr::VK_ADDR24_SEGMENT},
     {{"z80_24segmentlo"}, Z80MCExpr::VK_ADDR24_SEGMENT_LO},
     {{"z80_24segmenthi"}, Z80MCExpr::VK_ADDR24_SEGMENT_HI},
-    {{"z80_13"}, Z80MCExpr::VK_ADDR13},
 };
 constexpr auto AtSpecifiers = BUILD_ENUM_STRINGS(AtSpecifierDefs);
 

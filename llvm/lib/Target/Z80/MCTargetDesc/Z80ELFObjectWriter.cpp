@@ -50,8 +50,6 @@ unsigned Z80ELFObjectWriter::getRelocType(const MCFixup &Fixup,
       return ELF::R_Z80_ADDR24_SEGMENT_LO;
     case Z80MCExpr::VK_ADDR24_SEGMENT_HI:
       return ELF::R_Z80_ADDR24_SEGMENT_HI;
-    case Z80MCExpr::VK_ADDR13:
-      return ELF::R_Z80_ADDR13;
     }
   case FK_Data_2:
     switch (Specifier) {
@@ -60,8 +58,6 @@ unsigned Z80ELFObjectWriter::getRelocType(const MCFixup &Fixup,
     case Z80MCExpr::VK_NONE:
     case Z80MCExpr::VK_ADDR16:
       return ELF::R_Z80_ADDR16;
-    case Z80MCExpr::VK_ADDR13:
-      return ELF::R_Z80_ADDR13;
     case Z80MCExpr::VK_ADDR24_SEGMENT:
       return ELF::R_Z80_ADDR24_SEGMENT;
     }
@@ -88,18 +84,13 @@ unsigned Z80ELFObjectWriter::getRelocType(const MCFixup &Fixup,
     return ELF::R_Z80_ADDR24_SEGMENT_HI;
   case Z80::PCRel8:
     return ELF::R_Z80_PCREL_8;
-  case Z80::PCRel16:
-    return ELF::R_Z80_PCREL_16;
   case FK_Data_4:
     return ELF::R_Z80_FK_DATA_4;
   case FK_Data_8:
-    return ELF::R_Z80_FK_DATA_8;
-  case Z80::AddrAsciz:
-    return ELF::R_Z80_ADDR_ASCIZ;
+    reportError(Fixup.getLoc(), "8-byte data relocations are not supported");
+    return ELF::R_Z80_NONE;
   case Z80::Imm16:
     return ELF::R_Z80_IMM16;
-  case Z80::Addr13:
-    return ELF::R_Z80_ADDR13;
   case Z80::Disp8:
     return ELF::R_Z80_DISP8;
   case Z80::LDH8:

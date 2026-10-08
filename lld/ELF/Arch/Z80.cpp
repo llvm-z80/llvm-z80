@@ -47,7 +47,6 @@ RelExpr Z80::getRelExpr(RelType type, const Symbol &s,
                         const uint8_t *loc) const {
   switch (type) {
   case R_Z80_PCREL_8:
-  case R_Z80_PCREL_16:
     return R_PC;
   case R_Z80_NONE:
     return R_NONE;
@@ -87,10 +86,6 @@ void Z80::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     *loc = offset;
     break;
   }
-  case R_Z80_PCREL_16:
-    checkInt(ctx, loc, (int64_t)val - 1, 16, rel);
-    write16le(loc, val - 1);
-    break;
   case R_Z80_ADDR24: {
     checkIntUInt(ctx, loc, val, 24, rel);
     uint32_t existing = read32le(loc);
@@ -99,15 +94,6 @@ void Z80::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   }
   case R_Z80_ADDR24_BANK:
     *loc = val >> 16;
-    break;
-  case R_Z80_ADDR13:
-    checkUInt(ctx, loc, val, 13, rel);
-    write16le(loc, val);
-    break;
-  case R_Z80_ADDR_ASCIZ:
-    // Decimal ASCII address encoding — treated as 16-bit absolute address.
-    checkIntUInt(ctx, loc, val, 16, rel);
-    write16le(loc, val);
     break;
   case R_Z80_DISP8: {
     // 8-bit signed displacement for indexed addressing (IX+d, IY+d).
@@ -125,9 +111,6 @@ void Z80::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   }
   case R_Z80_FK_DATA_4:
     write32le(loc, val);
-    break;
-  case R_Z80_FK_DATA_8:
-    write64le(loc, val);
     break;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << rel.type;

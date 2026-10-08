@@ -85,10 +85,7 @@ MCFixupKindInfo Z80AsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"Addr24_Segment", 0, 16, 0},
       {"Addr24_Segment_Low", 0, 8, 0},
       {"Addr24_Segment_High", 0, 8, 0},
-      {"Addr13", 0, 13, 0},
       {"PCRel8", 0, 8, 0},
-      {"PCRel16", 0, 16, 0},
-      {"AddrAsciz", 0, 16, 0},
       {"Disp8", 0, 8, 0}, // 8-bit signed displacement for indexed addressing
       {"LDH8", 0, 8, 0},  // SM83 LDH operand: 8-bit offset from 0xFF00
   };
@@ -124,9 +121,6 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
       InRange = isInt<8>(SVal);
       Msg = "relative branch target out of range";
       break;
-    case Z80::PCRel16:
-      InRange = isInt<16>(SVal);
-      break;
     case Z80::Disp8:
       InRange = isInt<8>(SVal);
       Msg = "index displacement out of range";
@@ -145,11 +139,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
     case Z80::Imm16:
     case Z80::Addr16:
     case Z80::Addr24_Segment:
-    case Z80::AddrAsciz:
       InRange = isInt<16>(SVal) || isUInt<16>(Value);
-      break;
-    case Z80::Addr13:
-      InRange = isUInt<13>(Value);
       break;
     case Z80::Addr24:
       InRange = isInt<24>(SVal) || isUInt<24>(Value);
@@ -183,10 +173,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   case FK_Data_2:
   case Z80::Addr16:
   case Z80::Addr24_Segment:
-  case Z80::PCRel16:
-  case Z80::AddrAsciz:
   case Z80::Imm16:
-  case Z80::Addr13:
     NumBytes = 2;
     break;
   case Z80::Addr24:

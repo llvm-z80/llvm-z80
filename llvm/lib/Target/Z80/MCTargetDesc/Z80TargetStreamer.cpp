@@ -113,25 +113,25 @@ void Z80TargetAsmStreamer::stronglyReference(MCSymbol *Sym) {
   getStreamer().emitSymbolAttribute(Sym, MCSA_Global);
 }
 
-/// Makes an e_flags value based on subtarget features.
+/// Picks the e_flags CPU value for the subtarget. Z180, R800 and eZ80 also set
+/// the Z80 feature, so they are checked before falling back to Z80.
 static unsigned getEFlagsForFeatureSet(const FeatureBitset &Features) {
-  unsigned ELFArch = 0;
-  if (Features[Z80::FeatureZ80])
-    ELFArch |= ELF::EF_Z80_ARCH_Z80;
-  if (Features[Z80::FeatureZ180])
-    ELFArch |= ELF::EF_Z80_ARCH_Z180;
+  if (Features[Z80::FeatureSM83])
+    return ELF::EF_Z80_MACH_SM83;
   if (Features[Z80::FeatureEZ80])
-    ELFArch |= ELF::EF_Z80_ARCH_EZ80;
+    return ELF::EF_Z80_MACH_EZ80_Z80;
   if (Features[Z80::FeatureR800])
-    ELFArch |= ELF::EF_Z80_ARCH_R800;
-  return ELFArch;
+    return ELF::EF_Z80_MACH_R800;
+  if (Features[Z80::FeatureZ180])
+    return ELF::EF_Z80_MACH_Z180;
+  return ELF::EF_Z80_MACH_Z80;
 }
 
 Z80TargetELFStreamer::Z80TargetELFStreamer(MCStreamer &S,
                                            const MCSubtargetInfo &STI)
     : Z80TargetStreamer(S) {
   ELFObjectWriter &W = getStreamer().getWriter();
-  unsigned EFlags = W.getELFHeaderEFlags();
+  unsigned EFlags = W.getELFHeaderEFlags() & ~ELF::EF_Z80_MACH_MSK;
   EFlags |= getEFlagsForFeatureSet(STI.getFeatureBits());
   W.setELFHeaderEFlags(EFlags);
 }

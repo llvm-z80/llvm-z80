@@ -9,7 +9,6 @@
 #ifndef LLVM_LIB_TARGET_Z80_MCTARGETDESC_Z80MCELFSTREAMER_H
 #define LLVM_LIB_TARGET_Z80_MCTARGETDESC_Z80MCELFSTREAMER_H
 
-#include "MCTargetDesc/Z80MCExpr.h"
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCCodeEmitter.h"
@@ -34,12 +33,6 @@ public:
   void changeSection(MCSection *Section, uint32_t Subsection = 0) override;
 
   void emitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) override;
-
-  void emitValueImpl(const MCExpr *Value, unsigned Size,
-                     SMLoc Loc = SMLoc()) override;
-
-  void emitMosAddrAsciz(const MCExpr *Value, unsigned Size,
-                        SMLoc Loc = SMLoc());
 
   bool hasBSS() const { return HasBSS; }
   bool hasData() const { return HasData; }

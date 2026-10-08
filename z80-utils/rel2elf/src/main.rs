@@ -14,7 +14,7 @@ use std::process;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const EM_Z80: u16 = 0x1F90;
+const EM_Z80: u16 = 220;
 const ET_REL: u16 = 1;
 const ELFCLASS32: u8 = 1;
 const ELFDATA2LSB: u8 = 1;
@@ -43,7 +43,6 @@ const R_Z80_ADDR16: u32 = 3;
 const R_Z80_ADDR16_LO: u32 = 4;
 const R_Z80_ADDR16_HI: u32 = 5;
 const R_Z80_PCREL_8: u32 = 6;
-const R_Z80_PCREL_16: u32 = 12;
 const R_SM83_LDH8: u32 = 19;
 
 const R_BYTE: u8 = 0x01;
@@ -753,7 +752,13 @@ fn transform(raw: &mut RawModule) -> ElfModule {
                             R_Z80_ADDR8
                         }
                     }
-                    (false, true) => R_Z80_PCREL_16,
+                    (false, true) => {
+                        eprintln!(
+                            "warning: unsupported 16-bit PC-relative relocation at offset 0x{:04X}",
+                            r_offset
+                        );
+                        continue;
+                    }
                     (false, false) => R_Z80_ADDR16,
                 }
             };
