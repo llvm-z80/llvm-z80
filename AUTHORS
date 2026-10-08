@@ -2,6 +2,8 @@ The following people have contributed to LLVM-Z80:
 
 Chanung Park (Kiroo) (ung@zlfn.space)
 Thorbjørn Ravn Andersen (tra@ravnand.dk)
+Antonio Caggiano (info@antoniocaggiano.eu)
+
 Alex Jokela (alex@camulus.com) — Initial Z80 backend port
 
 The LLVM-Z80 project incorporates code from the LLVM-MOS project
