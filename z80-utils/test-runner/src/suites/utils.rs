@@ -286,8 +286,9 @@ fn run_elf2rel(input: &Path, output: &Path) -> Result<(), String> {
     if status.success() { Ok(()) } else { Err("elf2rel failed".into()) }
 }
 
-fn run_rel2elf(input: &Path, output: &Path) -> Result<(), String> {
+fn run_rel2elf(input: &Path, output: &Path, target: Target) -> Result<(), String> {
     let status = Command::new("rel2elf")
+        .arg(format!("--cpu={}", target.triple()))
         .arg(input)
         .arg(output)
         .stdout(std::process::Stdio::null())
@@ -342,6 +343,7 @@ fn convert_sdcc_lib(target: Target, output: &Path) -> Result<Option<PathBuf>, St
         None => return Ok(None),
     };
     let status = Command::new("rel2elf")
+        .arg(format!("--cpu={}", target.triple()))
         .arg(&sdcc_lib).arg(output)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -636,7 +638,7 @@ fn test_elf_roundtrip(
     }
 
     let rt_o = tmp.join(format!("{tag}_rt.o"));
-    if let Err(e) = run_rel2elf(&rel, &rt_o) {
+    if let Err(e) = run_rel2elf(&rel, &rt_o, target) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, format!("rel→elf: {e}"));
     }
 
@@ -698,7 +700,7 @@ fn test_rel_roundtrip(
     }
 
     let elf_o = tmp.join(format!("{tag}.o"));
-    if let Err(e) = run_rel2elf(&rel, &elf_o) {
+    if let Err(e) = run_rel2elf(&rel, &elf_o, target) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, format!("rel→elf: {e}"));
     }
 
@@ -873,7 +875,7 @@ fn test_rel_crosslink(
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, e);
     }
     let sdcc_o = tmp.join(format!("{tag}_sdcc.o"));
-    if let Err(e) = run_rel2elf(&sdcc_rel, &sdcc_o) {
+    if let Err(e) = run_rel2elf(&sdcc_rel, &sdcc_o, target) {
         remove_tmp_dir(&tmp); return TestResult::fatal(tag, format!("rel2elf: {e}"));
     }
 
@@ -933,13 +935,13 @@ fn run_group_elf_ar_roundtrip(
     let rt_lib_path = paths.rt_lib(target);
     let roundtripped_a = if rt_lib_path.exists() {
         let initial_a = tmp_ar.join("initial_rt.a");
-        match run_rel2elf(&rt_lib_path, &initial_a) {
+        match run_rel2elf(&rt_lib_path, &initial_a, target) {
             Ok(()) => {
                 let rt_lib = tmp_ar.join("roundtrip_rt.lib");
                 match run_elf2rel(&initial_a, &rt_lib) {
                     Ok(()) => {
                         let rt_a = tmp_ar.join("roundtrip_rt.a");
-                        match run_rel2elf(&rt_lib, &rt_a) {
+                        match run_rel2elf(&rt_lib, &rt_a, target) {
                             Ok(()) => Some(rt_a),
                             Err(e) => {
                                 for test_file in &tests {
@@ -1049,7 +1051,7 @@ fn run_group_rel_ar_roundtrip(
     let rt_lib_path = paths.rt_lib(target);
     let roundtripped_lib = if rt_lib_path.exists() {
         let rt_a = tmp_ar.join("roundtrip_rt.a");
-        match run_rel2elf(&rt_lib_path, &rt_a) {
+        match run_rel2elf(&rt_lib_path, &rt_a, target) {
             Ok(()) => {
                 let rt_lib = tmp_ar.join("roundtrip_rt.lib");
                 match run_elf2rel(&rt_a, &rt_lib) {

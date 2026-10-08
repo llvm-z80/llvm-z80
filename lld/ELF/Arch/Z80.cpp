@@ -12,8 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "InputFiles.h"
 #include "Symbols.h"
 #include "Target.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/Endian.h"
 
@@ -28,6 +30,7 @@ namespace {
 class Z80 final : public TargetInfo {
 public:
   Z80(Ctx &);
+  uint32_t calcEFlags() const override;
   RelExpr getRelExpr(RelType type, const Symbol &s,
                      const uint8_t *loc) const override;
   void relocate(uint8_t *loc, const Relocation &rel,
@@ -41,6 +44,73 @@ Z80::Z80(Ctx &ctx) : TargetInfo(ctx) {
   defaultImageBase = 0;
   defaultMaxPageSize = 1;
   defaultCommonPageSize = 1;
+}
+
+// Whether an object for CPU `inner` may be linked into a program for CPU
+// `outer`, following the binutils rules.
+static bool linksInto(uint32_t inner, uint32_t outer) {
+  if (inner == outer)
+    return true;
+  switch (outer) {
+  case EF_Z80_MACH_Z180:
+  case EF_Z80_MACH_R800:
+  case EF_Z80_MACH_Z80N:
+    return inner == EF_Z80_MACH_Z80;
+  case EF_Z80_MACH_EZ80_Z80:
+    return inner == EF_Z80_MACH_Z80 || inner == EF_Z80_MACH_Z180;
+  case EF_Z80_MACH_EZ80_ADL:
+    return inner == EF_Z80_MACH_Z80 || inner == EF_Z80_MACH_Z180 ||
+           inner == EF_Z80_MACH_EZ80_Z80;
+  default:
+    return false;
+  }
+}
+
+static std::string cpuName(uint32_t mach) {
+  switch (mach) {
+  case EF_Z80_MACH_Z80:
+    return "Z80";
+  case EF_Z80_MACH_Z180:
+    return "Z180";
+  case EF_Z80_MACH_R800:
+    return "R800";
+  case EF_Z80_MACH_EZ80_Z80:
+    return "eZ80";
+  case EF_Z80_MACH_EZ80_ADL:
+    return "eZ80 ADL";
+  case EF_Z80_MACH_SM83:
+    return "SM83";
+  case EF_Z80_MACH_Z80N:
+    return "Z80N";
+  default:
+    return "CPU 0x" + utohexstr(mach);
+  }
+}
+
+static uint32_t getMach(InputFile *f) {
+  uint32_t mach = cast<ObjFile<ELF32LE>>(f)->getObj().getHeader().e_flags &
+                  EF_Z80_MACH_MSK;
+  // binutils reads an object without a CPU value as plain Z80.
+  return mach ? mach : EF_Z80_MACH_Z80;
+}
+
+// The output takes the most capable input CPU, and every input must be
+// linkable with it.
+uint32_t Z80::calcEFlags() const {
+  uint32_t mach = 0;
+  InputFile *machFile = nullptr;
+  for (InputFile *f : ctx.objectFiles) {
+    uint32_t objMach = getMach(f);
+    if (!mach || linksInto(mach, objMach)) {
+      mach = objMach;
+      machFile = f;
+    } else if (!linksInto(objMach, mach)) {
+      ErrAlways(ctx) << f << ": cannot link " << cpuName(objMach)
+                     << " code with " << cpuName(mach) << " code from "
+                     << machFile;
+    }
+  }
+  return mach ? mach : EF_Z80_MACH_Z80;
 }
 
 RelExpr Z80::getRelExpr(RelType type, const Symbol &s,
