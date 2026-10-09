@@ -1801,6 +1801,10 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::ASHR16_VAR: return IsSM83 ? 11 : 10;
     // LD A,B; OR C; JR Z,e; LDIR
     case Z80::LDIR_GUARDED: return 6;
+    // Tail calls: JP nn, JP (IY), JP (HL).
+    case Z80::TCRETURN_nn: return 3;
+    case Z80::TCRETURN_IY: return 2;
+    case Z80::TCRETURN_HL: return 1;
     // Callee-cleanup return.  The sequences are in expandPostRAPseudoImpl;
     // SM83 needs one ADD SP,e per 127 bytes because the displacement is
     // signed 8-bit.

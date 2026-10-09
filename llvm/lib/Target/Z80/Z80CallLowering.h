@@ -160,6 +160,12 @@ protected:
     return decodeZ80CC(CC).usesZ88dkRegs() ? CCRegs0 : CCRegs;
   }
 
+  /// Whether \p Info can become a jump, given the stack bytes its arguments
+  /// take and the registers \p ArgRegs they go in.
+  bool canLowerTailCall(MachineFunction &MF, const CallLoweringInfo &Info,
+                        unsigned StackArgBytes,
+                        ArrayRef<Register> ArgRegs) const;
+
 public:
   Z80CallLoweringCommon(const TargetLowering *TL, CallingConvRegs Regs,
                         CallingConvRegs Regs0)

@@ -295,6 +295,33 @@ Z80InstructionSelector::countFoldablePatternsInBB(MachineBasicBlock &MBB,
   return Count;
 }
 
+// Whether a runtime call computing \p DstReg can be the function's jump, as a
+// libcall in tail position would be: all that follows \p MI is the copy of
+// \p DstReg into \p RetReg and a plain RET reading only that.
+static bool isInTailPosition(MachineInstr &MI, Register DstReg,
+                             Register RetReg) {
+  const Function &F = MI.getMF()->getFunction();
+  if (F.getFnAttribute("disable-tail-calls").getValueAsString() == "true")
+    return false;
+  auto End = MI.getParent()->instr_end();
+  auto Copy = next_nodbg(MI.getIterator(), End);
+  if (Copy == End || !Copy->isCopy() ||
+      Copy->getOperand(0).getReg() != RetReg ||
+      Copy->getOperand(1).getReg() != DstReg)
+    return false;
+  auto Ret = next_nodbg(Copy, End);
+  return Ret != End && Ret->getOpcode() == Z80::RET &&
+         Ret->getNumOperands() == 1 && Ret->getOperand(0).getReg() == RetReg;
+}
+
+// Erase \p MI and the copy and RET after it, which the tail call built in
+// front of it replaces.
+static void endBlockAtTailCall(MachineInstr &MI) {
+  MachineBasicBlock &MBB = *MI.getParent();
+  MBB.getParent()->getFrameInfo().setHasTailCall();
+  MBB.erase(MachineBasicBlock::iterator(MI), MBB.end());
+}
+
 // Emit a runtime library call for 16-bit binary ops.
 // Z80:  HL=Src1, DE=Src2, result in DE  (__sdcccall(1))
 // SM83: DE=Src1, BC=Src2, result in BC  (__sdcccall(1))
@@ -325,32 +352,39 @@ bool Z80InstructionSelector::selectRuntimeLibCall16(MachineInstr &MI,
                                   false));
   GlobalValue *GV = cast<GlobalValue>(Func.getCallee());
 
+  // The helpers return where a 16-bit result leaves the function.
+  Register RetReg = STI.hasSM83() ? Z80::BC : Z80::DE;
+  bool IsTail = isInTailPosition(MI, DstReg, RetReg);
+  unsigned CallOpc = IsTail ? Z80::TCRETURN_nn : Z80::CALL_nn;
+
   if (STI.hasSM83()) {
     // SM83: 1st arg→DE, 2nd arg→BC, return→BC
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
         .addReg(Src1Reg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::BC)
         .addReg(Src2Reg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(CallOpc))
         .addGlobalAddress(GV)
         .addUse(Z80::DE, RegState::Implicit)
         .addUse(Z80::BC, RegState::Implicit);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-        .addReg(Z80::BC);
   } else {
     // Z80: 1st arg→HL, 2nd arg→DE, return→DE
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
         .addReg(Src1Reg);
     BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
         .addReg(Src2Reg);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(CallOpc))
         .addGlobalAddress(GV)
         .addUse(Z80::HL, RegState::Implicit)
         .addUse(Z80::DE, RegState::Implicit);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-        .addReg(Z80::DE);
   }
 
+  if (IsTail) {
+    endBlockAtTailCall(MI);
+    return true;
+  }
+  BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
+      .addReg(RetReg);
   MI.eraseFromParent();
   return true;
 }
@@ -462,12 +496,17 @@ bool Z80InstructionSelector::selectUDivMod8(MachineInstr &MI, bool IsDiv) {
         MF.getSubtarget<Z80Subtarget>().hasSM83() ? Z80::E : Z80::L;
     BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DivisorReg)
         .addReg(Src2Reg);
-    BuildMI(MBB, MI, DL, TII.get(Z80::CALL_nn))
+    bool IsTail = isInTailPosition(MI, DstReg, Z80::A);
+    BuildMI(MBB, MI, DL, TII.get(IsTail ? Z80::TCRETURN_nn : Z80::CALL_nn))
         .addGlobalAddress(GV)
         .addUse(Z80::A, RegState::Implicit)
         .addUse(DivisorReg, RegState::Implicit);
-    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::A);
 
+    if (IsTail) {
+      endBlockAtTailCall(MI);
+      return true;
+    }
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::A);
     MI.eraseFromParent();
     return true;
   }

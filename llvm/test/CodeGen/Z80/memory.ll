@@ -54,7 +54,7 @@ define i16 @sext_i8_to_i16(i8 %a) {
 ; Test: 16-bit multiply uses library call
 define i16 @mul16(i16 %a, i16 %b) {
 ; CHECK-LABEL: _mul16:
-; CHECK:       call ___mulhi3
+; CHECK:       jp ___mulhi3
   %c = mul i16 %a, %b
   ret i16 %c
 }
