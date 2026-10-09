@@ -65,7 +65,7 @@ fn address_bytes_keep_their_half_and_addend() {
         [
             reloc(1, Field::AddrByte(1), false, 300),
             reloc(4, Field::AddrByte(0), false, 300),
-            reloc(7, Field::Byte, true, 0),
+            reloc(7, Field::AddrByte(0), true, 0),
         ]
     );
 }
@@ -121,10 +121,7 @@ fn relocations_survive_a_round_trip() {
     let rel = asxxxx::parse(REL).unwrap();
     let elf = sdcconv::rel_to_elf(&rel).unwrap();
     let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
-    let mut expected = rel.areas[0].relocs.clone();
-    // ELF has one PC-relative byte, however sdas wrote the field.
-    expected[2].field = Field::Byte;
-    assert_eq!(back.areas[0].relocs, expected);
+    assert_eq!(back.areas[0].relocs, rel.areas[0].relocs);
     assert_eq!(back.areas[0].data, rel.areas[0].data);
 }
 
@@ -198,7 +195,7 @@ R 00 00 00 00 0F 05 00 00
 ";
     let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
     let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
-    let mut expected = reloc(1, Field::Byte, true, 0x10);
+    let mut expected = reloc(1, Field::AddrByte(0), true, 0x10);
     expected.target = Target::Absolute;
     assert_eq!(back.areas[0].relocs, [expected]);
 }

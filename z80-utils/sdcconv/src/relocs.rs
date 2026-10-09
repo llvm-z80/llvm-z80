@@ -49,9 +49,11 @@ const TABLE: &[Row] = &[
     },
     row(R_Z80_ADDR16_LO, Field::AddrByte(0)),
     row(R_Z80_ADDR16_HI, Field::AddrByte(1)),
+    // As sdas writes a jr target, so the whole value reaches the linker's
+    // range check.
     Row {
         pc_relative: true,
-        ..row(R_Z80_PCREL_8, Field::Byte)
+        ..row(R_Z80_PCREL_8, Field::AddrByte(0))
     },
     Row {
         pc_relative: true,
@@ -81,9 +83,9 @@ pub fn to_elf(reloc: &Reloc, hram: bool) -> Option<&'static Row> {
     if reloc.unsigned || reloc.page != Page::None {
         return None;
     }
-    // sdas writes a jr target as the low byte of an address-wide field.
+    // A PC-relative byte may also come without the address-width flag.
     let field = match reloc.field {
-        Field::AddrByte(0) if reloc.pc_relative => Field::Byte,
+        Field::Byte if reloc.pc_relative => Field::AddrByte(0),
         field => field,
     };
     let fits = |r: &&Row| r.field == field && r.pc_relative == reloc.pc_relative;
