@@ -236,8 +236,17 @@ const T_LINE_VALUES: usize = 16;
 /// symbol may take its name.
 pub const ABS_SYMBOL: &str = ".__.ABS.";
 
-/// Whether `name` can name an area or a symbol, which the parser reads as one
-/// word.
-pub fn valid_name(name: &str) -> bool {
+/// Whether `name` can name a symbol, which the linker reads up to the next
+/// space.
+pub fn valid_symbol_name(name: &str) -> bool {
     !name.is_empty() && !name.contains(|c: char| c.is_whitespace() || c.is_control())
+}
+
+/// Whether `name` can name an area or a module, which the linker reads only as
+/// far as letters, digits, `$`, `.`, `_` and non-ASCII characters go.
+pub fn valid_area_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "$._".contains(c) || !c.is_ascii())
 }
