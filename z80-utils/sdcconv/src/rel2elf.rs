@@ -4,7 +4,7 @@ use object::write::StringId;
 use object::write::elf::{FileHeader, Rel, SectionHeader, SectionIndex, Sym, Writer};
 
 use crate::Error;
-use crate::areas::{may_be_bss, section_for_area};
+use crate::areas::{INITIALIZED, INITIALIZER, section_for_area};
 use crate::relocs::{EM_Z80, to_elf};
 
 /// Symbols from SDCC libraries that clash with Rust's compiler_builtins,
@@ -30,35 +30,53 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         if area.is_absolute() { area.addr } else { 0 }
     };
 
+    let find = |name| obj.areas.iter().position(|a| a.name == name);
+    let initialized = find(INITIALIZED);
+    let initializer = find(INITIALIZER);
+    if let Some(i) = initialized
+        && (!obj.areas[i].data.is_empty() || !obj.areas[i].relocs.is_empty())
+    {
+        return Err(Error::new(format!("{INITIALIZED} has contents of its own")));
+    }
+    let size = |a: Option<usize>| a.map_or(0, |a| obj.areas[a].size);
+    if size(initialized) != size(initializer) {
+        return Err(Error::new(format!(
+            "{INITIALIZED} and {INITIALIZER} differ in size"
+        )));
+    }
+
     let mut sections: Vec<Section> = Vec::new();
     let mut section_of = vec![None; obj.areas.len()];
     for (a, area) in obj.areas.iter().enumerate() {
-        let mut data = vec![0; area.size as usize];
-        for chunk in &area.data {
-            let end = chunk.end() as usize;
-            if end > data.len() {
-                data.resize(end, 0);
-            }
-            data[chunk.offset as usize..end].copy_from_slice(&chunk.bytes);
-        }
-        let start = base(a) as usize;
-        if start != 0 {
-            let end = (start + area.size as usize).min(data.len());
-            data = data.get(start..end).map_or(Vec::new(), <[u8]>::to_vec);
-        }
-        if data.is_empty() && area.relocs.is_empty() && area.size == 0 {
+        // Initialized data is one section, holding the bytes of
+        // `_INITIALIZER` and the symbols of `_INITIALIZED`.
+        let paired = [initialized, initializer].contains(&Some(a));
+        let contents = if paired { initializer } else { Some(a) };
+        if paired && section_of[a].is_some() {
             continue;
         }
-        let nobits =
-            may_be_bss(&area.name) && area.relocs.is_empty() && data.iter().all(|&b| b == 0);
-        let (name, flags) = section_for_area(&area.name);
-        section_of[a] = Some(sections.len());
+        let Some(contents) = contents else {
+            continue;
+        };
+        let source = &obj.areas[contents];
+        let data = layout(source, base(contents));
+        if data.is_empty() && source.relocs.is_empty() && source.size == 0 {
+            continue;
+        }
+        let empty = source.relocs.is_empty() && data.iter().all(|&b| b == 0);
+        let (name, sh_type, flags) = section_for_area(&area.name, empty);
+        let index = Some(sections.len());
+        section_of[a] = index;
+        if paired {
+            section_of[initialized.unwrap_or(a)] = index;
+            section_of[contents] = index;
+        }
         sections.push(Section {
-            area: a,
+            area: contents,
             name: name.to_string(),
-            nobits,
+            nobits: sh_type == elf::SHT_NOBITS,
             flags,
-            addr: if area.is_absolute() { area.addr } else { 0 },
+            addr: if source.is_absolute() { source.addr } else { 0 },
             data,
             relocs: Vec::new(),
         });
@@ -108,6 +126,24 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
     }
 
     write_elf(obj, &sections, &section_of, base)
+}
+
+/// An area's contents as the linker lays them out, starting at `base`.
+fn layout(area: &asxxxx::Area, base: u32) -> Vec<u8> {
+    let mut data = vec![0; area.size as usize];
+    for chunk in &area.data {
+        let end = chunk.end() as usize;
+        if end > data.len() {
+            data.resize(end, 0);
+        }
+        data[chunk.offset as usize..end].copy_from_slice(&chunk.bytes);
+    }
+    let start = base as usize;
+    if start == 0 {
+        return data;
+    }
+    let end = (start + area.size as usize).min(data.len());
+    data.get(start..end).map_or(Vec::new(), <[u8]>::to_vec)
 }
 
 /// The addend of a reference to an area: an absolute area's references hold
