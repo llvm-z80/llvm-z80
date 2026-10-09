@@ -87,7 +87,7 @@ R 00 00 00 00 0F 05 01 00 02 0A 01 00 06 0C 01 00
 
 #[test]
 fn sdas_relocations_become_lld_ones() {
-    let elf = sdcconv::rel_to_elf(&asxxxx::parse(REL).unwrap()).unwrap();
+    let elf = sdcconv::rel_to_elf(&asxxxx::parse(REL).unwrap()).unwrap().0;
     let elf = ElfFile32::<LittleEndian>::parse(&*elf).unwrap();
     let text = elf.section_by_name(".text").unwrap();
     let relocs: Vec<(u64, u32, i64, String)> = text
@@ -119,7 +119,7 @@ fn sdas_relocations_become_lld_ones() {
 #[test]
 fn relocations_survive_a_round_trip() {
     let rel = asxxxx::parse(REL).unwrap();
-    let elf = sdcconv::rel_to_elf(&rel).unwrap();
+    let elf = sdcconv::rel_to_elf(&rel).unwrap().0;
     let back = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     assert_eq!(back.areas[0].relocs, rel.areas[0].relocs);
     assert_eq!(back.areas[0].data, rel.areas[0].data);
@@ -193,7 +193,7 @@ A _CODE size 2 flags 0 addr 0
 T 00 00 00 00 18 10 00 00 00
 R 00 00 00 00 0F 05 00 00
 ";
-    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
+    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap().0;
     let back = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     let mut expected = reloc(1, Field::AddrByte(0), true, 0x10);
     expected.target = Target::Absolute;

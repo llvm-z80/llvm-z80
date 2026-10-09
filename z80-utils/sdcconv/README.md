@@ -58,6 +58,14 @@ rel2elf maps the same areas back, writing the `_INITIALIZED` and
 `_INITIALIZER` pair as one `.data` section, and keeps the name of any other
 area, adding a leading `_` if it lacks one.
 
+An absolute area, such as one SDCC writes for `__at` data, becomes a section
+that the linker script has to place at the area's address, since lld ignores
+the address an object gives a section. rel2elf warns about each one.
+
+```
+_CABS0 (0x0100) : { KEEP(*(_CABS0)) } > ROM
+```
+
 A section named `_DATA`, `_BSS`, `_INITIALIZED`, `_INITIALIZER`, `_CABS` or
 `_DABS` is refused, because its contents would be lost or misplaced there. The
 other SDCC areas, such as `_HOME`, can be named directly.

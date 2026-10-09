@@ -32,8 +32,9 @@ struct Section {
     relocs: Vec<Rel>,
 }
 
-/// Convert an ASxxxx object to a Z80 ELF relocatable object.
-pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
+/// Convert an ASxxxx object to a Z80 ELF relocatable object. Also returns
+/// warnings about sections the linker cannot place by itself.
+pub fn rel_to_elf(obj: &Object) -> Result<(Vec<u8>, Vec<String>), Error> {
     // An absolute area places its contents and symbols at their addresses;
     // the section starts at the area's address instead.
     let base = |a: usize| {
@@ -80,6 +81,7 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         }
     }
 
+    let mut warnings = Vec::new();
     let mut sections: Vec<Section> = Vec::new();
     let mut section_of = vec![None; obj.areas.len()];
     for (a, area) in obj.areas.iter().enumerate() {
@@ -97,6 +99,13 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         }
         let empty = source.relocs.is_empty() && data.iter().all(|&b| b == 0);
         let (name, sh_type, flags) = section_for_area(&area.name, empty);
+        // lld ignores the address an object gives a section.
+        if source.is_absolute() {
+            warnings.push(format!(
+                "{name} must be placed at {:#06X} by the linker script",
+                source.addr
+            ));
+        }
         let index = Some(sections.len());
         section_of[a] = index;
         if paired {
@@ -166,7 +175,7 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         }
     }
 
-    write_elf(obj, &sections, &section_of, base)
+    Ok((write_elf(obj, &sections, &section_of, base)?, warnings))
 }
 
 /// An area's contents as the linker lays them out, starting at `base`.

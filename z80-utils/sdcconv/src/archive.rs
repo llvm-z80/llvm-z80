@@ -53,7 +53,7 @@ pub fn lib_to_elf_archive(data: &[u8], rename_libc: bool) -> Result<(Vec<u8>, Ve
         if rename_libc {
             rename_libc_symbols(&mut obj);
         }
-        Ok((rel_to_elf(&obj)?, Vec::new()))
+        rel_to_elf(&obj)
     })
 }
 

@@ -24,7 +24,7 @@ R 00 00 04 00
 
 #[test]
 fn areas_become_the_sections_their_contents_need() {
-    let elf = sdcconv::rel_to_elf(&asxxxx::parse(REL).unwrap()).unwrap();
+    let elf = sdcconv::rel_to_elf(&asxxxx::parse(REL).unwrap()).unwrap().0;
     let elf = ElfFile32::<LittleEndian>::parse(&*elf).unwrap();
     let sections: Vec<(&str, u32, u64, Vec<u8>)> = elf
         .sections()
@@ -114,7 +114,7 @@ A _INITIALIZED size 0 flags 0 addr 0
 T 00 00 00 00 00 00 00 00 00 00
 R 00 00 00 00 02 04 01 00 00 06 01 00 00 08 02 00
 ";
-    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
+    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap().0;
     let back = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     let area_name = |a: Option<usize>| a.map(|a| back.areas[a].name.as_str());
     assert_eq!(area_name(back.symbols[0].def.unwrap().area), Some("_DATA"));
@@ -144,7 +144,7 @@ R 00 00 00 00
 T 00 00 00 00 02
 R 00 00 01 00
 ";
-    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
+    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap().0;
     let back = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     let names: Vec<&str> = back.areas.iter().map(|a| a.name.as_str()).collect();
     assert_eq!(names, ["_.note", "_.text.home"]);
@@ -210,5 +210,23 @@ fn a_member_that_cannot_be_converted_fails_the_library() {
     assert_eq!(
         err.to_string(),
         "bad.rel: a big-endian object is not a Z80 one"
+    );
+}
+
+#[test]
+fn absolute_areas_are_left_to_the_linker_script() {
+    let rel = "\
+XL4
+H 1 areas 2 global symbols
+S .__.ABS. Def00000000
+A _CABS0 size 2 flags 8 addr 100
+S _tag Def00000100
+T 00 01 00 00 01 02
+R 00 00 00 00
+";
+    let (_, warnings) = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
+    assert_eq!(
+        warnings,
+        ["_CABS0 must be placed at 0x0100 by the linker script"]
     );
 }

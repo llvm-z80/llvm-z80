@@ -24,13 +24,10 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let data = std::fs::read(&args.input)
         .with_context(|| format!("cannot read '{}'", args.input.display()))?;
-    let (converted, extension) = match FileKind::parse(&*data) {
+    let (converted, warnings, extension) = match FileKind::parse(&*data) {
         Ok(FileKind::Archive) => {
             let (archive, warnings) = sdcconv::lib_to_elf_archive(&data, args.rename_sdcc_libc)?;
-            for warning in warnings {
-                eprintln!("warning: {warning}");
-            }
-            (archive, "a")
+            (archive, warnings, "a")
         }
         _ => {
             let text = std::str::from_utf8(&data).with_context(|| {
@@ -43,9 +40,13 @@ fn main() -> anyhow::Result<()> {
             if args.rename_sdcc_libc {
                 sdcconv::rename_libc_symbols(&mut obj);
             }
-            (sdcconv::rel_to_elf(&obj)?, "o")
+            let (elf, warnings) = sdcconv::rel_to_elf(&obj)?;
+            (elf, warnings, "o")
         }
     };
+    for warning in warnings {
+        eprintln!("warning: {warning}");
+    }
     let output = args
         .output
         .unwrap_or_else(|| args.input.with_extension(extension));
