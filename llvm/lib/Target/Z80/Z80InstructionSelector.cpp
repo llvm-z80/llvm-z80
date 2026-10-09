@@ -57,7 +57,7 @@ private:
   bool selectMulByConst(MachineInstr &MI);
   bool selectUDivMod8(MachineInstr &MI, bool IsDiv);
   bool selectSDivMod8(MachineInstr &MI, bool IsDiv);
-  bool tryNarrowSDivMod16(MachineInstr &MI, bool IsDiv);
+  bool tryNarrowSRem16(MachineInstr &MI);
   bool emitFusedCompareAndBranch(MachineBasicBlock &MBB, MachineInstr &MI,
                                  MachineInstr &CmpMI, MachineRegisterInfo &MRI);
   std::optional<Register> emitEqualityTest(MachineBasicBlock &MBB,
@@ -561,9 +561,10 @@ bool Z80InstructionSelector::selectSDivMod8(MachineInstr &MI, bool IsDiv) {
   return true;
 }
 
-// Try to narrow G_SDIV/G_SREM i16 to i8 when both operands are G_SEXT from i8.
+// Try to narrow G_SREM i16 to i8 when both operands are G_SEXT from i8.
 // Fallback for when G_TRUNC fold doesn't apply (i16 result used directly).
-bool Z80InstructionSelector::tryNarrowSDivMod16(MachineInstr &MI, bool IsDiv) {
+// G_SDIV is not narrowed here: -128 / -1 is 128, which no i8 quotient holds.
+bool Z80InstructionSelector::tryNarrowSRem16(MachineInstr &MI) {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
   MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -590,23 +591,22 @@ bool Z80InstructionSelector::tryNarrowSDivMod16(MachineInstr &MI, bool IsDiv) {
       MRI.getType(Orig2).getSizeInBits() != 8)
     return false;
 
-  // Under -Oz, let the normal __divhi3/__modhi3 path handle it.
+  // Under -Oz, let the normal __modhi3 path handle it.
   if (MF.getFunction().hasMinSize())
     return false;
 
   const DebugLoc &DL = MI.getDebugLoc();
 
-  // Inline 8-bit signed division, then sign-extend result to i16.
+  // Inline 8-bit signed remainder, then sign-extend result to i16.
   if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
       !RBI.constrainGenericRegister(Orig1, Z80::GR8RegClass, MRI) ||
       !RBI.constrainGenericRegister(Orig2, Z80::GR8RegClass, MRI))
     return false;
 
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::E).addReg(Orig2);
-  Register Quot =
-      emitAccUnary(MBB, MI, DL, IsDiv ? Z80::SDIV8 : Z80::SMOD8, Orig1, MRI);
+  Register Rem = emitAccUnary(MBB, MI, DL, Z80::SMOD8, Orig1, MRI);
   // Sign-extend the 8-bit result to the 16-bit destination.
-  BuildMI(MBB, MI, DL, TII.get(Z80::SEXT_GR8_GR16), DstReg).addReg(Quot);
+  BuildMI(MBB, MI, DL, TII.get(Z80::SEXT_GR8_GR16), DstReg).addReg(Rem);
 
   MI.eraseFromParent();
   return true;
@@ -3857,8 +3857,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
   case TargetOpcode::G_SDIV:
     if (selectSDivMod8(MI, /*IsDiv=*/true))
       return true;
-    if (tryNarrowSDivMod16(MI, /*IsDiv=*/true))
-      return true;
     if (STI.inlineI16Runtime())
       return selectInline16(MI, Z80::SDIV16);
     return selectRuntimeLibCall16(MI, "__divhi3");
@@ -3873,7 +3871,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
   case TargetOpcode::G_SREM:
     if (selectSDivMod8(MI, /*IsDiv=*/false))
       return true;
-    if (tryNarrowSDivMod16(MI, /*IsDiv=*/false))
+    if (tryNarrowSRem16(MI))
       return true;
     if (STI.inlineI16Runtime())
       return selectInline16(MI, Z80::SMOD16);
