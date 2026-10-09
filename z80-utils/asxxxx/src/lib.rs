@@ -221,6 +221,12 @@ mod mode {
     pub const BIT: u16 = 0x400;
 }
 
+/// Where the contents of a `T` line must end: within the addresses the format
+/// can write, and within what a `u32` offset can reach.
+fn address_space(format: Format) -> u64 {
+    (1u64 << (8 * format.addr_bytes)).min(u64::from(u32::MAX))
+}
+
 /// Most values one `T` line may hold, address included. The linker cannot
 /// read a longer one.
 const T_LINE_VALUES: usize = 16;

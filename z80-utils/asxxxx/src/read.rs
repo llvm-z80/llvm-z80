@@ -2,7 +2,7 @@ use crate::raw::{self, Entry, Record, TextKind};
 use crate::write::symbol_order;
 use crate::{
     ABS_SYMBOL, Area, Chunk, Def, Error, Field, Object, Page, PageBase, PdkPart, Reloc, Symbol,
-    T_LINE_VALUES, Target, mode,
+    T_LINE_VALUES, Target, address_space, mode,
 };
 
 /// How a linker reads relocation fields. The Padauk linker merges every field
@@ -208,7 +208,8 @@ impl<'a> Decoder<'a> {
             }
             contents.extend_from_slice(&data[next..pos]);
             relocs.push(Reloc {
-                offset: addr + contents.len() as u32,
+                // From the start of the line, until the line is placed.
+                offset: contents.len() as u32,
                 field: shape.field,
                 pc_relative: e.mode & mode::PCR != 0,
                 unsigned: e.mode & mode::USGN != 0,
@@ -221,12 +222,19 @@ impl<'a> Decoder<'a> {
         }
         contents.extend_from_slice(&data[next..]);
 
+        let end = u64::from(addr) + contents.len() as u64;
+        if end > address_space(self.obj.format) {
+            let message = format!("T line at {addr:X} runs past the address space");
+            return Err(self.error(i, message));
+        }
         let area = &mut self.obj.areas[area];
         let base = if area.is_absolute() { area.addr } else { 0 };
-        let end = u64::from(addr) + contents.len() as u64;
         if !contents.is_empty() && (addr < base || end > u64::from(base) + u64::from(area.size)) {
             let message = format!("T line at {addr:X} lies outside {}", area.name);
             return Err(self.error(i, message));
+        }
+        for reloc in &mut relocs {
+            reloc.offset += addr;
         }
         area.relocs.extend(relocs);
         insert_chunk(&mut area.data, addr, contents).map_err(|m| self.error(i, m))
@@ -450,6 +458,11 @@ mod tests {
                 "T 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\nR 00 00 00 00\n",
                 5,
                 "T line holds more than 16 values",
+            ),
+            (
+                "T FF FF FF FF 00 00 00\nR 00 00 00 00\n",
+                5,
+                "T line at FFFFFFFF runs past the address space",
             ),
             (
                 "H 1 areas 1 global symbols\n",

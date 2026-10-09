@@ -1,7 +1,7 @@
 use crate::raw::{self, Entry, Record, TextKind};
 use crate::{
     ABS_SYMBOL, Area, Chunk, Error, Field, Object, Page, PdkPart, Reloc, T_LINE_VALUES, Target,
-    mode, valid_name,
+    address_space, mode, valid_name,
 };
 
 /// Write `obj` as the text of a `.rel` file.
@@ -157,6 +157,15 @@ impl Encoder<'_> {
         let room = T_LINE_VALUES - usize::from(addr_bytes);
         let mut next = 0;
         for chunk in &area.data {
+            if u64::from(chunk.offset) + chunk.bytes.len() as u64 > address_space(self.obj.format) {
+                return Err(Error::new(
+                    0,
+                    format!(
+                        "contents at {:X} in {} run past the address space",
+                        chunk.offset, area.name
+                    ),
+                ));
+            }
             let mut pos = chunk.offset;
             while pos < chunk.end() {
                 let (start, first) = (pos, next);
@@ -223,15 +232,6 @@ impl Encoder<'_> {
         let contents = |from: u32, to: u32| {
             &chunk.bytes[(from - chunk.offset) as usize..(to - chunk.offset) as usize]
         };
-        if u64::from(start) >> (8 * format.addr_bytes) != 0 {
-            return Err(Error::new(
-                0,
-                format!(
-                    "contents at {start:X} in {} lie beyond the address width",
-                    self.obj.areas[area_index].name
-                ),
-            ));
-        }
         let mut bytes = Vec::new();
         format.push_int(&mut bytes, i64::from(start), usize::from(format.addr_bytes));
         let mut entries = Vec::new();
@@ -393,7 +393,7 @@ fn miscounted(field: Field) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Area, Chunk, Def, Field, Object, Page, Reloc, Symbol, Target, write};
+    use crate::{Area, Chunk, Def, Field, Format, Object, Page, Reloc, Symbol, Target, write};
 
     #[test]
     fn layout() {
@@ -450,6 +450,30 @@ mod tests {
             T 0B 00 00 00 05 00 DD 86 3E 2C 01 00 00 C9 00 C9\n\
             R 00 00 00 00 00 04 00 00 8B 09 01 00\n";
         assert_eq!(write(&obj).unwrap(), expected);
+    }
+
+    #[test]
+    fn refuses_contents_past_the_address_space() {
+        let obj = Object {
+            format: Format {
+                addr_bytes: 2,
+                ..Format::default()
+            },
+            areas: vec![Area {
+                name: "_CODE".into(),
+                size: 0x10002,
+                data: vec![Chunk {
+                    offset: 0xFFFF,
+                    bytes: vec![0; 2],
+                }],
+                ..Area::default()
+            }],
+            ..Object::default()
+        };
+        assert_eq!(
+            write(&obj).unwrap_err().message,
+            "contents at FFFF in _CODE run past the address space"
+        );
     }
 
     #[test]
