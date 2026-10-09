@@ -152,7 +152,14 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
     }
 
     for section in sections.iter() {
-        if section.sh_type(endian) != elf::SHT_RELA {
+        let sh_type = section.sh_type(endian);
+        let applies = placed.contains_key(&(section.sh_info(endian) as usize));
+        if matches!(sh_type, elf::SHT_REL | elf::SHT_CREL) && applies {
+            return Err(Error::new(
+                "relocations without explicit addends are not supported",
+            ));
+        }
+        if sh_type != elf::SHT_RELA {
             continue;
         }
         let Some(&Placed {

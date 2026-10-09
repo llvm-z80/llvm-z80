@@ -1,7 +1,8 @@
 use asxxxx::{Chunk, Def, Object as Rel, Symbol};
-use object::write::{Object, SectionId, Symbol as ElfSymbol, SymbolSection};
+use object::write::{Object, Relocation, SectionId, Symbol as ElfSymbol, SymbolSection};
 use object::{
-    Architecture, BinaryFormat, Endianness, SectionKind, SymbolFlags, SymbolKind, SymbolScope,
+    Architecture, BinaryFormat, Endianness, RelocationFlags, SectionKind, SymbolFlags, SymbolKind,
+    SymbolScope,
 };
 
 fn new_object() -> Object<'static> {
@@ -174,6 +175,42 @@ fn names_a_rel_object_cannot_hold_are_refused() {
     assert_eq!(
         err.to_string(),
         "section \"_X-Y\" cannot be named in a .rel object"
+    );
+}
+
+#[test]
+fn relocations_without_addends_are_refused() {
+    // object writes REL relocations for i386.
+    let mut obj = new_object();
+    let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
+    obj.append_section_data(text, &[0x21, 0, 0], 1);
+    let x = obj.add_symbol(ElfSymbol {
+        name: b"_x".to_vec(),
+        value: 0,
+        size: 0,
+        kind: SymbolKind::Data,
+        scope: SymbolScope::Linkage,
+        weak: false,
+        section: SymbolSection::Undefined,
+        flags: SymbolFlags::None,
+    });
+    let flags = RelocationFlags::Elf { r_type: 3 };
+    obj.add_relocation(
+        text,
+        Relocation {
+            offset: 1,
+            symbol: x,
+            addend: 0,
+            flags,
+        },
+    )
+    .unwrap();
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "relocations without explicit addends are not supported"
     );
 }
 
