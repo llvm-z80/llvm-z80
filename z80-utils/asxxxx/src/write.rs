@@ -189,7 +189,7 @@ impl Encoder<'_> {
                             used += len;
                             pos += r.field.size();
                             next += 1;
-                            if miscounted(r.field) {
+                            if miscounted(r.field, addr_bytes) {
                                 break;
                             }
                         }
@@ -385,14 +385,18 @@ fn field_len(field: Field, addr_bytes: u8) -> usize {
     }
 }
 
-/// Whether the linker locates later fields on the line wrongly after this
-/// one: it hides two of a 24-bit field's bytes but only counts them when the
-/// address-width flag is set.
-fn miscounted(field: Field) -> bool {
-    matches!(
-        field,
-        Field::LongByte { bytx: false, .. } | Field::LongBit { bytx: false }
-    )
+/// Whether the linker counts a different number of bytes for `field` than it
+/// hides, which misplaces later fields on the line.
+fn miscounted(field: Field, addr_bytes: u8) -> bool {
+    match field {
+        // Two hidden bytes, counted as one less than the address width, and
+        // only with the address-width flag.
+        Field::LongByte { bytx, .. } | Field::LongBit { bytx } => !bytx || addr_bytes != 3,
+        // Three hidden bytes, counted as three plus one less than the
+        // address width.
+        Field::Pdk { part, .. } => part != PdkPart::Whole,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -454,6 +458,52 @@ mod tests {
             T 0B 00 00 00 05 00 DD 86 3E 2C 01 00 00 C9 00 C9\n\
             R 00 00 00 00 00 04 00 00 8B 09 01 00\n";
         assert_eq!(write(&obj).unwrap(), expected);
+    }
+
+    #[test]
+    fn starts_a_line_after_a_miscounted_field() {
+        // A 24-bit byte with the address-width flag, then a PC-relative byte.
+        let t_lines = |addr_bytes| {
+            let reloc = |offset, field, pc_relative| Reloc {
+                offset,
+                field,
+                pc_relative,
+                unsigned: false,
+                page: Page::None,
+                target: Target::Area(0),
+                addend: 0,
+            };
+            let obj = Object {
+                format: Format {
+                    addr_bytes,
+                    ..Format::default()
+                },
+                areas: vec![Area {
+                    name: "_CODE".into(),
+                    size: 2,
+                    data: vec![Chunk {
+                        offset: 0,
+                        bytes: vec![0; 2],
+                    }],
+                    relocs: vec![
+                        reloc(
+                            0,
+                            Field::LongByte {
+                                index: 0,
+                                bytx: true,
+                            },
+                            false,
+                        ),
+                        reloc(1, Field::Byte, true),
+                    ],
+                    ..Area::default()
+                }],
+                ..Object::default()
+            };
+            let text = write(&obj).unwrap();
+            text.lines().filter(|l| l.starts_with('T')).count()
+        };
+        assert_eq!((t_lines(3), t_lines(4)), (1, 2));
     }
 
     #[test]
