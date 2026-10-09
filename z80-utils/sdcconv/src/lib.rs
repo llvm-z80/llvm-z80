@@ -16,45 +16,23 @@ pub use archive::{elf_archive_to_lib, lib_to_elf_archive};
 pub use elf2rel::elf_to_rel;
 pub use rel2elf::{rel_to_elf, rename_libc_symbols};
 
-use std::fmt;
-
-#[derive(Debug)]
-pub struct Error(String);
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// The object holds something the other format cannot.
+    #[error("{0}")]
+    Convert(String),
+    #[error(transparent)]
+    Rel(#[from] asxxxx::Error),
+    #[error(transparent)]
+    ReadElf(#[from] object::read::Error),
+    #[error(transparent)]
+    WriteElf(#[from] object::write::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
 
 impl Error {
     fn new(message: impl Into<String>) -> Error {
-        Error(message.into())
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<asxxxx::Error> for Error {
-    fn from(e: asxxxx::Error) -> Error {
-        Error(e.to_string())
-    }
-}
-
-impl From<object::read::Error> for Error {
-    fn from(e: object::read::Error) -> Error {
-        Error(e.to_string())
-    }
-}
-
-impl From<object::write::Error> for Error {
-    fn from(e: object::write::Error) -> Error {
-        Error(e.to_string())
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Error {
-        Error(e.to_string())
+        Error::Convert(message.into())
     }
 }
