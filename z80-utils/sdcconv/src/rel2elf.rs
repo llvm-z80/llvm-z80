@@ -98,7 +98,7 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
                     .is_some_and(|a| obj.areas[a].name == "_HRAM"),
                 Target::Area(a) => obj.areas[a].name == "_HRAM",
             };
-            let r_type = to_elf(reloc, hram).ok_or_else(|| {
+            let row = to_elf(reloc, hram).ok_or_else(|| {
                 Error::new(format!(
                     "unsupported relocation at {:#06X} in {}",
                     reloc.offset, area.name
@@ -114,8 +114,8 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
             section.relocs.push(Rel {
                 r_offset: u64::from(reloc.offset - start),
                 r_sym,
-                r_type,
-                r_addend: i64::from(r_addend as i32),
+                r_type: row.r_type,
+                r_addend: i64::from((r_addend - row.pc_bias) as i32),
             });
             let at = (reloc.offset - start) as usize;
             let end = (at + reloc.field.size() as usize).min(section.data.len());

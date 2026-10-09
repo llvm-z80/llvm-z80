@@ -77,3 +77,19 @@ fn initialized_halves_must_match() {
         "_INITIALIZED and _INITIALIZER differ in size"
     );
 }
+
+#[test]
+fn other_ports_relocations_are_refused() {
+    // One byte of a 24-bit address, as the 8051 assembler writes it.
+    let rel = "\
+XL3
+H 1 areas 2 global symbols
+S .__.ABS. Def000000
+S _x Ref000000
+A CSEG size 1 flags 0 addr 0
+T 00 00 00 00 00 00
+R 00 00 00 00 F1 03 03 01 00
+";
+    let err = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap_err();
+    assert_eq!(err.to_string(), "unsupported relocation at 0x0000 in CSEG");
+}
