@@ -230,3 +230,26 @@ R 00 00 00 00
         ["_CABS0 must be placed at 0x0100 by the linker script"]
     );
 }
+
+#[test]
+fn zeros_in_an_area_keep_their_bytes() {
+    let rel = "\
+XL4
+H 2 areas 1 global symbols
+S .__.ABS. Def00000000
+A _TABLE size 4 flags 0 addr 0
+A _SPACE size 4 flags 0 addr 0
+T 00 00 00 00 00 00 00 00
+R 00 00 00 00
+";
+    let (elf, _) = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
+    let elf = ElfFile32::<LittleEndian>::parse(&*elf).unwrap();
+    let types: Vec<(&str, u32)> = ["_TABLE", "_SPACE"]
+        .into_iter()
+        .map(|name| {
+            let section = elf.section_by_name(name).unwrap();
+            (name, section.elf_section_header().sh_type.get(LittleEndian))
+        })
+        .collect();
+    assert_eq!(types, [("_TABLE", SHT_PROGBITS), ("_SPACE", SHT_NOBITS)]);
+}

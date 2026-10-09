@@ -97,7 +97,7 @@ pub fn rel_to_elf(obj: &Object) -> Result<(Vec<u8>, Vec<String>), Error> {
         if data.is_empty() && source.relocs.is_empty() && source.size == 0 && !needed[a] {
             continue;
         }
-        let empty = source.relocs.is_empty() && data.iter().all(|&b| b == 0);
+        let empty = source.data.is_empty() && source.relocs.is_empty();
         let (name, sh_type, flags) = section_for_area(&area.name, empty);
         // lld ignores the address an object gives a section.
         if source.is_absolute() {

@@ -60,7 +60,7 @@ pub fn area_for_section(name: &str, sh_type: u32, flags: u32) -> Place<'_> {
 }
 
 /// The section an area becomes, as name, type and flags. `empty` says the
-/// area holds nothing but zeros, so it can take no file space.
+/// area only reserves space and has no contents, so it can take no file space.
 pub fn section_for_area(area: &str, empty: bool) -> (String, u32, u32) {
     let code = SHF_ALLOC | SHF_EXECINSTR;
     let data = SHF_ALLOC | SHF_WRITE;
