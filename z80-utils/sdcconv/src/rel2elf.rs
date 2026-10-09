@@ -7,14 +7,13 @@ use crate::Error;
 use crate::areas::{ADDRESS_SPACE, INITIALIZED, INITIALIZER, section_for_area};
 use crate::relocs::{EM_Z80, to_elf};
 
-/// C library functions SDCC's libraries define with a calling convention of
-/// their own, which the LLVM-Z80 runtime defines too.
+/// C library functions that the LLVM-Z80 runtime defines and a library built
+/// with SDCC may define again, not always with the same calling convention.
 const LIBC_CLASHES: &[&str] = &["_memcpy", "_memmove", "_memset", "_strlen", "_strcmp"];
 
-/// Rename the C library functions that SDCC's libraries and the LLVM-Z80
-/// runtime both define to `<name>__sdcc`, definitions and references alike,
-/// so that an SDCC library keeps calling its own versions when linked
-/// alongside the LLVM-Z80 runtime.
+/// Rename the functions in `LIBC_CLASHES` to `<name>__sdcc`, definitions and
+/// references alike, so that a library built with SDCC keeps calling its own
+/// versions when linked alongside the LLVM-Z80 runtime.
 pub fn rename_libc_symbols(obj: &mut Object) {
     for symbol in &mut obj.symbols {
         if LIBC_CLASHES.contains(&symbol.name.as_str()) {
