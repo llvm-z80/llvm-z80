@@ -4,7 +4,7 @@ use object::write::StringId;
 use object::write::elf::{FileHeader, Rel, SectionHeader, SectionIndex, Sym, Writer};
 
 use crate::Error;
-use crate::areas::{INITIALIZED, INITIALIZER, MAX_AREA_SIZE, section_for_area};
+use crate::areas::{ADDRESS_SPACE, INITIALIZED, INITIALIZER, section_for_area};
 use crate::relocs::{EM_Z80, to_elf};
 
 /// C library functions SDCC's libraries define with a calling convention of
@@ -42,11 +42,14 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         if area.is_absolute() { area.addr } else { 0 }
     };
 
-    if let Some(area) = obj.areas.iter().find(|a| a.size > MAX_AREA_SIZE) {
-        return Err(Error::new(format!(
-            "{} is larger than any Z80 address space",
-            area.name
-        )));
+    if obj.format.big_endian {
+        return Err(Error::new("a big-endian object is not a Z80 one"));
+    }
+    let total: u64 = obj.areas.iter().map(|a| u64::from(a.size)).sum();
+    if total > u64::from(ADDRESS_SPACE) {
+        return Err(Error::new(
+            "the areas add up to more than any Z80 address space",
+        ));
     }
 
     let find = |name| obj.areas.iter().position(|a| a.name == name);

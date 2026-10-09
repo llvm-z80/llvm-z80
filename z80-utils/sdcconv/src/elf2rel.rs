@@ -6,7 +6,7 @@ use object::elf::{self, FileHeader32, Rela32};
 use object::read::elf::{FileHeader, Rela, SectionHeader, Sym};
 
 use crate::Error;
-use crate::areas::{AREAS, INITIALIZED, INITIALIZER, MAX_AREA_SIZE, Place, area_for_section};
+use crate::areas::{ADDRESS_SPACE, AREAS, INITIALIZED, INITIALIZER, Place, area_for_section};
 use crate::relocs::{EM_Z80, FromElf, from_elf};
 
 /// Convert a Z80 ELF relocatable object to an ASxxxx object named after
@@ -69,7 +69,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         };
         let offset = areas[area].size;
         let size = section.sh_size(endian);
-        if u64::from(offset) + u64::from(size) > u64::from(MAX_AREA_SIZE) {
+        if u64::from(offset) + u64::from(size) > u64::from(ADDRESS_SPACE) {
             return Err(Error::new(format!(
                 "{name} makes {} larger than any Z80 address space",
                 areas[area].name

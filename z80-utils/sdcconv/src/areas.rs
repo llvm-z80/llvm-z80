@@ -19,8 +19,8 @@ pub const AREAS: &[(&str, u32)] = &[
     ("_CABS", asxxxx::Area::ABS),
 ];
 
-/// The most an area may hold: the eZ80's 24-bit address space.
-pub const MAX_AREA_SIZE: u32 = 0x100_0000;
+/// The largest address space in the Z80 family, the eZ80's 24 bits.
+pub const ADDRESS_SPACE: u32 = 0x100_0000;
 
 pub const INITIALIZED: &str = "_INITIALIZED";
 pub const INITIALIZER: &str = "_INITIALIZER";
