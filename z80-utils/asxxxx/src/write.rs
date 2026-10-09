@@ -286,6 +286,8 @@ impl Encoder<'_> {
                 })
             }
             Target::Area(a) if a < self.obj.areas.len() => Ok(a as u16),
+            // `.__.ABS.`, always the first `S` line.
+            Target::Absolute => Ok(0),
             Target::Area(a) => Err(Error::new(
                 0,
                 format!("relocation against undefined area {a}"),
@@ -327,7 +329,7 @@ impl Encoder<'_> {
             Page::Zero(_) => PAG0,
             Page::Paged(_) => PAG,
         };
-        let sym = if matches!(r.target, Target::Symbol(_)) {
+        let sym = if matches!(r.target, Target::Symbol(_) | Target::Absolute) {
             SYM
         } else {
             0

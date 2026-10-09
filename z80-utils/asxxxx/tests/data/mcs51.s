@@ -25,3 +25,5 @@ flags:	.ds 2
 	clr flags[6]
 	jb flags[1], .
 	mov c, flags[7]
+	.area CSEG5 (CODE)
+	ajmp 0x0123

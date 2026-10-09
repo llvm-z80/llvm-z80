@@ -255,6 +255,12 @@ impl<'a> Decoder<'a> {
     fn target(&self, i: usize, e: Entry) -> Result<Target, Error> {
         let index = usize::from(e.index);
         if e.mode & mode::SYM == 0 {
+            // sdas8051 writes an 11-bit jump to a fixed address against area
+            // FFFF, which the linker reads as zero.
+            let jump11 = e.mode & (mode::BYTE | mode::BYTX | mode::MSB) == mode::BYTX;
+            if jump11 && e.index == 0xFFFF {
+                return Ok(Target::Absolute);
+            }
             return if index < self.obj.areas.len() {
                 Ok(Target::Area(index))
             } else {
@@ -263,7 +269,7 @@ impl<'a> Decoder<'a> {
         }
         match self.symbol_index.get(index) {
             Some(Some(s)) => Ok(Target::Symbol(*s)),
-            Some(None) => Err(self.error(i, format!("relocation against {ABS_SYMBOL}"))),
+            Some(None) => Ok(Target::Absolute),
             None => Err(self.error(i, format!("relocation against undefined symbol {index}"))),
         }
     }

@@ -1,5 +1,5 @@
 XH3
-H 5 areas 3 global symbols
+H 6 areas 3 global symbols
 M mcs51
 S extbit Ref000000
 S ext Ref000000
@@ -9,6 +9,7 @@ A CSEG size 1B flags 20 addr 0
 A CSEG2 size 4 flags 20 addr 0
 A BSEG_BYTES size 2 flags 0 addr 0
 A CSEG4 size 9 flags 20 addr 0
+A CSEG5 size 2 flags 20 addr 0
 T 00 00 00
 R 00 00 00 01
 T 00 00 00 00 00 01 00 10 11 80
@@ -33,3 +34,5 @@ T 00 00 00 D2 00 83 00 C2 00 86 00 20
 R 00 00 00 04 F1 21 04 00 03 F1 21 08 00 03
 T 00 00 05 00 81 00 FD A2 00 87 00
 R 00 00 00 04 F1 21 03 00 03 F1 21 08 00 03
+T 00 00 00 01 23 01
+R 00 00 00 05 08 03 FF FF

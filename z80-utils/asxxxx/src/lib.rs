@@ -172,6 +172,9 @@ pub struct PageBase {
 pub enum Target {
     Symbol(usize),
     Area(usize),
+    /// Address zero, which sdas uses for a PC-relative reference to a fixed
+    /// address.
+    Absolute,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
