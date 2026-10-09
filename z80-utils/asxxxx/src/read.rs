@@ -100,6 +100,12 @@ impl<'a> Decoder<'a> {
                     value,
                 } => {
                     if name == ABS_SYMBOL {
+                        // The linker takes its value like any symbol's, and
+                        // a fixed address is read as relative to zero.
+                        if !defined || *value != 0 || current_area.is_some() {
+                            let message = format!("{ABS_SYMBOL} is not zero ahead of the areas");
+                            return Err(self.error(i, message));
+                        }
                         self.symbol_index.push(None);
                         continue;
                     }
@@ -216,7 +222,11 @@ impl<'a> Decoder<'a> {
                 pc_relative: e.mode & mode::PCR != 0,
                 unsigned: e.mode & mode::USGN != 0,
                 page: self.page(e.mode).map_err(|m| self.error(i, m))?,
-                target: self.target(i, e)?,
+                target: if fixed_jump(e) {
+                    Target::Absolute
+                } else {
+                    self.target(i, e)?
+                },
                 addend: self.obj.format.read_int(&data[pos..pos + shape.value_len]),
             });
             contents.resize(contents.len() + shape.field.size() as usize, 0);
@@ -265,12 +275,6 @@ impl<'a> Decoder<'a> {
     fn target(&self, i: usize, e: Entry) -> Result<Target, Error> {
         let index = usize::from(e.index);
         if e.mode & mode::SYM == 0 {
-            // sdas8051 writes an 11-bit jump to a fixed address against area
-            // FFFF, which the linker reads as zero.
-            let jump11 = e.mode & (mode::BYTE | mode::BYTX | mode::MSB) == mode::BYTX;
-            if jump11 && e.index == 0xFFFF {
-                return Ok(Target::Absolute);
-            }
             return if index < self.obj.areas.len() {
                 Ok(Target::Area(index))
             } else {
@@ -365,6 +369,13 @@ impl<'a> Decoder<'a> {
         };
         Ok(shape)
     }
+}
+
+/// Whether `e` is an 11-bit jump to a fixed address, which sdas8051 writes
+/// against area FFFF and the linker reads as zero. Only `R` lines have these.
+fn fixed_jump(e: Entry) -> bool {
+    let jump11 = e.mode & (mode::BYTE | mode::BYTX | mode::MSB) == mode::BYTX;
+    jump11 && e.mode & mode::SYM == 0 && e.index == 0xFFFF
 }
 
 /// A field as it sits in a `T` line: `len` values, the first `value_len` of
@@ -467,6 +478,16 @@ mod tests {
                 "relocation entries out of order",
             ),
             (
+                "S .__.ABS. Def00000000\n",
+                5,
+                ".__.ABS. is not zero ahead of the areas",
+            ),
+            (
+                "T 00 00 00 00 00 00\nP 00 00 00 00 08 02 FF FF\n",
+                5,
+                "relocation against undefined area 65535",
+            ),
+            (
                 "T FF FF FF FF 00 00 00\nR 00 00 00 00\n",
                 5,
                 "T line at FFFFFFFF runs past the address space",
@@ -484,5 +505,10 @@ mod tests {
                 "{body:?}"
             );
         }
+        let err = parse("XL4\nH 0 areas 1 global symbols\nS .__.ABS. Def00000020\n").unwrap_err();
+        assert_eq!(
+            (err.line, err.message.as_str()),
+            (3, ".__.ABS. is not zero ahead of the areas")
+        );
     }
 }
