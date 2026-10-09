@@ -2,8 +2,7 @@
 members = [
     "test-runner",
     "asxxxx",
-    "elf2rel",
-    "rel2elf",
+    "sdcconv",
 ]
 default-members = ["test-runner"]
 resolver = "3"

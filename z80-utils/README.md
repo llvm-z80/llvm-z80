@@ -3,8 +3,8 @@
 Utilities and test infrastructure for LLVM-Z80. This workspace contains three crates:
 
 * **test-runner** — Dynamic test runner (compiles, emulates, verifies)
-* **elf2rel** — ELF → SDCC .rel object format converter
-* **rel2elf** — SDCC .rel → ELF object format converter
+* **sdcconv** — `elf2rel` and `rel2elf`, converters between Z80 ELF objects and SDCC .rel objects
+* **asxxxx** — Library for reading and writing ASxxxx (.rel) objects, used by sdcconv
 
 ## Prerequisites
 * Rust toolchain
@@ -29,7 +29,7 @@ These enable cross-linking between Clang-compiled (ELF) and SDCC-compiled (.rel)
 ### Usage
 
 ```bash
-cargo build -p elf2rel -p rel2elf --release
+cargo build -p sdcconv --release
 
 # Single object conversion
 elf2rel input.o output.rel
@@ -58,6 +58,14 @@ sdldz80 -i output crt0.rel my_module.rel sdcc_code.rel
 rel2elf sdcc_code.rel sdcc_code.o
 clang --target=z80 my_module.c sdcc_code.o -o output.elf
 ```
+
+### Symbol renaming
+
+SDCC libraries define C library functions such as `memset` and `memcpy` that
+also exist in the LLVM-Z80 runtime with a different calling convention.
+`rel2elf` renames `_memcpy`, `_memmove`, `_memset`, `_strlen` and `_strcmp`
+to `<name>__sdcc`, both definitions and references, so SDCC code keeps
+linking to its own versions.
 
 ## Test Runner
 

@@ -1,0 +1,86 @@
+use std::io::Cursor;
+use std::path::Path;
+
+use ar_archive_writer::{
+    ArchiveKind, DEFAULT_OBJECT_READER, NewArchiveMember, ObjectReader, write_archive_to_stream,
+};
+use object::read::archive::ArchiveFile;
+
+use crate::{Error, elf_to_rel, rel_to_elf};
+
+/// Lists the symbols a `.rel` member defines, for the archive's index.
+static REL_READER: ObjectReader = ObjectReader {
+    get_symbols: rel_symbols,
+    ..DEFAULT_OBJECT_READER
+};
+
+fn rel_symbols(
+    buf: &[u8],
+    f: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+) -> std::io::Result<bool> {
+    let Some(obj) = std::str::from_utf8(buf)
+        .ok()
+        .and_then(|t| asxxxx::parse(t).ok())
+    else {
+        return Ok(false);
+    };
+    for symbol in obj.symbols.iter().filter(|s| s.def.is_some()) {
+        f(symbol.name.as_bytes())?;
+    }
+    Ok(true)
+}
+
+/// Convert an archive of ELF objects to an SDCC library of `.rel` objects.
+/// Members that fail to convert are left out with a warning.
+pub fn elf_archive_to_lib(data: &[u8]) -> Result<Vec<u8>, Error> {
+    convert_members(data, "rel", &REL_READER, |name, data| {
+        let module = Path::new(name)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        Ok(asxxxx::write(&elf_to_rel(data, &module)?)?.into_bytes())
+    })
+}
+
+/// Convert an SDCC library of `.rel` objects to an archive of ELF objects.
+/// Members that fail to convert are left out with a warning.
+pub fn lib_to_elf_archive(data: &[u8]) -> Result<Vec<u8>, Error> {
+    convert_members(data, "o", &DEFAULT_OBJECT_READER, |_, data| {
+        let text = std::str::from_utf8(data).map_err(|_| Error::new("not a text object"))?;
+        rel_to_elf(&asxxxx::parse(text)?)
+    })
+}
+
+fn convert_members(
+    data: &[u8],
+    extension: &str,
+    reader: &'static ObjectReader,
+    convert: impl Fn(&str, &[u8]) -> Result<Vec<u8>, Error>,
+) -> Result<Vec<u8>, Error> {
+    let archive = ArchiveFile::parse(data)?;
+    let mut members = Vec::new();
+    for member in archive.members() {
+        let member = member?;
+        let name = String::from_utf8_lossy(member.name()).into_owned();
+        match convert(&name, member.data(data)?) {
+            Ok(converted) => members.push(NewArchiveMember {
+                buf: Box::new(converted),
+                object_reader: reader,
+                member_name: Path::new(&name)
+                    .with_extension(extension)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+                mtime: 0,
+                uid: 0,
+                gid: 0,
+                perms: 0o644,
+            }),
+            Err(e) => eprintln!("warning: skipping '{name}': {e}"),
+        }
+    }
+    let mut out = Cursor::new(Vec::new());
+    write_archive_to_stream(&mut out, &members, ArchiveKind::Gnu, false, None)?;
+    Ok(out.into_inner())
+}
