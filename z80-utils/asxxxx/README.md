@@ -45,12 +45,6 @@ covers, among others:
 Version 4 objects (`G` and `B` records), which the SDCC assemblers never write,
 are not supported.
 
-One sdld bug is not reproduced. After a 24-bit field without the
-address-width flag, sdld measures later PC-relative fields on the same `T` line
-from the wrong place. `Object` keeps the value the assembler meant, and `write`
-starts a new line after any field sdld miscounts, so a rewritten object links
-as intended where the original may not.
-
 ## Tests
 
 ```bash
