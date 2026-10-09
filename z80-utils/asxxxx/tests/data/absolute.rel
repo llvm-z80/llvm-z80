@@ -1,0 +1,14 @@
+XL4
+H 2 areas 3 global symbols
+M absolute
+S port Def00000040
+S .__.ABS. Def00000000
+A _CODE size 9 flags 0 addr 0
+A _DATA size 2 flags 0 addr 0
+S v Def00000000
+T 00 00 00 00 3A 40 00 21 40 00
+R 00 00 00 00
+T 00 00 00 00
+R 00 00 01 00
+T 06 00 00 00 22 00 00
+R 00 00 00 00 00 05 01 00
