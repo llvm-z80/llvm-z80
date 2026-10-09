@@ -110,6 +110,7 @@ pub enum TextKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
     /// The mode bits, with an escaped mode's extra bits above the low byte.
+    /// A `P` line holds only the low byte.
     pub mode: u16,
     /// Where the field starts in the `T` line, counting its address.
     pub pos: u8,
@@ -195,28 +196,21 @@ pub(crate) fn parse_lines(text: &str) -> Result<(Object, Vec<usize>), Error> {
             'M' => Record::Module(rest.to_string()),
             'O' => Record::Options(rest.to_string()),
             'A' => {
-                let mut fields = rest.split_whitespace();
-                let name = fields
-                    .next()
-                    .ok_or_else(|| err("area without a name".into()))?;
-                let (mut size, mut flags, mut addr) = (None, None, None);
-                while let Some(key) = fields.next() {
-                    let value = fields
-                        .next()
-                        .ok_or_else(|| err(format!("area attribute '{key}' without a value")))?;
-                    let value = Some(num(value)?);
-                    match key {
-                        "size" => size = value,
-                        "flags" => flags = value,
-                        "addr" => addr = value,
-                        _ => return Err(err(format!("unknown area attribute '{key}'"))),
+                // The linker reads the values by position, whatever names
+                // them, so only the order the assemblers write is accepted.
+                let fields: Vec<&str> = rest.split_whitespace().collect();
+                let (name, size, flags, addr) = match fields[..] {
+                    [name, "size", size, "flags", flags] => (name, size, flags, None),
+                    [name, "size", size, "flags", flags, "addr", addr] => {
+                        (name, size, flags, Some(addr))
                     }
-                }
+                    _ => return Err(err("malformed area line".into())),
+                };
                 Record::Area {
                     name: name.to_string(),
-                    size: size.ok_or_else(|| err("area without a size".into()))?,
-                    flags: flags.ok_or_else(|| err("area without flags".into()))?,
-                    addr,
+                    size: num(size)?,
+                    flags: num(flags)?,
+                    addr: addr.map(num).transpose()?,
                 }
             }
             'S' => {
@@ -292,8 +286,9 @@ fn text_record(bytes: Vec<u8>, kind: char, rel: &[u8], big_endian: bool) -> Resu
     let mut entries = Vec::new();
     let mut rest = rest;
     while !rest.is_empty() {
+        // The linker reads a P line's modes as single bytes.
         let (mode, tail) = match rest {
-            [m, low, tail @ ..] if u16::from(*m) & ESCAPE == ESCAPE => {
+            [m, low, tail @ ..] if kind == 'R' && u16::from(*m) & ESCAPE == ESCAPE => {
                 ((u16::from(*m) & 0x0F) << 8 | u16::from(*low), tail)
             }
             [m, tail @ ..] => (u16::from(*m), tail),
@@ -377,7 +372,8 @@ pub fn write(obj: &Object) -> String {
                 let mut rel = vec![0, 0];
                 push_word(&mut rel, *area, f.big_endian);
                 for e in entries {
-                    if e.mode > 0xFF || e.mode & ESCAPE == ESCAPE {
+                    let escape = *kind == TextKind::Relocate;
+                    if escape && (e.mode > 0xFF || e.mode & ESCAPE == ESCAPE) {
                         rel.extend([ESCAPE as u8 | (e.mode >> 8) as u8, e.mode as u8]);
                     } else {
                         rel.push(e.mode as u8);
@@ -428,7 +424,7 @@ fn push_word(buf: &mut Vec<u8>, v: u16, big_endian: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Format, Radix, parse};
+    use super::{Entry, Format, Radix, Record, parse, write};
 
     #[test]
     fn needs_the_format_then_the_header() {
@@ -450,6 +446,31 @@ mod tests {
                 "{text:?}"
             );
         }
+    }
+
+    #[test]
+    fn area_lines_keep_the_linkers_order() {
+        let head = "XL2\nH 1 areas 0 global symbols\n";
+        assert!(parse(&format!("{head}A _CODE size 1 flags 0 addr 0\n")).is_ok());
+        let err = parse(&format!("{head}A _CODE flags 0 size 1\n")).unwrap_err();
+        assert_eq!(err.message, "malformed area line");
+    }
+
+    #[test]
+    fn p_line_modes_are_single_bytes() {
+        let text = "XL2\nH 1 areas 0 global symbols\nA _CODE size 0 flags 0\n\
+                    T 00 00 00 00 00 00\nP 00 00 00 00 F1 02 00 00\n";
+        let obj = parse(text).unwrap();
+        let Some(Record::Text { entries, .. }) = obj.records.last() else {
+            panic!("no P line");
+        };
+        let entry = Entry {
+            mode: 0xF1,
+            pos: 2,
+            index: 0,
+        };
+        assert_eq!(entries[..], [entry]);
+        assert_eq!(write(&obj), text);
     }
 
     #[test]

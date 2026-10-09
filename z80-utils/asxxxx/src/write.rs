@@ -262,6 +262,10 @@ impl Encoder<'_> {
             .relocs
             .iter()
             .map(|&(pos, mode, target)| {
+                if mode > 0xFF {
+                    let message = format!("base page mode {mode:03X} does not fit a P line");
+                    return Err(Error::new(0, message));
+                }
                 Ok(Entry {
                     mode,
                     pos,

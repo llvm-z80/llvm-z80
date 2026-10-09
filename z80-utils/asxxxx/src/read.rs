@@ -191,12 +191,14 @@ impl<'a> Decoder<'a> {
         let addr = self.obj.format.read_uint(&bytes[..n]) as u32;
         let data = &bytes[n..];
 
-        let mut entries = entries.to_vec();
-        entries.sort_by_key(|e| e.pos);
+        // The linker places each field after the ones before it on the line.
+        if entries.windows(2).any(|w| w[1].pos <= w[0].pos) {
+            return Err(self.error(i, "relocation entries out of order"));
+        }
         let mut contents = Vec::with_capacity(data.len());
         let mut relocs = Vec::new();
         let mut next = 0;
-        for e in entries {
+        for &e in entries {
             let pos = usize::from(e.pos)
                 .checked_sub(n)
                 .ok_or_else(|| self.error(i, "relocation inside the T line address"))?;
@@ -458,6 +460,11 @@ mod tests {
                 "T 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\nR 00 00 00 00\n",
                 5,
                 "T line holds more than 16 values",
+            ),
+            (
+                "T 00 00 00 00 00 00 00 00\nR 00 00 00 00 00 06 00 00 00 04 00 00\n",
+                5,
+                "relocation entries out of order",
             ),
             (
                 "T FF FF FF FF 00 00 00\nR 00 00 00 00\n",
