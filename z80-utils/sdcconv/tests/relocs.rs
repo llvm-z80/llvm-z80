@@ -59,7 +59,7 @@ fn address_bytes_keep_their_half_and_addend() {
     let mut elf = obj.write().unwrap();
     elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
 
-    let rel = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let rel = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     assert_eq!(
         rel.areas[0].relocs,
         [
@@ -120,7 +120,7 @@ fn sdas_relocations_become_lld_ones() {
 fn relocations_survive_a_round_trip() {
     let rel = asxxxx::parse(REL).unwrap();
     let elf = sdcconv::rel_to_elf(&rel).unwrap();
-    let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let back = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     assert_eq!(back.areas[0].relocs, rel.areas[0].relocs);
     assert_eq!(back.areas[0].data, rel.areas[0].data);
 }
@@ -194,7 +194,7 @@ T 00 00 00 00 18 10 00 00 00
 R 00 00 00 00 0F 05 00 00
 ";
     let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
-    let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let back = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     let mut expected = reloc(1, Field::AddrByte(0), true, 0x10);
     expected.target = Target::Absolute;
     assert_eq!(back.areas[0].relocs, [expected]);

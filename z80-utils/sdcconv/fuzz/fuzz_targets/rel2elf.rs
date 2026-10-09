@@ -29,8 +29,8 @@ fuzz_target!(|data: &[u8]| {
     let Ok(elf) = sdcconv::rel_to_elf(&rel) else {
         return;
     };
-    let once = sdcconv::elf_to_rel(&elf, "m").expect("rel2elf output should convert back");
+    let (once, _) = sdcconv::elf_to_rel(&elf, "m").expect("rel2elf output should convert back");
     let elf = sdcconv::rel_to_elf(&once).expect("elf2rel output should convert again");
-    let twice = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let twice = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     assert_eq!(filled(once), filled(twice));
 });

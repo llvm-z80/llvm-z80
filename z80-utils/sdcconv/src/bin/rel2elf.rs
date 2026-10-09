@@ -41,7 +41,11 @@ fn main() -> ExitCode {
 fn convert(input: &str, output: Option<&str>, rename_libc: bool) -> Result<(), Box<dyn Error>> {
     let data = std::fs::read(input).map_err(|e| format!("cannot read '{input}': {e}"))?;
     let (converted, extension) = if data.starts_with(b"!<arch>\n") {
-        (sdcconv::lib_to_elf_archive(&data, rename_libc)?, "a")
+        let (archive, warnings) = sdcconv::lib_to_elf_archive(&data, rename_libc)?;
+        for warning in warnings {
+            eprintln!("warning: {warning}");
+        }
+        (archive, "a")
     } else {
         let text = std::str::from_utf8(&data)
             .map_err(|_| format!("'{input}' is neither a .rel object nor an archive"))?;

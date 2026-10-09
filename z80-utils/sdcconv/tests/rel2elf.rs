@@ -115,7 +115,7 @@ T 00 00 00 00 00 00 00 00 00 00
 R 00 00 00 00 02 04 01 00 00 06 01 00 00 08 02 00
 ";
     let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
-    let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let back = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     let area_name = |a: Option<usize>| a.map(|a| back.areas[a].name.as_str());
     assert_eq!(area_name(back.symbols[0].def.unwrap().area), Some("_DATA"));
     let targets: Vec<_> = back.areas[0]
@@ -145,7 +145,7 @@ T 00 00 00 00 02
 R 00 00 01 00
 ";
     let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
-    let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let back = sdcconv::elf_to_rel(&elf, "m").unwrap().0;
     let names: Vec<&str> = back.areas.iter().map(|a| a.name.as_str()).collect();
     assert_eq!(names, ["_.note", "_.text.home"]);
 }

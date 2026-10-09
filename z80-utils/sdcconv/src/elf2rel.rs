@@ -11,7 +11,8 @@ use crate::relocs::{EM_Z80, FromElf, from_elf};
 
 /// Convert a Z80 ELF relocatable object to an ASxxxx object named after
 /// `module`, with the characters a module name cannot hold replaced by `_`.
-pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
+/// Also returns warnings about what the object could not keep.
+pub fn elf_to_rel(data: &[u8], module: &str) -> Result<(Object, Vec<String>), Error> {
     let header = FileHeader32::<LE>::parse(data)?;
     let endian = header.endian()?;
     let machine = header.e_machine(endian);
@@ -106,6 +107,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         }
     }
 
+    let mut warnings = Vec::new();
     let mut model_symbols = Vec::new();
     let mut symbol_index: HashMap<usize, usize> = HashMap::new();
     for (i, sym) in symbols.iter().enumerate() {
@@ -142,7 +144,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
             },
         };
         if sym.st_bind() == elf::STB_WEAK {
-            eprintln!("warning: weak symbol '{name}' becomes an ordinary one");
+            warnings.push(format!("weak symbol '{name}' becomes an ordinary one"));
         }
         symbol_index.insert(i, model_symbols.len());
         model_symbols.push(Symbol {
@@ -257,7 +259,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         }
     }
 
-    Ok(keep_used_areas(areas, model_symbols, module))
+    Ok((keep_used_areas(areas, model_symbols, module), warnings))
 }
 
 /// The area named `name`, added after the others if there is none.

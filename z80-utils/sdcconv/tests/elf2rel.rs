@@ -26,7 +26,7 @@ fn convert(obj: Object) -> Rel {
     let mut elf = obj.write().unwrap();
     // object has no Z80 architecture, so write an i386 ELF32 and retarget it.
     elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
-    sdcconv::elf_to_rel(&elf, "m").unwrap()
+    sdcconv::elf_to_rel(&elf, "m").unwrap().0
 }
 
 fn def(name: &str, area: usize, value: u32) -> Symbol {
@@ -130,7 +130,16 @@ fn absolute_and_weak_symbols_carry_over() {
             flags: SymbolFlags::None,
         });
     }
-    let rel = convert(obj);
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    let (rel, warnings) = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    assert_eq!(
+        warnings,
+        [
+            "weak symbol '_hook' becomes an ordinary one",
+            "weak symbol '_maybe' becomes an ordinary one"
+        ]
+    );
     let symbol = |name: &str, def| Symbol {
         name: name.to_string(),
         def,
@@ -235,7 +244,7 @@ fn module_names_keep_only_what_the_linker_reads() {
     obj.append_section_data(text, &[0xC9], 1);
     let mut elf = obj.write().unwrap();
     elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
-    let rel = sdcconv::elf_to_rel(&elf, "my-file 2").unwrap();
+    let rel = sdcconv::elf_to_rel(&elf, "my-file 2").unwrap().0;
     assert_eq!(rel.name.as_deref(), Some("my_file_2"));
 }
 
