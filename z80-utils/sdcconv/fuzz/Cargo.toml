@@ -1,0 +1,30 @@
+[package]
+name = "sdcconv-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+asxxxx = { path = "../../asxxxx" }
+libfuzzer-sys = "0.4"
+sdcconv = { path = ".." }
+
+# Kept out of the z80-utils workspace, since it builds only with nightly.
+[workspace]
+
+[[bin]]
+name = "elf2rel"
+path = "fuzz_targets/elf2rel.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rel2elf"
+path = "fuzz_targets/rel2elf.rs"
+test = false
+doc = false
+bench = false
