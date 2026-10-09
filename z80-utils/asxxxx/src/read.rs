@@ -2,7 +2,7 @@ use crate::raw::{self, Entry, Record, TextKind};
 use crate::write::symbol_order;
 use crate::{
     ABS_SYMBOL, Area, Chunk, Def, Error, Field, Object, Page, PageBase, PdkPart, Reloc, Symbol,
-    T_LINE_VALUES, Target, mode,
+    T_LINE_VALUES, Target, address_space, mode,
 };
 
 /// How a linker reads relocation fields. The Padauk linker merges every field
@@ -191,12 +191,14 @@ impl<'a> Decoder<'a> {
         let addr = self.obj.format.read_uint(&bytes[..n]) as u32;
         let data = &bytes[n..];
 
-        let mut entries = entries.to_vec();
-        entries.sort_by_key(|e| e.pos);
+        // The linker places each field after the ones before it on the line.
+        if entries.windows(2).any(|w| w[1].pos <= w[0].pos) {
+            return Err(self.error(i, "relocation entries out of order"));
+        }
         let mut contents = Vec::with_capacity(data.len());
         let mut relocs = Vec::new();
         let mut next = 0;
-        for e in entries {
+        for &e in entries {
             let pos = usize::from(e.pos)
                 .checked_sub(n)
                 .ok_or_else(|| self.error(i, "relocation inside the T line address"))?;
@@ -208,7 +210,8 @@ impl<'a> Decoder<'a> {
             }
             contents.extend_from_slice(&data[next..pos]);
             relocs.push(Reloc {
-                offset: addr + contents.len() as u32,
+                // From the start of the line, until the line is placed.
+                offset: contents.len() as u32,
                 field: shape.field,
                 pc_relative: e.mode & mode::PCR != 0,
                 unsigned: e.mode & mode::USGN != 0,
@@ -221,12 +224,19 @@ impl<'a> Decoder<'a> {
         }
         contents.extend_from_slice(&data[next..]);
 
+        let end = u64::from(addr) + contents.len() as u64;
+        if end > address_space(self.obj.format) {
+            let message = format!("T line at {addr:X} runs past the address space");
+            return Err(self.error(i, message));
+        }
         let area = &mut self.obj.areas[area];
         let base = if area.is_absolute() { area.addr } else { 0 };
-        let end = u64::from(addr) + contents.len() as u64;
         if !contents.is_empty() && (addr < base || end > u64::from(base) + u64::from(area.size)) {
             let message = format!("T line at {addr:X} lies outside {}", area.name);
             return Err(self.error(i, message));
+        }
+        for reloc in &mut relocs {
+            reloc.offset += addr;
         }
         area.relocs.extend(relocs);
         insert_chunk(&mut area.data, addr, contents).map_err(|m| self.error(i, m))
@@ -255,6 +265,12 @@ impl<'a> Decoder<'a> {
     fn target(&self, i: usize, e: Entry) -> Result<Target, Error> {
         let index = usize::from(e.index);
         if e.mode & mode::SYM == 0 {
+            // sdas8051 writes an 11-bit jump to a fixed address against area
+            // FFFF, which the linker reads as zero.
+            let jump11 = e.mode & (mode::BYTE | mode::BYTX | mode::MSB) == mode::BYTX;
+            if jump11 && e.index == 0xFFFF {
+                return Ok(Target::Absolute);
+            }
             return if index < self.obj.areas.len() {
                 Ok(Target::Area(index))
             } else {
@@ -263,7 +279,7 @@ impl<'a> Decoder<'a> {
         }
         match self.symbol_index.get(index) {
             Some(Some(s)) => Ok(Target::Symbol(*s)),
-            Some(None) => Err(self.error(i, format!("relocation against {ABS_SYMBOL}"))),
+            Some(None) => Ok(Target::Absolute),
             None => Err(self.error(i, format!("relocation against undefined symbol {index}"))),
         }
     }
@@ -444,6 +460,16 @@ mod tests {
                 "T 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\nR 00 00 00 00\n",
                 5,
                 "T line holds more than 16 values",
+            ),
+            (
+                "T 00 00 00 00 00 00 00 00\nR 00 00 00 00 00 06 00 00 00 04 00 00\n",
+                5,
+                "relocation entries out of order",
+            ),
+            (
+                "T FF FF FF FF 00 00 00\nR 00 00 00 00\n",
+                5,
+                "T line at FFFFFFFF runs past the address space",
             ),
             (
                 "H 1 areas 1 global symbols\n",

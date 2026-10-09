@@ -1,7 +1,7 @@
 use crate::raw::{self, Entry, Record, TextKind};
 use crate::{
     ABS_SYMBOL, Area, Chunk, Error, Field, Object, Page, PdkPart, Reloc, T_LINE_VALUES, Target,
-    mode, valid_name,
+    address_space, mode, valid_name,
 };
 
 /// Write `obj` as the text of a `.rel` file.
@@ -20,6 +20,11 @@ fn encode(obj: &Object) -> Result<raw::Object, Error> {
         return Err(Error::new(0, message));
     }
     check_text(obj)?;
+    // Lines name symbols and areas in 16 bits, and area FFFF stands for a
+    // fixed address in an 11-bit jump.
+    if obj.symbols.len() > 0xFFFF || obj.areas.len() > 0xFFFF {
+        return Err(Error::new(0, "too many symbols or areas for a .rel object"));
+    }
     let order = symbol_order(obj)?;
     let mut file_index = vec![0; obj.symbols.len()];
     for (i, &s) in order.iter().enumerate() {
@@ -157,6 +162,15 @@ impl Encoder<'_> {
         let room = T_LINE_VALUES - usize::from(addr_bytes);
         let mut next = 0;
         for chunk in &area.data {
+            if u64::from(chunk.offset) + chunk.bytes.len() as u64 > address_space(self.obj.format) {
+                return Err(Error::new(
+                    0,
+                    format!(
+                        "contents at {:X} in {} run past the address space",
+                        chunk.offset, area.name
+                    ),
+                ));
+            }
             let mut pos = chunk.offset;
             while pos < chunk.end() {
                 let (start, first) = (pos, next);
@@ -180,7 +194,7 @@ impl Encoder<'_> {
                             used += len;
                             pos += r.field.size();
                             next += 1;
-                            if miscounted(r.field) {
+                            if miscounted(r.field, addr_bytes) {
                                 break;
                             }
                         }
@@ -223,15 +237,6 @@ impl Encoder<'_> {
         let contents = |from: u32, to: u32| {
             &chunk.bytes[(from - chunk.offset) as usize..(to - chunk.offset) as usize]
         };
-        if u64::from(start) >> (8 * format.addr_bytes) != 0 {
-            return Err(Error::new(
-                0,
-                format!(
-                    "contents at {start:X} in {} lie beyond the address width",
-                    self.obj.areas[area_index].name
-                ),
-            ));
-        }
         let mut bytes = Vec::new();
         format.push_int(&mut bytes, i64::from(start), usize::from(format.addr_bytes));
         let mut entries = Vec::new();
@@ -258,10 +263,18 @@ impl Encoder<'_> {
 
     fn page_base(&mut self, p: usize) -> Result<(), Error> {
         let page = &self.obj.pages[p];
+        if page.area >= self.obj.areas.len() {
+            let message = format!("base page in undefined area {}", page.area);
+            return Err(Error::new(0, message));
+        }
         let entries = page
             .relocs
             .iter()
             .map(|&(pos, mode, target)| {
+                if mode > 0xFF {
+                    let message = format!("base page mode {mode:03X} does not fit a P line");
+                    return Err(Error::new(0, message));
+                }
                 Ok(Entry {
                     mode,
                     pos,
@@ -286,6 +299,8 @@ impl Encoder<'_> {
                 })
             }
             Target::Area(a) if a < self.obj.areas.len() => Ok(a as u16),
+            // `.__.ABS.`, always the first `S` line.
+            Target::Absolute => Ok(0),
             Target::Area(a) => Err(Error::new(
                 0,
                 format!("relocation against undefined area {a}"),
@@ -327,7 +342,7 @@ impl Encoder<'_> {
             Page::Zero(_) => PAG0,
             Page::Paged(_) => PAG,
         };
-        let sym = if matches!(r.target, Target::Symbol(_)) {
+        let sym = if matches!(r.target, Target::Symbol(_) | Target::Absolute) {
             SYM
         } else {
             0
@@ -379,19 +394,23 @@ fn field_len(field: Field, addr_bytes: u8) -> usize {
     }
 }
 
-/// Whether the linker locates later fields on the line wrongly after this
-/// one: it hides two of a 24-bit field's bytes but only counts them when the
-/// address-width flag is set.
-fn miscounted(field: Field) -> bool {
-    matches!(
-        field,
-        Field::LongByte { bytx: false, .. } | Field::LongBit { bytx: false }
-    )
+/// Whether the linker counts a different number of bytes for `field` than it
+/// hides, which misplaces later fields on the line.
+fn miscounted(field: Field, addr_bytes: u8) -> bool {
+    match field {
+        // Two hidden bytes, counted as one less than the address width, and
+        // only with the address-width flag.
+        Field::LongByte { bytx, .. } | Field::LongBit { bytx } => !bytx || addr_bytes != 3,
+        // Three hidden bytes, counted as three plus one less than the
+        // address width.
+        Field::Pdk { part, .. } => part != PdkPart::Whole,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Area, Chunk, Def, Field, Object, Page, Reloc, Symbol, Target, write};
+    use crate::{Area, Chunk, Def, Field, Format, Object, Page, Reloc, Symbol, Target, write};
 
     #[test]
     fn layout() {
@@ -448,6 +467,76 @@ mod tests {
             T 0B 00 00 00 05 00 DD 86 3E 2C 01 00 00 C9 00 C9\n\
             R 00 00 00 00 00 04 00 00 8B 09 01 00\n";
         assert_eq!(write(&obj).unwrap(), expected);
+    }
+
+    #[test]
+    fn starts_a_line_after_a_miscounted_field() {
+        // A 24-bit byte with the address-width flag, then a PC-relative byte.
+        let t_lines = |addr_bytes| {
+            let reloc = |offset, field, pc_relative| Reloc {
+                offset,
+                field,
+                pc_relative,
+                unsigned: false,
+                page: Page::None,
+                target: Target::Area(0),
+                addend: 0,
+            };
+            let obj = Object {
+                format: Format {
+                    addr_bytes,
+                    ..Format::default()
+                },
+                areas: vec![Area {
+                    name: "_CODE".into(),
+                    size: 2,
+                    data: vec![Chunk {
+                        offset: 0,
+                        bytes: vec![0; 2],
+                    }],
+                    relocs: vec![
+                        reloc(
+                            0,
+                            Field::LongByte {
+                                index: 0,
+                                bytx: true,
+                            },
+                            false,
+                        ),
+                        reloc(1, Field::Byte, true),
+                    ],
+                    ..Area::default()
+                }],
+                ..Object::default()
+            };
+            let text = write(&obj).unwrap();
+            text.lines().filter(|l| l.starts_with('T')).count()
+        };
+        assert_eq!((t_lines(3), t_lines(4)), (1, 2));
+    }
+
+    #[test]
+    fn refuses_contents_past_the_address_space() {
+        let obj = Object {
+            format: Format {
+                addr_bytes: 2,
+                ..Format::default()
+            },
+            areas: vec![Area {
+                name: "_CODE".into(),
+                size: 0x10002,
+                data: vec![Chunk {
+                    offset: 0xFFFF,
+                    bytes: vec![0; 2],
+                }],
+                ..Area::default()
+            }],
+            ..Object::default()
+        };
+        assert_eq!(
+            write(&obj).unwrap_err().message,
+            "contents at FFFF in _CODE run past the address space"
+        );
     }
 
     #[test]

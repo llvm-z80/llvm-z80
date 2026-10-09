@@ -12,3 +12,4 @@ start:
 other:
 	jr start
 	jp start
+	jr 0x0010

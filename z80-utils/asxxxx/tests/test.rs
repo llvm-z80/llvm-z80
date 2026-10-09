@@ -171,6 +171,8 @@ fn z80() {
         [
             pc(reloc(1, Field::AddrByte(0), Target::Area(0), 0)),
             reloc(3, Field::Word, Target::Area(0), 0),
+            // `jr 0x0010`, relative to `.__.ABS.`.
+            pc(reloc(6, Field::AddrByte(0), Target::Absolute, 0x10)),
         ]
     );
 }
@@ -203,6 +205,16 @@ fn mcs51() {
     assert_eq!(
         obj.areas[4].relocs[0],
         page_zero(None, reloc(1, long(0, false), Target::Area(3), 0x8300))
+    );
+    // `ajmp 0x0123`, which sdas8051 writes against area FFFF.
+    assert_eq!(
+        obj.areas[5].relocs,
+        [reloc(
+            0,
+            Field::Jump11 { opcode: 0x01 },
+            Target::Absolute,
+            0x123
+        )]
     );
 }
 

@@ -172,6 +172,9 @@ pub struct PageBase {
 pub enum Target {
     Symbol(usize),
     Area(usize),
+    /// Address zero, which sdas uses for a PC-relative reference to a fixed
+    /// address.
+    Absolute,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -216,6 +219,12 @@ mod mode {
     pub const BYT3: u16 = 0x100;
     pub const HIB: u16 = 0x200;
     pub const BIT: u16 = 0x400;
+}
+
+/// Where the contents of a `T` line must end: within the addresses the format
+/// can write, and within what a `u32` offset can reach.
+fn address_space(format: Format) -> u64 {
+    (1u64 << (8 * format.addr_bytes)).min(u64::from(u32::MAX))
 }
 
 /// Most values one `T` line may hold, address included. The linker cannot
