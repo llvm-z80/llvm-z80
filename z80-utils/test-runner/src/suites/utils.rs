@@ -342,6 +342,7 @@ fn convert_sdcc_lib(target: Target, output: &Path) -> Result<Option<PathBuf>, St
         None => return Ok(None),
     };
     let status = Command::new("rel2elf")
+        .arg("--rename-sdcc-libc")
         .arg(&sdcc_lib).arg(output)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

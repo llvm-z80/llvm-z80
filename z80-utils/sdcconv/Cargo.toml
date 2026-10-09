@@ -1,0 +1,22 @@
+[package]
+name = "sdcconv"
+version = "0.1.0"
+edition = "2024"
+description = "Convert between Z80 ELF objects and SDCC .rel objects"
+
+[dependencies]
+anyhow = "1.0.104"
+ar_archive_writer = "0.5"
+asxxxx = { path = "../asxxxx" }
+clap = { version = "4.6.7", features = ["derive"] }
+object = { version = "0.39", default-features = false, features = [
+    "std",
+    "read_core",
+    "elf",
+    "archive",
+    "write_core",
+] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+object = { version = "0.39", default-features = false, features = ["std", "elf", "write"] }
