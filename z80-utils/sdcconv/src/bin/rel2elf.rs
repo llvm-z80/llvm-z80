@@ -1,62 +1,55 @@
-use std::error::Error;
-use std::path::Path;
-use std::process::ExitCode;
+use std::path::PathBuf;
 
-const USAGE: &str = "Usage: rel2elf [--rename-sdcc-libc] <input.rel|input.lib> [output.o|output.a]
+use anyhow::Context;
+use clap::Parser;
+use object::FileKind;
 
-  --rename-sdcc-libc  Rename the C library functions SDCC's libraries share with
-                      the LLVM-Z80 runtime (memcpy, memmove, memset, strlen,
-                      strcmp) to <name>__sdcc, so SDCC code keeps its own.";
-
-fn main() -> ExitCode {
-    let mut rename_libc = false;
-    let mut paths = Vec::new();
-    for arg in std::env::args().skip(1) {
-        match arg.as_str() {
-            "--rename-sdcc-libc" => rename_libc = true,
-            _ if arg.starts_with('-') => {
-                eprintln!("{USAGE}");
-                return ExitCode::FAILURE;
-            }
-            _ => paths.push(arg),
-        }
-    }
-    let (input, output) = match paths.as_slice() {
-        [input] => (input, None),
-        [input, output] => (input, Some(output.as_str())),
-        _ => {
-            eprintln!("{USAGE}");
-            return ExitCode::FAILURE;
-        }
-    };
-    match convert(input, output, rename_libc) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
-    }
+/// Convert an SDCC object, or a library of them, to a Z80 ELF object or
+/// archive.
+#[derive(Parser)]
+#[command(version)]
+struct Args {
+    /// Rename memcpy, memmove, memset, strlen and strcmp to <name>__sdcc, so
+    /// that code built with SDCC keeps calling its own versions when linked
+    /// alongside the LLVM-Z80 runtime.
+    #[arg(long)]
+    rename_sdcc_libc: bool,
+    /// An SDCC object (.rel) or a library of them (.lib).
+    input: PathBuf,
+    /// Where to write, by default the input's name ending in .o or .a.
+    output: Option<PathBuf>,
 }
 
-fn convert(input: &str, output: Option<&str>, rename_libc: bool) -> Result<(), Box<dyn Error>> {
-    let data = std::fs::read(input).map_err(|e| format!("cannot read '{input}': {e}"))?;
-    let (converted, extension) = if data.starts_with(b"!<arch>\n") {
-        let (archive, warnings) = sdcconv::lib_to_elf_archive(&data, rename_libc)?;
-        for warning in warnings {
-            eprintln!("warning: {warning}");
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    let data = std::fs::read(&args.input)
+        .with_context(|| format!("cannot read '{}'", args.input.display()))?;
+    let (converted, extension) = match FileKind::parse(&*data) {
+        Ok(FileKind::Archive) => {
+            let (archive, warnings) = sdcconv::lib_to_elf_archive(&data, args.rename_sdcc_libc)?;
+            for warning in warnings {
+                eprintln!("warning: {warning}");
+            }
+            (archive, "a")
         }
-        (archive, "a")
-    } else {
-        let text = std::str::from_utf8(&data)
-            .map_err(|_| format!("'{input}' is neither a .rel object nor an archive"))?;
-        let mut obj = asxxxx::parse(text)?;
-        if rename_libc {
-            sdcconv::rename_libc_symbols(&mut obj);
+        _ => {
+            let text = std::str::from_utf8(&data).with_context(|| {
+                format!(
+                    "'{}' is neither an SDCC object nor a library",
+                    args.input.display()
+                )
+            })?;
+            let mut obj = asxxxx::parse(text)?;
+            if args.rename_sdcc_libc {
+                sdcconv::rename_libc_symbols(&mut obj);
+            }
+            (sdcconv::rel_to_elf(&obj)?, "o")
         }
-        (sdcconv::rel_to_elf(&obj)?, "o")
     };
-    let output = output.map_or_else(|| Path::new(input).with_extension(extension), Into::into);
+    let output = args
+        .output
+        .unwrap_or_else(|| args.input.with_extension(extension));
     std::fs::write(&output, converted)
-        .map_err(|e| format!("cannot write '{}': {e}", output.display()))?;
+        .with_context(|| format!("cannot write '{}'", output.display()))?;
     Ok(())
 }
