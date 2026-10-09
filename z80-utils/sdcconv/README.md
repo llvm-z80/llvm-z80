@@ -83,6 +83,7 @@ way sdas writes it, so that the linker range-checks the whole value.
 The tools refuse anything the other format cannot hold, including:
 
 - relocations of other SDCC ports, such as 24-bit fields or 8051 jumps
+- overlaid and paged areas (`OVR` and `PAG`)
 - symbol and area names a `.rel` object cannot hold
 - common symbols (compile with `-fno-common`)
 - allocated sections other than data and uninitialized data, such as the

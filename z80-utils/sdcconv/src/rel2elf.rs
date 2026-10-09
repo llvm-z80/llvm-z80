@@ -51,6 +51,13 @@ pub fn rel_to_elf(obj: &Object) -> Result<(Vec<u8>, Vec<String>), Error> {
             "the areas add up to more than any Z80 address space",
         ));
     }
+    // ELF sections cannot overlay each other or keep within a page.
+    if let Some(area) = obj.areas.iter().find(|a| a.flags & !asxxxx::Area::ABS != 0) {
+        return Err(Error::new(format!(
+            "{} has area flags {:X} an ELF object cannot hold",
+            area.name, area.flags
+        )));
+    }
 
     let find = |name| obj.areas.iter().position(|a| a.name == name);
     let initialized = find(INITIALIZED);

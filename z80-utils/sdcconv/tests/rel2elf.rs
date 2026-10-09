@@ -163,6 +163,16 @@ fn objects_no_z80_can_hold_are_refused() {
             "A _CABS size 1 flags 8 addr 100\nS _x Def00000080\n",
             "'_x' lies before its absolute area",
         ),
+        (
+            "XL4",
+            "A _OSEG size 4 flags 4 addr 0\n",
+            "_OSEG has area flags 4 an ELF object cannot hold",
+        ),
+        (
+            "XL4",
+            "A _PSEG size 2 flags 10 addr 0\n",
+            "_PSEG has area flags 10 an ELF object cannot hold",
+        ),
         ("XH4", "", "a big-endian object is not a Z80 one"),
     ] {
         let rel = format!("{format}\nH 2 areas 2 global symbols\nS .__.ABS. Def00000000\n{areas}");
