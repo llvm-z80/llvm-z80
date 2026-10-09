@@ -113,9 +113,9 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
             continue;
         }
         let Some(&Placed {
-            area,
             contents,
             offset: base,
+            ..
         }) = placed.get(&(section.sh_info(endian) as usize))
         else {
             continue;
@@ -123,42 +123,47 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         for rela in section.data_as_array::<Rela32<LE>, _>(endian, data)? {
             let r_type = rela.r_type(endian);
             let r_offset = rela.r_offset(endian);
-            let (width, pc_relative) = match from_elf(r_type) {
-                FromElf::Field { width, pc_relative } => (width, pc_relative),
+            let row = match from_elf(r_type) {
+                FromElf::Field(row) => row,
                 FromElf::Ignore => continue,
                 FromElf::Unsupported => {
-                    eprintln!(
-                        "warning: unsupported relocation type {r_type} at offset {r_offset:#06X}"
-                    );
-                    continue;
+                    return Err(Error::new(format!(
+                        "unsupported relocation type {r_type} at offset {r_offset:#06X}"
+                    )));
                 }
             };
             let r_sym = rela.r_sym(endian) as usize;
-            let addend = i64::from(rela.r_addend(endian));
-            let (target, addend) = if r_sym == 0 {
-                (Target::Area(area), addend)
+            if r_sym == 0 {
+                return Err(Error::new(format!(
+                    "relocation without a symbol at offset {r_offset:#06X}"
+                )));
+            }
+            let addend = i64::from(rela.r_addend(endian)) + row.pc_bias;
+            let sym = symbols.symbol(object::SymbolIndex(r_sym))?;
+            let (target, addend) = if is_global(sym) {
+                let s = *symbol_index.get(&r_sym).ok_or_else(|| {
+                    let name = symbols.symbol_name(endian, sym).unwrap_or_default();
+                    Error::new(format!(
+                        "relocation against '{}', which has no area",
+                        String::from_utf8_lossy(name)
+                    ))
+                })?;
+                (Target::Symbol(s), addend)
             } else {
-                let sym = symbols.symbol(object::SymbolIndex(r_sym))?;
-                if is_global(sym) {
-                    match symbol_index.get(&r_sym) {
-                        Some(&s) => (Target::Symbol(s), addend),
-                        None => {
-                            eprintln!("warning: unmapped symbol index {r_sym}");
-                            continue;
-                        }
-                    }
-                } else {
-                    let Some(p) = placed.get(&usize::from(sym.st_shndx(endian))) else {
-                        continue;
-                    };
-                    let value = i64::from(sym.st_value(endian)) + i64::from(p.offset);
-                    (Target::Area(p.area), addend + value)
-                }
+                let p = placed
+                    .get(&usize::from(sym.st_shndx(endian)))
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "relocation at offset {r_offset:#06X} into a section with no area"
+                        ))
+                    })?;
+                let value = i64::from(sym.st_value(endian)) + i64::from(p.offset);
+                (Target::Area(p.area), addend + value)
             };
             areas[contents].relocs.push(Reloc {
                 offset: base + r_offset,
-                width,
-                pc_relative,
+                width: row.width,
+                pc_relative: row.pc_relative,
                 target,
                 addend,
             });

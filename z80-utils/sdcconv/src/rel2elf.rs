@@ -105,11 +105,17 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
                     (sym, area_addend(reloc.width, reloc.addend, base(a)))
                 }
             };
+            let row = to_elf(reloc.width, reloc.pc_relative, hram).ok_or_else(|| {
+                Error::new(format!(
+                    "unsupported relocation at {:#06X} in {}",
+                    reloc.offset, area.name
+                ))
+            })?;
             section.relocs.push(Rel {
                 r_offset: u64::from(reloc.offset - start),
                 r_sym,
-                r_type: to_elf(reloc.width, reloc.pc_relative, hram),
-                r_addend: i64::from(r_addend as i32),
+                r_type: row.r_type,
+                r_addend: i64::from((r_addend - row.pc_bias) as i32),
             });
             let at = (reloc.offset - start) as usize;
             let end = (at + reloc.width.size() as usize).min(section.data.len());
