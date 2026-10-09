@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 
-use crate::Error;
+use crate::{Error, valid_area_name};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Object {
@@ -193,7 +193,14 @@ pub(crate) fn parse_lines(text: &str) -> Result<(Object, Vec<usize>), Error> {
                     symbols: num(symbols)?,
                 }
             }
-            'M' => Record::Module(rest.to_string()),
+            'M' => {
+                if !valid_area_name(rest) {
+                    return Err(err(format!(
+                        "the linker reads module name '{rest}' only in part"
+                    )));
+                }
+                Record::Module(rest.to_string())
+            }
             'O' => Record::Options(rest.to_string()),
             'A' => {
                 // The linker reads the values by position, whatever names
@@ -206,6 +213,11 @@ pub(crate) fn parse_lines(text: &str) -> Result<(Object, Vec<usize>), Error> {
                     }
                     _ => return Err(err("malformed area line".into())),
                 };
+                if !valid_area_name(name) {
+                    return Err(err(format!(
+                        "the linker reads area name '{name}' only in part"
+                    )));
+                }
                 Record::Area {
                     name: name.to_string(),
                     size: num(size)?,
@@ -454,6 +466,24 @@ mod tests {
         assert!(parse(&format!("{head}A _CODE size 1 flags 0 addr 0\n")).is_ok());
         let err = parse(&format!("{head}A _CODE flags 0 size 1\n")).unwrap_err();
         assert_eq!(err.message, "malformed area line");
+    }
+
+    #[test]
+    fn area_and_module_names_are_read_whole() {
+        let head = "XL2\nH 1 areas 0 global symbols\n";
+        for (line, message) in [
+            (
+                "A _X-Y size 3 flags 0",
+                "the linker reads area name '_X-Y' only in part",
+            ),
+            (
+                "M my-module",
+                "the linker reads module name 'my-module' only in part",
+            ),
+        ] {
+            let err = parse(&format!("{head}{line}\n")).unwrap_err();
+            assert_eq!(err.message, message);
+        }
     }
 
     #[test]

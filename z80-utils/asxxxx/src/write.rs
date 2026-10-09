@@ -1,7 +1,7 @@
 use crate::raw::{self, Entry, Record, TextKind};
 use crate::{
     ABS_SYMBOL, Area, Chunk, Error, Field, Object, Page, PdkPart, Reloc, T_LINE_VALUES, Target,
-    address_space, mode, valid_name,
+    address_space, mode, valid_area_name, valid_symbol_name,
 };
 
 /// Write `obj` as the text of a `.rel` file.
@@ -97,17 +97,16 @@ pub(crate) fn check_counts(obj: &Object) -> Result<(), Error> {
 /// Refuse names and lines that would not read back the same.
 fn check_text(obj: &Object) -> Result<(), Error> {
     let changes = |text: &str| Error::new(0, format!("{text:?} would not read back the same"));
-    for area in &obj.areas {
-        if !valid_name(&area.name) {
-            return Err(changes(&area.name));
-        }
+    let areas = obj.areas.iter().map(|a| &a.name);
+    if let Some(name) = obj.name.iter().chain(areas).find(|n| !valid_area_name(n)) {
+        return Err(changes(name));
     }
     for symbol in &obj.symbols {
-        if !valid_name(&symbol.name) || symbol.name == ABS_SYMBOL {
+        if !valid_symbol_name(&symbol.name) || symbol.name == ABS_SYMBOL {
             return Err(changes(&symbol.name));
         }
     }
-    for line in obj.name.iter().chain(&obj.options) {
+    for line in &obj.options {
         if line.trim() != line || line.contains(char::is_control) {
             return Err(changes(line));
         }
@@ -584,6 +583,22 @@ mod tests {
                 }],
                 ..Object::default()
             };
+            let message = format!("{name:?} would not read back the same");
+            assert_eq!(write(&obj).unwrap_err().message, message);
+        }
+        // The linker stops an area or module name at the first other mark.
+        let area = Object {
+            areas: vec![Area {
+                name: "_X-Y".into(),
+                ..Area::default()
+            }],
+            ..Object::default()
+        };
+        let module = Object {
+            name: Some("a b".into()),
+            ..Object::default()
+        };
+        for (obj, name) in [(area, "_X-Y"), (module, "a b")] {
             let message = format!("{name:?} would not read back the same");
             assert_eq!(write(&obj).unwrap_err().message, message);
         }
