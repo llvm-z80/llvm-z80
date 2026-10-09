@@ -123,7 +123,7 @@ R 00 00 00 00 02 04 01 00 00 06 01 00 00 08 02 00
         .iter()
         .filter_map(|r| match r.target {
             asxxxx::Target::Area(a) => area_name(Some(a)),
-            asxxxx::Target::Symbol(_) => None,
+            _ => None,
         })
         .collect();
     assert_eq!(targets, ["_DATA", "_INITIALIZED"]);

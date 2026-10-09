@@ -127,6 +127,7 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
                     .and_then(|d| d.area)
                     .is_some_and(|a| obj.areas[a].name == "_HRAM"),
                 Target::Area(a) => obj.areas[a].name == "_HRAM",
+                Target::Absolute => false,
             };
             let row = to_elf(reloc, hram).ok_or_else(|| {
                 Error::new(format!(
@@ -140,6 +141,8 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
                     let sym = section_of[a].map_or(0, section_symbol);
                     (sym, area_addend(reloc.field, reloc.addend, base(a)))
                 }
+                // Symbol 0 stands for address zero.
+                Target::Absolute => (0, reloc.addend),
             };
             let at = reloc.offset.checked_sub(start).ok_or_else(|| {
                 Error::new(format!(

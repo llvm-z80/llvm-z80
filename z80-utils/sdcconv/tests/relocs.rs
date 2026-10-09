@@ -181,3 +181,21 @@ fn relocations_must_not_overlap() {
         "relocations at 0x0001 and 0x0002 in _CODE overlap"
     );
 }
+
+#[test]
+fn fixed_addresses_survive_a_round_trip() {
+    // What sdasz80 writes for `jr 0x0010`.
+    let rel = "\
+XL4
+H 1 areas 1 global symbols
+S .__.ABS. Def00000000
+A _CODE size 2 flags 0 addr 0
+T 00 00 00 00 18 10 00 00 00
+R 00 00 00 00 0F 05 00 00
+";
+    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
+    let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let mut expected = reloc(1, Field::Byte, true, 0x10);
+    expected.target = Target::Absolute;
+    assert_eq!(back.areas[0].relocs, [expected]);
+}

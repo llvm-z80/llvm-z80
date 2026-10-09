@@ -174,14 +174,13 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
                 )));
             }
             let r_sym = rela.r_sym(endian) as usize;
-            if r_sym == 0 {
-                return Err(Error::new(format!(
-                    "relocation without a symbol at offset {r_offset:#06X}"
-                )));
-            }
             let addend = i64::from(rela.r_addend(endian)) + row.pc_bias;
-            let sym = symbols.symbol(object::SymbolIndex(r_sym))?;
-            let (target, addend) = if is_global(sym) {
+            // Symbol 0 stands for address zero.
+            let sym = match r_sym {
+                0 => None,
+                _ => Some(symbols.symbol(object::SymbolIndex(r_sym))?),
+            };
+            let (target, addend) = if let Some(sym) = sym.filter(|s| is_global(s)) {
                 let s = *symbol_index.get(&r_sym).ok_or_else(|| {
                     let name = symbols.symbol_name(endian, sym).unwrap_or_default();
                     Error::new(format!(
@@ -190,7 +189,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
                     ))
                 })?;
                 (Target::Symbol(s), addend)
-            } else {
+            } else if let Some(sym) = sym {
                 let p = placed
                     .get(&usize::from(sym.st_shndx(endian)))
                     .ok_or_else(|| {
@@ -200,6 +199,8 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
                     })?;
                 let value = i64::from(sym.st_value(endian)) + i64::from(p.offset);
                 (Target::Area(p.area), addend + value)
+            } else {
+                (Target::Absolute, addend)
             };
             areas[contents].relocs.push(Reloc {
                 offset: base + r_offset,
