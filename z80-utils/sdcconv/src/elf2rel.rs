@@ -91,16 +91,27 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         if name.is_empty() {
             continue;
         }
+        let value = sym.st_value(endian);
         let def = match sym.st_shndx(endian) {
             elf::SHN_UNDEF => None,
+            elf::SHN_ABS => Some(Def { area: None, value }),
+            elf::SHN_COMMON => {
+                return Err(Error::new(format!(
+                    "'{name}' is a common symbol, which SDCC objects cannot hold; \
+                     compile with -fno-common"
+                )));
+            }
             shndx => match placed.get(&usize::from(shndx)) {
                 Some(p) => Some(Def {
                     area: Some(p.area),
-                    value: p.offset + sym.st_value(endian),
+                    value: p.offset + value,
                 }),
                 None => continue,
             },
         };
+        if sym.st_bind() == elf::STB_WEAK {
+            eprintln!("warning: weak symbol '{name}' becomes an ordinary one");
+        }
         symbol_index.insert(i, model_symbols.len());
         model_symbols.push(Symbol {
             name: name.to_string(),

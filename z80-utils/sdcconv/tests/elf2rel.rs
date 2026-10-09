@@ -107,3 +107,64 @@ fn sections_go_to_the_areas_sdcc_uses() {
     assert_eq!(rel.areas[4].data, chunk(&[0x42]));
     assert_eq!(rel.symbols, [def("_d", 2, 0)]);
 }
+
+#[test]
+fn absolute_and_weak_symbols_carry_over() {
+    let mut obj = new_object();
+    let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
+    obj.append_section_data(text, &[0xC9], 1);
+    for (name, section, weak) in [
+        ("_port", SymbolSection::Absolute, false),
+        ("_hook", SymbolSection::Section(text), true),
+        ("_maybe", SymbolSection::Undefined, true),
+    ] {
+        obj.add_symbol(ElfSymbol {
+            name: name.as_bytes().to_vec(),
+            value: if name == "_port" { 0x40 } else { 0 },
+            size: 0,
+            kind: SymbolKind::Data,
+            scope: SymbolScope::Linkage,
+            weak,
+            section,
+            flags: SymbolFlags::None,
+        });
+    }
+    let rel = convert(obj);
+    let symbol = |name: &str, def| Symbol {
+        name: name.to_string(),
+        def,
+    };
+    assert_eq!(
+        rel.symbols,
+        [
+            symbol(
+                "_port",
+                Some(Def {
+                    area: None,
+                    value: 0x40
+                })
+            ),
+            def("_hook", 0, 0),
+            symbol("_maybe", None),
+        ]
+    );
+}
+
+#[test]
+fn common_symbols_are_refused() {
+    let mut obj = new_object();
+    obj.add_symbol(ElfSymbol {
+        name: b"_c".to_vec(),
+        value: 1,
+        size: 2,
+        kind: SymbolKind::Data,
+        scope: SymbolScope::Linkage,
+        weak: false,
+        section: SymbolSection::Common,
+        flags: SymbolFlags::None,
+    });
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert!(err.to_string().contains("-fno-common"), "{err}");
+}
