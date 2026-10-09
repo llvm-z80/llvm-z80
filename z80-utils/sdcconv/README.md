@@ -72,8 +72,7 @@ values, the low and high byte of an address, PC-relative bytes and words
 (`jr`, `djnz`), and the SM83 `ldh` operand. A PC-relative byte is written the
 way sdas writes it, so that the linker range-checks the whole value.
 
-Anything the other side cannot hold is refused rather than converted into
-something that links differently, including:
+The tools refuse anything the other format cannot hold, including:
 
 - relocations of other SDCC ports, such as 24-bit fields or 8051 jumps
 - symbol and area names a `.rel` object cannot hold
