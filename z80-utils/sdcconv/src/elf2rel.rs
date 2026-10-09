@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use asxxxx::{Area, Chunk, Def, Object, Page, Reloc, Symbol, Target};
+use asxxxx::{Area, Chunk, Def, Field, Object, Page, Reloc, Symbol, Target};
 use object::LittleEndian as LE;
 use object::elf::{self, FileHeader32, Rela32};
 use object::read::elf::{FileHeader, Rela, SectionHeader, Sym};
@@ -190,6 +190,18 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
             }
             let r_sym = rela.r_sym(endian) as usize;
             let addend = i64::from(rela.r_addend(endian)) + row.pc_bias;
+            // The addend is written into the field, which would cut off what
+            // does not fit.
+            let bits = match row.field {
+                Field::Word => 16,
+                Field::Byte => 8,
+                _ => 32,
+            };
+            if addend < -(1 << (bits - 1)) || addend >= 1 << bits {
+                return Err(Error::new(format!(
+                    "addend {addend} at offset {r_offset:#06X} does not fit its field"
+                )));
+            }
             // Symbol 0 stands for address zero.
             let sym = match r_sym {
                 0 => None,
@@ -224,7 +236,9 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
                 unsigned: false,
                 page: Page::None,
                 target,
-                addend,
+                // As the field reads back. An offset into an area, added
+                // above, is taken modulo the field by the linker anyway.
+                addend: sign_extend(addend, bits),
             });
         }
     }
@@ -279,6 +293,11 @@ fn module_name(module: &str) -> String {
         .chars()
         .map(|c| if keep(c) { c } else { '_' })
         .collect()
+}
+
+fn sign_extend(value: i64, bits: u32) -> i64 {
+    let shift = 64 - bits;
+    (value << shift) >> shift
 }
 
 fn is_global(sym: &elf::Sym32<LE>) -> bool {

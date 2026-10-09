@@ -128,9 +128,9 @@ fn relocations_survive_a_round_trip() {
     assert_eq!(back.areas[0].data, rel.areas[0].data);
 }
 
-/// An ELF object whose `.text` holds `bytes`, relocated against `_x` at each
-/// of `relocs`.
-fn elf_with_relocs(bytes: &[u8], relocs: &[(u64, u32)]) -> Vec<u8> {
+/// An ELF object whose `.text` holds `bytes`, relocated against `_x` as each
+/// of `relocs` (offset, type and addend) says.
+fn elf_with_relocs(bytes: &[u8], relocs: &[(u64, u32, i64)]) -> Vec<u8> {
     let mut obj = Object::new(BinaryFormat::Elf, Architecture::Riscv32, Endianness::Little);
     let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
     obj.append_section_data(text, bytes, 1);
@@ -144,14 +144,14 @@ fn elf_with_relocs(bytes: &[u8], relocs: &[(u64, u32)]) -> Vec<u8> {
         section: SymbolSection::Undefined,
         flags: SymbolFlags::None,
     });
-    for &(offset, r_type) in relocs {
+    for &(offset, r_type, addend) in relocs {
         let flags = RelocationFlags::Elf { r_type };
         obj.add_relocation(
             text,
             Relocation {
                 offset,
                 symbol: x,
-                addend: 0,
+                addend,
                 flags,
             },
         )
@@ -164,7 +164,7 @@ fn elf_with_relocs(bytes: &[u8], relocs: &[(u64, u32)]) -> Vec<u8> {
 
 #[test]
 fn relocations_must_lie_in_their_section() {
-    let elf = elf_with_relocs(&[0x21, 0, 0], &[(2, R_Z80_ADDR16)]);
+    let elf = elf_with_relocs(&[0x21, 0, 0], &[(2, R_Z80_ADDR16, 0)]);
     let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
     assert_eq!(
         err.to_string(),
@@ -174,7 +174,10 @@ fn relocations_must_lie_in_their_section() {
 
 #[test]
 fn relocations_must_not_overlap() {
-    let elf = elf_with_relocs(&[0x21, 0, 0], &[(1, R_Z80_ADDR16), (2, R_Z80_ADDR16_LO)]);
+    let elf = elf_with_relocs(
+        &[0x21, 0, 0],
+        &[(1, R_Z80_ADDR16, 0), (2, R_Z80_ADDR16_LO, 0)],
+    );
     let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
     assert_eq!(
         err.to_string(),
@@ -198,4 +201,14 @@ R 00 00 00 00 0F 05 00 00
     let mut expected = reloc(1, Field::Byte, true, 0x10);
     expected.target = Target::Absolute;
     assert_eq!(back.areas[0].relocs, [expected]);
+}
+
+#[test]
+fn addends_must_fit_their_field() {
+    let elf = elf_with_relocs(&[0x21, 0, 0], &[(1, R_Z80_ADDR16, 0x12345)]);
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "addend 74565 at offset 0x0001 does not fit its field"
+    );
 }
