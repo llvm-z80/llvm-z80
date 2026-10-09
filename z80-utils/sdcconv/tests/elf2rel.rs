@@ -163,6 +163,29 @@ fn names_a_rel_object_cannot_hold_are_refused() {
         err.to_string(),
         "symbol \"_a b\" cannot be named in a .rel object"
     );
+
+    // The linker would read this area as `_X`.
+    let mut obj = new_object();
+    let text = obj.add_section(Vec::new(), b"_X-Y".to_vec(), SectionKind::Text);
+    obj.append_section_data(text, &[0xC9], 1);
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "section \"_X-Y\" cannot be named in a .rel object"
+    );
+}
+
+#[test]
+fn module_names_keep_only_what_the_linker_reads() {
+    let mut obj = new_object();
+    let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
+    obj.append_section_data(text, &[0xC9], 1);
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    let rel = sdcconv::elf_to_rel(&elf, "my-file 2").unwrap();
+    assert_eq!(rel.name.as_deref(), Some("my_file_2"));
 }
 
 #[test]

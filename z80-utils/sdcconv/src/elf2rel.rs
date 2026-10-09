@@ -9,7 +9,8 @@ use crate::Error;
 use crate::areas::{AREAS, INITIALIZED, INITIALIZER, MAX_AREA_SIZE, Place, area_for_section};
 use crate::relocs::{EM_Z80, FromElf, from_elf};
 
-/// Convert a Z80 ELF relocatable object to an ASxxxx object named `module`.
+/// Convert a Z80 ELF relocatable object to an ASxxxx object named after
+/// `module`, with the characters a module name cannot hold replaced by `_`.
 pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
     let header = FileHeader32::<LE>::parse(data)?;
     let endian = header.endian()?;
@@ -46,7 +47,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         }
         let (area, contents) = match area_for_section(name, sh_type, flags) {
             Place::Area(a) => {
-                if !asxxxx::valid_name(a) {
+                if !asxxxx::valid_area_name(a) {
                     return Err(Error::new(format!(
                         "section {a:?} cannot be named in a .rel object"
                     )));
@@ -108,7 +109,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         if name.is_empty() {
             continue;
         }
-        if !asxxxx::valid_name(name) || name == asxxxx::ABS_SYMBOL {
+        if !asxxxx::valid_symbol_name(name) || name == asxxxx::ABS_SYMBOL {
             return Err(Error::new(format!(
                 "symbol {name:?} cannot be named in a .rel object"
             )));
@@ -256,6 +257,16 @@ struct Placed {
     data_size: u32,
 }
 
+/// `module`, which usually comes from a file name, with each character the
+/// linker would stop at replaced by `_`.
+fn module_name(module: &str) -> String {
+    let keep = |c: char| asxxxx::valid_area_name(c.encode_utf8(&mut [0; 4]));
+    module
+        .chars()
+        .map(|c| if keep(c) { c } else { '_' })
+        .collect()
+}
+
 fn is_global(sym: &elf::Sym32<LE>) -> bool {
     matches!(sym.st_bind(), elf::STB_GLOBAL | elf::STB_WEAK)
 }
@@ -299,7 +310,7 @@ fn keep_used_areas(areas: Vec<Area>, mut symbols: Vec<Symbol>, module: &str) -> 
     }
 
     Object {
-        name: Some(module.to_string()),
+        name: Some(module_name(module)),
         areas: kept,
         symbols,
         ..Object::default()
