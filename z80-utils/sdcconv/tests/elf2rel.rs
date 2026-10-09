@@ -178,6 +178,20 @@ fn names_a_rel_object_cannot_hold_are_refused() {
 }
 
 #[test]
+fn sections_named_after_sdcc_areas_are_refused() {
+    for name in ["_INITIALIZER", "_CABS"] {
+        let mut obj = new_object();
+        let text = obj.add_section(Vec::new(), name.as_bytes().to_vec(), SectionKind::Data);
+        obj.append_section_data(text, &[1], 1);
+        let mut elf = obj.write().unwrap();
+        elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+        let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+        let message = format!("section {name:?} takes the name of an area SDCC reserves");
+        assert_eq!(err.to_string(), message);
+    }
+}
+
+#[test]
 fn module_names_keep_only_what_the_linker_reads() {
     let mut obj = new_object();
     let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);

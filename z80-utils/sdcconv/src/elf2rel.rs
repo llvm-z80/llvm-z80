@@ -45,6 +45,13 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         if name.is_empty() || name.starts_with(".note") || name.starts_with(".comment") {
             continue;
         }
+        // Their contents would land where SDCC's own conventions for those
+        // areas do not expect them.
+        if AREAS.iter().any(|&(area, _)| area == name) {
+            return Err(Error::new(format!(
+                "section {name:?} takes the name of an area SDCC reserves"
+            )));
+        }
         let (area, contents) = match area_for_section(name, sh_type, flags) {
             Place::Area(a) => {
                 if !asxxxx::valid_area_name(a) {

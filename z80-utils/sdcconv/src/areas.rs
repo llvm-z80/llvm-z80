@@ -38,7 +38,8 @@ pub fn area_for_section(name: &str, sh_type: u32, flags: u32) -> Place<'_> {
         ".text.home" => return Place::Area("_HOME"),
         ".text.gsinit" => return Place::Area("_GSINIT"),
         ".text.gsfinal" => return Place::Area("_GSFINAL"),
-        // An area rel2elf passed through under its own name.
+        // An area rel2elf passed through under its own name. elf2rel refuses
+        // a section named after one of SDCC's own areas.
         _ if name.starts_with('_') => return Place::Area(name),
         _ => {}
     }
