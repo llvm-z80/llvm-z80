@@ -7,9 +7,20 @@ use crate::Error;
 use crate::areas::{INITIALIZED, INITIALIZER, section_for_area};
 use crate::relocs::{EM_Z80, to_elf};
 
-/// Symbols from SDCC libraries that clash with Rust's compiler_builtins,
-/// renamed with a `__sdcc` suffix so SDCC code keeps its own versions.
-const CONFLICTING_SYMBOLS: &[&str] = &["_memcpy", "_memmove", "_memset", "_strlen", "_strcmp"];
+/// C library functions SDCC's libraries define with a calling convention of
+/// their own, which the LLVM-Z80 runtime defines too.
+const LIBC_CLASHES: &[&str] = &["_memcpy", "_memmove", "_memset", "_strlen", "_strcmp"];
+
+/// Rename the functions in [`LIBC_CLASHES`] to `<name>__sdcc`, definitions
+/// and references alike, so that an SDCC library keeps calling its own
+/// versions when linked alongside the LLVM-Z80 runtime.
+pub fn rename_libc_symbols(obj: &mut Object) {
+    for symbol in &mut obj.symbols {
+        if LIBC_CLASHES.contains(&symbol.name.as_str()) {
+            symbol.name.push_str("__sdcc");
+        }
+    }
+}
 
 struct Section {
     area: usize,
@@ -158,14 +169,6 @@ fn area_addend(width: Width, value: i64, base: u32) -> i64 {
     }
 }
 
-fn mangle(name: &str) -> String {
-    if CONFLICTING_SYMBOLS.contains(&name) {
-        format!("{name}__sdcc")
-    } else {
-        name.to_string()
-    }
-}
-
 fn write_elf(
     obj: &Object,
     sections: &[Section],
@@ -203,9 +206,12 @@ fn write_elf(
     for &(index, _) in &content {
         w.reserve_symbol_index(Some(index));
     }
-    let names: Vec<String> = obj.symbols.iter().map(|s| mangle(&s.name)).collect();
-    let name_ids: Vec<StringId> = names.iter().map(|n| w.add_string(n.as_bytes())).collect();
-    for _ in &names {
+    let name_ids: Vec<StringId> = obj
+        .symbols
+        .iter()
+        .map(|s| w.add_string(s.name.as_bytes()))
+        .collect();
+    for _ in &obj.symbols {
         w.reserve_symbol_index(None);
     }
 
