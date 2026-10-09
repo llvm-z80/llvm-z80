@@ -39,14 +39,17 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<(Object, Vec<String>), Er
     for (i, section) in sections.iter().enumerate() {
         let sh_type = section.sh_type(endian);
         let flags = section.sh_flags(endian);
-        if (sh_type != elf::SHT_PROGBITS && sh_type != elf::SHT_NOBITS)
-            || flags & elf::SHF_ALLOC == 0
-        {
+        if flags & elf::SHF_ALLOC == 0 {
             continue;
         }
         let name = std::str::from_utf8(sections.section_name(endian, section)?).unwrap_or("");
         if name.is_empty() || name.starts_with(".note") || name.starts_with(".comment") {
             continue;
+        }
+        if sh_type != elf::SHT_PROGBITS && sh_type != elf::SHT_NOBITS {
+            return Err(Error::new(format!(
+                "section {name:?} is of a type a .rel object cannot hold"
+            )));
         }
         if RESERVED.contains(&name) {
             return Err(Error::new(format!(

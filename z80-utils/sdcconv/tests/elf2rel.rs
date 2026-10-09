@@ -1,8 +1,8 @@
 use asxxxx::{Chunk, Def, Object as Rel, Symbol};
 use object::write::{Object, Relocation, SectionId, Symbol as ElfSymbol, SymbolSection};
 use object::{
-    Architecture, BinaryFormat, Endianness, RelocationFlags, SectionKind, SymbolFlags, SymbolKind,
-    SymbolScope,
+    Architecture, BinaryFormat, Endianness, RelocationFlags, SectionFlags, SectionKind,
+    SymbolFlags, SymbolKind, SymbolScope,
 };
 
 fn new_object() -> Object<'static> {
@@ -252,6 +252,28 @@ fn code_areas_can_be_named_directly() {
         .collect();
     assert_eq!(areas, [("_HOME", 2), ("_GSINIT", 1)]);
     assert_eq!(rel.areas[0].data, chunk(&[1, 2]));
+}
+
+#[test]
+fn sections_of_other_types_are_refused() {
+    use object::elf::{SHF_ALLOC, SHF_WRITE, SHT_INIT_ARRAY};
+    let mut obj = new_object();
+    let init = obj.add_section(
+        Vec::new(),
+        b".init_array".to_vec(),
+        SectionKind::Elf(SHT_INIT_ARRAY),
+    );
+    obj.section_mut(init).flags = SectionFlags::Elf {
+        sh_flags: u64::from(SHF_ALLOC | SHF_WRITE),
+    };
+    obj.append_section_data(init, &[0, 0], 1);
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "section \".init_array\" is of a type a .rel object cannot hold"
+    );
 }
 
 #[test]

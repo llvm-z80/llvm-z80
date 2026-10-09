@@ -85,6 +85,8 @@ The tools refuse anything the other format cannot hold, including:
 - relocations of other SDCC ports, such as 24-bit fields or 8051 jumps
 - symbol and area names a `.rel` object cannot hold
 - common symbols (compile with `-fno-common`)
+- allocated sections other than data and uninitialized data, such as the
+  `.init_array` of constructors
 - relocation sections other than RELA, relocations outside their section's
   data or overlapping each other, and addends too large for their field
 - big-endian objects, and objects larger than any Z80 address space
