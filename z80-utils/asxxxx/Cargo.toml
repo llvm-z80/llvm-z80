@@ -1,0 +1,7 @@
+[package]
+name = "asxxxx"
+version = "0.1.0"
+edition = "2024"
+description = "Read and write ASxxxx object files, the .rel format of the SDCC assemblers"
+
+[dependencies]
