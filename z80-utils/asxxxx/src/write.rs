@@ -20,6 +20,11 @@ fn encode(obj: &Object) -> Result<raw::Object, Error> {
         return Err(Error::new(0, message));
     }
     check_text(obj)?;
+    // Lines name symbols and areas in 16 bits, and area FFFF stands for a
+    // fixed address in an 11-bit jump.
+    if obj.symbols.len() > 0xFFFF || obj.areas.len() > 0xFFFF {
+        return Err(Error::new(0, "too many symbols or areas for a .rel object"));
+    }
     let order = symbol_order(obj)?;
     let mut file_index = vec![0; obj.symbols.len()];
     for (i, &s) in order.iter().enumerate() {
@@ -258,6 +263,10 @@ impl Encoder<'_> {
 
     fn page_base(&mut self, p: usize) -> Result<(), Error> {
         let page = &self.obj.pages[p];
+        if page.area >= self.obj.areas.len() {
+            let message = format!("base page in undefined area {}", page.area);
+            return Err(Error::new(0, message));
+        }
         let entries = page
             .relocs
             .iter()
