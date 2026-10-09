@@ -70,11 +70,12 @@ a nightly toolchain.
 ```bash
 cargo install cargo-fuzz
 cd asxxxx
+mkdir -p fuzz/corpus/roundtrip
 cargo +nightly fuzz run -a roundtrip fuzz/corpus/roundtrip tests/data -- -max_total_time=60
 ```
 
-The first directory collects the inputs libFuzzer keeps, and the others only
-seed it. The objects in SDCC's libraries make a wider seed: extract one with
-`sdar x /usr/share/sdcc/lib/z80/z80.lib` in an empty directory and pass that
-directory as well. An input that fails is saved under
+The first directory collects the inputs libFuzzer keeps and has to exist, and
+the others only seed it. The objects in SDCC's libraries make a wider seed:
+extract one with `sdar x /usr/share/sdcc/lib/z80/z80.lib` in an empty directory
+and pass that directory as well. An input that fails is saved under
 `fuzz/artifacts/roundtrip/` and can be rerun by passing it alone.
