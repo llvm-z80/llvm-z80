@@ -6,7 +6,9 @@ use object::elf::{self, FileHeader32, Rela32};
 use object::read::elf::{FileHeader, Rela, SectionHeader, Sym};
 
 use crate::Error;
-use crate::areas::{ADDRESS_SPACE, AREAS, INITIALIZED, INITIALIZER, Place, area_for_section};
+use crate::areas::{
+    ADDRESS_SPACE, AREAS, INITIALIZED, INITIALIZER, Place, RESERVED, area_for_section,
+};
 use crate::relocs::{EM_Z80, FromElf, from_elf};
 
 /// Convert a Z80 ELF relocatable object to an ASxxxx object named after
@@ -46,9 +48,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<(Object, Vec<String>), Er
         if name.is_empty() || name.starts_with(".note") || name.starts_with(".comment") {
             continue;
         }
-        // Their contents would land where SDCC's own conventions for those
-        // areas do not expect them.
-        if AREAS.iter().any(|&(area, _)| area == name) {
+        if RESERVED.contains(&name) {
             return Err(Error::new(format!(
                 "section {name:?} takes the name of an area SDCC reserves"
             )));

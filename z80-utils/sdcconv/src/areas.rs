@@ -25,6 +25,11 @@ pub const ADDRESS_SPACE: u32 = 0x100_0000;
 pub const INITIALIZED: &str = "_INITIALIZED";
 pub const INITIALIZER: &str = "_INITIALIZER";
 
+/// Areas a section cannot be named after: crt0 zeroes `_DATA`, loads nothing
+/// into `_BSS` and copies `_INITIALIZER` over `_INITIALIZED`, and `_CABS` and
+/// `_DABS` are absolute.
+pub const RESERVED: &[&str] = &["_DATA", "_BSS", INITIALIZED, INITIALIZER, "_CABS", "_DABS"];
+
 /// Where an ELF section goes.
 pub enum Place<'a> {
     Area(&'a str),
@@ -38,8 +43,8 @@ pub fn area_for_section(name: &str, sh_type: u32, flags: u32) -> Place<'_> {
         ".text.home" => return Place::Area("_HOME"),
         ".text.gsinit" => return Place::Area("_GSINIT"),
         ".text.gsfinal" => return Place::Area("_GSFINAL"),
-        // An area rel2elf passed through under its own name. elf2rel refuses
-        // a section named after one of SDCC's own areas.
+        // An area named directly, such as `_HOME`, or one rel2elf passed
+        // through under its own name.
         _ if name.starts_with('_') => return Place::Area(name),
         _ => {}
     }

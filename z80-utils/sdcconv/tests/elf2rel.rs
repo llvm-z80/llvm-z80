@@ -225,7 +225,7 @@ fn relocations_without_addends_are_refused() {
 
 #[test]
 fn sections_named_after_sdcc_areas_are_refused() {
-    for name in ["_INITIALIZER", "_CABS"] {
+    for name in ["_DATA", "_INITIALIZER", "_CABS"] {
         let mut obj = new_object();
         let text = obj.add_section(Vec::new(), name.as_bytes().to_vec(), SectionKind::Data);
         obj.append_section_data(text, &[1], 1);
@@ -235,6 +235,23 @@ fn sections_named_after_sdcc_areas_are_refused() {
         let message = format!("section {name:?} takes the name of an area SDCC reserves");
         assert_eq!(err.to_string(), message);
     }
+}
+
+#[test]
+fn code_areas_can_be_named_directly() {
+    let mut obj = new_object();
+    for (name, byte) in [("_HOME", 1), (".text.home", 2), ("_GSINIT", 3)] {
+        let section = obj.add_section(Vec::new(), name.as_bytes().to_vec(), SectionKind::Text);
+        obj.append_section_data(section, &[byte], 1);
+    }
+    let rel = convert(obj);
+    let areas: Vec<(&str, u32)> = rel
+        .areas
+        .iter()
+        .map(|a| (a.name.as_str(), a.size))
+        .collect();
+    assert_eq!(areas, [("_HOME", 2), ("_GSINIT", 1)]);
+    assert_eq!(rel.areas[0].data, chunk(&[1, 2]));
 }
 
 #[test]
