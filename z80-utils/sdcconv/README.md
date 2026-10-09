@@ -112,6 +112,7 @@ nightly toolchain.
 
 ```bash
 cd sdcconv
+mkdir -p fuzz/corpus/rel2elf fuzz/corpus/elf2rel
 cargo +nightly fuzz run -a rel2elf fuzz/corpus/rel2elf ../asxxxx/tests/data -- -max_total_time=60
 cargo +nightly fuzz run -a elf2rel fuzz/corpus/elf2rel <directory of ELF objects> -- -max_total_time=60
 ```
