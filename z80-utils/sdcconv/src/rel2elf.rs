@@ -4,7 +4,7 @@ use object::write::StringId;
 use object::write::elf::{FileHeader, Rel, SectionHeader, SectionIndex, Sym, Writer};
 
 use crate::Error;
-use crate::areas::{INITIALIZED, INITIALIZER, section_for_area};
+use crate::areas::{INITIALIZED, INITIALIZER, MAX_AREA_SIZE, section_for_area};
 use crate::relocs::{EM_Z80, to_elf};
 
 /// C library functions SDCC's libraries define with a calling convention of
@@ -41,6 +41,13 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         let area = &obj.areas[a];
         if area.is_absolute() { area.addr } else { 0 }
     };
+
+    if let Some(area) = obj.areas.iter().find(|a| a.size > MAX_AREA_SIZE) {
+        return Err(Error::new(format!(
+            "{} is larger than any Z80 address space",
+            area.name
+        )));
+    }
 
     let find = |name| obj.areas.iter().position(|a| a.name == name);
     let initialized = find(INITIALIZED);
@@ -82,7 +89,7 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         }
         let contents = if paired { initializer.unwrap_or(a) } else { a };
         let source = &obj.areas[contents];
-        let data = layout(source, base(contents));
+        let data = layout(source, base(contents))?;
         if data.is_empty() && source.relocs.is_empty() && source.size == 0 && !needed[a] {
             continue;
         }
@@ -134,13 +141,19 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
                     (sym, area_addend(reloc.field, reloc.addend, base(a)))
                 }
             };
+            let at = reloc.offset.checked_sub(start).ok_or_else(|| {
+                Error::new(format!(
+                    "relocation at {:#06X} lies before {}",
+                    reloc.offset, area.name
+                ))
+            })?;
             section.relocs.push(Rel {
-                r_offset: u64::from(reloc.offset - start),
+                r_offset: u64::from(at),
                 r_sym,
                 r_type: row.r_type,
                 r_addend: i64::from((r_addend - row.pc_bias) as i32),
             });
-            let at = (reloc.offset - start) as usize;
+            let at = at as usize;
             let end = (at + reloc.field.size() as usize).min(section.data.len());
             if at < end {
                 section.data[at..end].fill(0);
@@ -152,21 +165,21 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
 }
 
 /// An area's contents as the linker lays them out, starting at `base`.
-fn layout(area: &asxxxx::Area, base: u32) -> Vec<u8> {
+fn layout(area: &asxxxx::Area, base: u32) -> Result<Vec<u8>, Error> {
     let mut data = vec![0; area.size as usize];
     for chunk in &area.data {
-        let end = chunk.end() as usize;
-        if end > data.len() {
-            data.resize(end, 0);
+        let at = chunk.offset.checked_sub(base).map(|at| at as usize);
+        match at.and_then(|at| data.get_mut(at..at + chunk.bytes.len())) {
+            Some(bytes) => bytes.copy_from_slice(&chunk.bytes),
+            None => {
+                return Err(Error::new(format!(
+                    "contents of {} lie outside it",
+                    area.name
+                )));
+            }
         }
-        data[chunk.offset as usize..end].copy_from_slice(&chunk.bytes);
     }
-    let start = base as usize;
-    if start == 0 {
-        return data;
-    }
-    let end = (start + area.size as usize).min(data.len());
-    data.get(start..end).map_or(Vec::new(), <[u8]>::to_vec)
+    Ok(data)
 }
 
 /// The addend of a reference to an area: an absolute area's references hold
@@ -275,7 +288,12 @@ fn write_elf(
         let (section, st_shndx, st_value) = match symbol.def {
             None => (None, elf::SHN_UNDEF, 0),
             Some(def) => match def.area.and_then(|a| section_of[a].map(|s| (a, s))) {
-                Some((a, s)) => (Some(content[s].0), 0, def.value - base(a)),
+                Some((a, s)) => {
+                    let value = def.value.checked_sub(base(a)).ok_or_else(|| {
+                        Error::new(format!("'{}' lies before its absolute area", symbol.name))
+                    })?;
+                    (Some(content[s].0), 0, value)
+                }
                 None => (None, elf::SHN_ABS, def.value),
             },
         };

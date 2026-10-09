@@ -151,6 +151,24 @@ R 00 00 01 00
 }
 
 #[test]
+fn areas_must_fit_an_address_space() {
+    for (areas, message) in [
+        (
+            "A _DATA size 1000001 flags 0 addr 0\n",
+            "_DATA is larger than any Z80 address space",
+        ),
+        (
+            "A _CABS size 1 flags 8 addr 100\nS _x Def00000080\n",
+            "'_x' lies before its absolute area",
+        ),
+    ] {
+        let rel = format!("XL4\nH 1 areas 2 global symbols\nS .__.ABS. Def00000000\n{areas}");
+        let err = sdcconv::rel_to_elf(&asxxxx::parse(&rel).unwrap()).unwrap_err();
+        assert_eq!(err.to_string(), message);
+    }
+}
+
+#[test]
 fn other_ports_relocations_are_refused() {
     // One byte of a 24-bit address, as the 8051 assembler writes it.
     let rel = "\

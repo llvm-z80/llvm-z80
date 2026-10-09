@@ -151,6 +151,35 @@ fn absolute_and_weak_symbols_carry_over() {
 }
 
 #[test]
+fn names_a_rel_object_cannot_hold_are_refused() {
+    let mut obj = new_object();
+    let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
+    obj.append_section_data(text, &[0xC9], 1);
+    add_symbol(&mut obj, "_a b", text);
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "symbol \"_a b\" cannot be named in a .rel object"
+    );
+}
+
+#[test]
+fn areas_must_fit_an_address_space() {
+    let mut obj = new_object();
+    let bss = obj.add_section(Vec::new(), b".bss".to_vec(), SectionKind::UninitializedData);
+    obj.append_section_bss(bss, 0x100_0001, 1);
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        ".bss makes _DATA larger than any Z80 address space"
+    );
+}
+
+#[test]
 fn common_symbols_are_refused() {
     let mut obj = new_object();
     obj.add_symbol(ElfSymbol {

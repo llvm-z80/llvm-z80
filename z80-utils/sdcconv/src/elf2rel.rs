@@ -6,7 +6,7 @@ use object::elf::{self, FileHeader32, Rela32};
 use object::read::elf::{FileHeader, Rela, SectionHeader, Sym};
 
 use crate::Error;
-use crate::areas::{AREAS, INITIALIZED, INITIALIZER, Place, area_for_section};
+use crate::areas::{AREAS, INITIALIZED, INITIALIZER, MAX_AREA_SIZE, Place, area_for_section};
 use crate::relocs::{EM_Z80, FromElf, from_elf};
 
 /// Convert a Z80 ELF relocatable object to an ASxxxx object named `module`.
@@ -46,6 +46,11 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         }
         let (area, contents) = match area_for_section(name, sh_type, flags) {
             Place::Area(a) => {
+                if !asxxxx::valid_name(a) {
+                    return Err(Error::new(format!(
+                        "section {a:?} cannot be named in a .rel object"
+                    )));
+                }
                 let a = area_index(&mut areas, a);
                 (a, a)
             }
@@ -55,15 +60,27 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
             ),
         };
         let offset = areas[area].size;
+        let size = section.sh_size(endian);
+        if u64::from(offset) + u64::from(size) > u64::from(MAX_AREA_SIZE) {
+            return Err(Error::new(format!(
+                "{name} makes {} larger than any Z80 address space",
+                areas[area].name
+            )));
+        }
+        let data_size = if sh_type == elf::SHT_PROGBITS {
+            size
+        } else {
+            0
+        };
         placed.insert(
             i,
             Placed {
                 area,
                 contents,
                 offset,
+                data_size,
             },
         );
-        let size = section.sh_size(endian);
         if sh_type == elf::SHT_PROGBITS {
             let bytes = section.data(endian, data)?;
             let contents = &mut areas[contents];
@@ -91,6 +108,11 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         if name.is_empty() {
             continue;
         }
+        if !asxxxx::valid_name(name) || name == asxxxx::ABS_SYMBOL {
+            return Err(Error::new(format!(
+                "symbol {name:?} cannot be named in a .rel object"
+            )));
+        }
         let value = sym.st_value(endian);
         let def = match sym.st_shndx(endian) {
             elf::SHN_UNDEF => None,
@@ -104,7 +126,9 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
             shndx => match placed.get(&usize::from(shndx)) {
                 Some(p) => Some(Def {
                     area: Some(p.area),
-                    value: p.offset + value,
+                    value: p.offset.checked_add(value).ok_or_else(|| {
+                        Error::new(format!("{name:?} lies beyond any address space"))
+                    })?,
                 }),
                 None => continue,
             },
@@ -126,6 +150,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         let Some(&Placed {
             contents,
             offset: base,
+            data_size,
             ..
         }) = placed.get(&(section.sh_info(endian) as usize))
         else {
@@ -143,6 +168,11 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
                     )));
                 }
             };
+            if u64::from(r_offset) + u64::from(row.field.size()) > u64::from(data_size) {
+                return Err(Error::new(format!(
+                    "relocation at offset {r_offset:#06X} lies outside its section's data"
+                )));
+            }
             let r_sym = rela.r_sym(endian) as usize;
             if r_sym == 0 {
                 return Err(Error::new(format!(
@@ -183,6 +213,20 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         }
     }
 
+    for area in &mut areas {
+        area.relocs.sort_by_key(|r| r.offset);
+        if let Some(w) = area
+            .relocs
+            .windows(2)
+            .find(|w| w[1].offset < w[0].offset + w[0].field.size())
+        {
+            return Err(Error::new(format!(
+                "relocations at {:#06X} and {:#06X} in {} overlap",
+                w[0].offset, w[1].offset, area.name
+            )));
+        }
+    }
+
     Ok(keep_used_areas(areas, model_symbols, module))
 }
 
@@ -207,6 +251,8 @@ struct Placed {
     area: usize,
     contents: usize,
     offset: u32,
+    /// Bytes the section holds, which relocations must lie within.
+    data_size: u32,
 }
 
 fn is_global(sym: &elf::Sym32<LE>) -> bool {

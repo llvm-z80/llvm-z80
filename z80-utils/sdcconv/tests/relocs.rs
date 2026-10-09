@@ -127,3 +127,57 @@ fn relocations_survive_a_round_trip() {
     assert_eq!(back.areas[0].relocs, expected);
     assert_eq!(back.areas[0].data, rel.areas[0].data);
 }
+
+/// An ELF object whose `.text` holds `bytes`, relocated against `_x` at each
+/// of `relocs`.
+fn elf_with_relocs(bytes: &[u8], relocs: &[(u64, u32)]) -> Vec<u8> {
+    let mut obj = Object::new(BinaryFormat::Elf, Architecture::Riscv32, Endianness::Little);
+    let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
+    obj.append_section_data(text, bytes, 1);
+    let x = obj.add_symbol(Symbol {
+        name: b"_x".to_vec(),
+        value: 0,
+        size: 0,
+        kind: SymbolKind::Data,
+        scope: SymbolScope::Linkage,
+        weak: false,
+        section: SymbolSection::Undefined,
+        flags: SymbolFlags::None,
+    });
+    for &(offset, r_type) in relocs {
+        let flags = RelocationFlags::Elf { r_type };
+        obj.add_relocation(
+            text,
+            Relocation {
+                offset,
+                symbol: x,
+                addend: 0,
+                flags,
+            },
+        )
+        .unwrap();
+    }
+    let mut elf = obj.write().unwrap();
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    elf
+}
+
+#[test]
+fn relocations_must_lie_in_their_section() {
+    let elf = elf_with_relocs(&[0x21, 0, 0], &[(2, R_Z80_ADDR16)]);
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "relocation at offset 0x0002 lies outside its section's data"
+    );
+}
+
+#[test]
+fn relocations_must_not_overlap() {
+    let elf = elf_with_relocs(&[0x21, 0, 0], &[(1, R_Z80_ADDR16), (2, R_Z80_ADDR16_LO)]);
+    let err = sdcconv::elf_to_rel(&elf, "m").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "relocations at 0x0001 and 0x0002 in _CODE overlap"
+    );
+}
