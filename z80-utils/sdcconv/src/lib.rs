@@ -14,7 +14,7 @@ mod relocs;
 
 pub use archive::{elf_archive_to_lib, lib_to_elf_archive};
 pub use elf2rel::elf_to_rel;
-pub use rel2elf::rel_to_elf;
+pub use rel2elf::{rel_to_elf, rename_libc_symbols};
 
 use std::fmt;
 

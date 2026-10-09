@@ -62,10 +62,15 @@ clang --target=z80 my_module.c sdcc_code.o -o output.elf
 ### Symbol renaming
 
 SDCC libraries define C library functions such as `memset` and `memcpy` that
-also exist in the LLVM-Z80 runtime with a different calling convention.
-`rel2elf` renames `_memcpy`, `_memmove`, `_memset`, `_strlen` and `_strcmp`
-to `<name>__sdcc`, both definitions and references, so SDCC code keeps
-linking to its own versions.
+also exist in the LLVM-Z80 runtime with a different calling convention. When
+converting such a library, pass `--rename-sdcc-libc` to `rel2elf`: it renames
+`_memcpy`, `_memmove`, `_memset`, `_strlen` and `_strcmp` to `<name>__sdcc`,
+both definitions and references, so SDCC code keeps linking to its own
+versions.
+
+```bash
+rel2elf --rename-sdcc-libc /usr/share/sdcc/lib/z80/z80.lib z80.a
+```
 
 ## Test Runner
 

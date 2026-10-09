@@ -6,7 +6,7 @@ use ar_archive_writer::{
 };
 use object::read::archive::ArchiveFile;
 
-use crate::{Error, elf_to_rel, rel_to_elf};
+use crate::{Error, elf_to_rel, rel_to_elf, rename_libc_symbols};
 
 /// Lists the symbols a `.rel` member defines, for the archive's index.
 static REL_READER: ObjectReader = ObjectReader {
@@ -42,12 +42,17 @@ pub fn elf_archive_to_lib(data: &[u8]) -> Result<Vec<u8>, Error> {
     })
 }
 
-/// Convert an SDCC library of `.rel` objects to an archive of ELF objects.
-/// Members that fail to convert are left out with a warning.
-pub fn lib_to_elf_archive(data: &[u8]) -> Result<Vec<u8>, Error> {
+/// Convert an SDCC library of `.rel` objects to an archive of ELF objects,
+/// renaming clashing C library functions if asked to. Members that fail to
+/// convert are left out with a warning.
+pub fn lib_to_elf_archive(data: &[u8], rename_libc: bool) -> Result<Vec<u8>, Error> {
     convert_members(data, "o", &DEFAULT_OBJECT_READER, |_, data| {
         let text = std::str::from_utf8(data).map_err(|_| Error::new("not a text object"))?;
-        rel_to_elf(&asxxxx::parse(text)?)
+        let mut obj = asxxxx::parse(text)?;
+        if rename_libc {
+            rename_libc_symbols(&mut obj);
+        }
+        rel_to_elf(&obj)
     })
 }
 

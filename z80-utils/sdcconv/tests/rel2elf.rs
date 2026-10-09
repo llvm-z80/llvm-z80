@@ -79,6 +79,27 @@ fn initialized_halves_must_match() {
 }
 
 #[test]
+fn libc_renaming_is_asked_for() {
+    let rel = "\
+XL4
+H 1 areas 3 global symbols
+S .__.ABS. Def00000000
+S _strcmp Ref00000000
+A _CODE size 1 flags 0 addr 0
+S _memset Def00000000
+T 00 00 00 00 C9
+R 00 00 00 00
+";
+    let mut obj = asxxxx::parse(rel).unwrap();
+    let names = |obj: &asxxxx::Object| -> Vec<String> {
+        obj.symbols.iter().map(|s| s.name.clone()).collect()
+    };
+    assert_eq!(names(&obj), ["_strcmp", "_memset"]);
+    sdcconv::rename_libc_symbols(&mut obj);
+    assert_eq!(names(&obj), ["_strcmp__sdcc", "_memset__sdcc"]);
+}
+
+#[test]
 fn other_ports_relocations_are_refused() {
     // One byte of a 24-bit address, as the 8051 assembler writes it.
     let rel = "\
