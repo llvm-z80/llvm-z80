@@ -6,7 +6,7 @@ use object::elf::{self, FileHeader32, Rela32};
 use object::read::elf::{FileHeader, Rela, SectionHeader, Sym};
 
 use crate::Error;
-use crate::areas::{AREAS, area_for_section};
+use crate::areas::{AREAS, INITIALIZED, INITIALIZER, Place, area_for_section};
 use crate::relocs::{EM_Z80, FromElf, from_elf};
 
 /// Convert a Z80 ELF relocatable object to an ASxxxx object named `module`.
@@ -30,15 +30,13 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
             ..Area::default()
         })
         .collect();
-    let area_index = |name| AREAS.iter().position(|&(n, _)| n == name).unwrap();
 
-    // Each placed section's area and offset in it.
-    let mut placed: HashMap<usize, (usize, u32)> = HashMap::new();
+    let mut placed: HashMap<usize, Placed> = HashMap::new();
     for (i, section) in sections.iter().enumerate() {
         let sh_type = section.sh_type(endian);
-        let nobits = sh_type == elf::SHT_NOBITS;
-        if (sh_type != elf::SHT_PROGBITS && !nobits)
-            || section.sh_flags(endian) & elf::SHF_ALLOC == 0
+        let flags = section.sh_flags(endian);
+        if (sh_type != elf::SHT_PROGBITS && sh_type != elf::SHT_NOBITS)
+            || flags & elf::SHF_ALLOC == 0
         {
             continue;
         }
@@ -46,20 +44,41 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         if name.is_empty() || name.starts_with(".note") || name.starts_with(".comment") {
             continue;
         }
-        let a = area_index(area_for_section(name, nobits));
-        let area = &mut areas[a];
-        placed.insert(i, (a, area.size));
-        if !nobits {
+        let (area, contents) = match area_for_section(name, sh_type, flags) {
+            Place::Area(a) => {
+                let a = area_index(&mut areas, a);
+                (a, a)
+            }
+            Place::Initialized => (
+                area_index(&mut areas, INITIALIZED),
+                area_index(&mut areas, INITIALIZER),
+            ),
+        };
+        let offset = areas[area].size;
+        placed.insert(
+            i,
+            Placed {
+                area,
+                contents,
+                offset,
+            },
+        );
+        let size = section.sh_size(endian);
+        if sh_type == elf::SHT_PROGBITS {
             let bytes = section.data(endian, data)?;
-            match area.data.last_mut() {
-                Some(chunk) if chunk.end() == area.size => chunk.bytes.extend_from_slice(bytes),
-                _ => area.data.push(Chunk {
-                    offset: area.size,
+            let contents = &mut areas[contents];
+            match contents.data.last_mut() {
+                Some(chunk) if chunk.end() == offset => chunk.bytes.extend_from_slice(bytes),
+                _ => contents.data.push(Chunk {
+                    offset,
                     bytes: bytes.to_vec(),
                 }),
             }
         }
-        area.size += section.sh_size(endian);
+        areas[area].size += size;
+        if contents != area {
+            areas[contents].size += size;
+        }
     }
 
     let mut model_symbols = Vec::new();
@@ -75,9 +94,9 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         let def = match sym.st_shndx(endian) {
             elf::SHN_UNDEF => None,
             shndx => match placed.get(&usize::from(shndx)) {
-                Some(&(area, offset)) => Some(Def {
-                    area: Some(area),
-                    value: offset + sym.st_value(endian),
+                Some(p) => Some(Def {
+                    area: Some(p.area),
+                    value: p.offset + sym.st_value(endian),
                 }),
                 None => continue,
             },
@@ -93,7 +112,12 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         if section.sh_type(endian) != elf::SHT_RELA {
             continue;
         }
-        let Some(&(a, base)) = placed.get(&(section.sh_info(endian) as usize)) else {
+        let Some(&Placed {
+            area,
+            contents,
+            offset: base,
+        }) = placed.get(&(section.sh_info(endian) as usize))
+        else {
             continue;
         };
         for rela in section.data_as_array::<Rela32<LE>, _>(endian, data)? {
@@ -112,7 +136,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
             let r_sym = rela.r_sym(endian) as usize;
             let addend = i64::from(rela.r_addend(endian));
             let (target, addend) = if r_sym == 0 {
-                (Target::Area(a), addend)
+                (Target::Area(area), addend)
             } else {
                 let sym = symbols.symbol(object::SymbolIndex(r_sym))?;
                 if is_global(sym) {
@@ -124,14 +148,14 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
                         }
                     }
                 } else {
-                    let Some(&(sa, offset)) = placed.get(&usize::from(sym.st_shndx(endian))) else {
+                    let Some(p) = placed.get(&usize::from(sym.st_shndx(endian))) else {
                         continue;
                     };
-                    let value = i64::from(sym.st_value(endian)) + i64::from(offset);
-                    (Target::Area(sa), addend + value)
+                    let value = i64::from(sym.st_value(endian)) + i64::from(p.offset);
+                    (Target::Area(p.area), addend + value)
                 }
             };
-            areas[a].relocs.push(Reloc {
+            areas[contents].relocs.push(Reloc {
                 offset: base + r_offset,
                 width,
                 pc_relative,
@@ -142,6 +166,29 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
     }
 
     keep_used_areas(areas, model_symbols, module)
+}
+
+/// The area named `name`, added after the others if there is none.
+fn area_index(areas: &mut Vec<Area>, name: &str) -> usize {
+    match areas.iter().position(|a| a.name == name) {
+        Some(i) => i,
+        None => {
+            areas.push(Area {
+                name: name.to_string(),
+                ..Area::default()
+            });
+            areas.len() - 1
+        }
+    }
+}
+
+/// Where a section landed: the area its symbols and references go to, the
+/// area holding its bytes, and its offset in both.
+#[derive(Clone, Copy)]
+struct Placed {
+    area: usize,
+    contents: usize,
+    offset: u32,
 }
 
 fn is_global(sym: &elf::Sym32<LE>) -> bool {
@@ -181,9 +228,8 @@ fn keep_used_areas(
     for area in &mut kept {
         for reloc in &mut area.relocs {
             if let Target::Area(a) = reloc.target {
-                let a = new_index[a].ok_or_else(|| {
-                    Error::new(format!("relocation against empty area {}", AREAS[a].0))
-                })?;
+                let a = new_index[a]
+                    .ok_or_else(|| Error::new(format!("relocation against empty area {a}")))?;
                 reloc.target = Target::Area(a);
             }
         }

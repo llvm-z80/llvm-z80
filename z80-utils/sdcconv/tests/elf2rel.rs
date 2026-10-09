@@ -1,12 +1,53 @@
-use asxxxx::{Chunk, Def, Symbol};
-use object::write::{Object, Symbol as ElfSymbol, SymbolSection};
+use asxxxx::{Chunk, Def, Object as Rel, Symbol};
+use object::write::{Object, SectionId, Symbol as ElfSymbol, SymbolSection};
 use object::{
     Architecture, BinaryFormat, Endianness, SectionKind, SymbolFlags, SymbolKind, SymbolScope,
 };
 
-/// An ELF object with one byte of code and two 2 KB uninitialized globals.
-fn bss_object() -> Vec<u8> {
-    let mut obj = Object::new(BinaryFormat::Elf, Architecture::I386, Endianness::Little);
+fn new_object() -> Object<'static> {
+    Object::new(BinaryFormat::Elf, Architecture::I386, Endianness::Little)
+}
+
+fn add_symbol(obj: &mut Object, name: &str, section: SectionId) {
+    obj.add_symbol(ElfSymbol {
+        name: name.as_bytes().to_vec(),
+        value: 0,
+        size: 0,
+        kind: SymbolKind::Data,
+        scope: SymbolScope::Linkage,
+        weak: false,
+        section: SymbolSection::Section(section),
+        flags: SymbolFlags::None,
+    });
+}
+
+fn convert(obj: Object) -> Rel {
+    let mut elf = obj.write().unwrap();
+    // object has no Z80 architecture, so write an i386 ELF32 and retarget it.
+    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+    sdcconv::elf_to_rel(&elf, "m").unwrap()
+}
+
+fn def(name: &str, area: usize, value: u32) -> Symbol {
+    Symbol {
+        name: name.to_string(),
+        def: Some(Def {
+            area: Some(area),
+            value,
+        }),
+    }
+}
+
+fn chunk(bytes: &[u8]) -> Vec<Chunk> {
+    vec![Chunk {
+        offset: 0,
+        bytes: bytes.to_vec(),
+    }]
+}
+
+#[test]
+fn bss_goes_to_data_without_bytes() {
+    let mut obj = new_object();
     let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
     obj.append_section_data(text, &[0xC9], 1);
     for name in ["_a", "_b"] {
@@ -16,46 +57,53 @@ fn bss_object() -> Vec<u8> {
             SectionKind::UninitializedData,
         );
         obj.append_section_bss(bss, 0x800, 1);
-        obj.add_symbol(ElfSymbol {
-            name: name.as_bytes().to_vec(),
-            value: 0,
-            size: 0x800,
-            kind: SymbolKind::Data,
-            scope: SymbolScope::Linkage,
-            weak: false,
-            section: SymbolSection::Section(bss),
-            flags: SymbolFlags::None,
-        });
+        add_symbol(&mut obj, name, bss);
     }
-    let mut elf = obj.write().unwrap();
-    // object has no Z80 architecture, so write an i386 ELF32 and retarget it.
-    elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
-    elf
-}
-
-#[test]
-fn bss_takes_its_own_area_without_bytes() {
-    let rel = sdcconv::elf_to_rel(&bss_object(), "bss").unwrap();
+    let rel = convert(obj);
     let areas: Vec<(&str, u32)> = rel
         .areas
         .iter()
         .map(|a| (a.name.as_str(), a.size))
         .collect();
-    assert_eq!(areas, [("_CODE", 1), ("_BSS", 0x1000)]);
-    assert_eq!(
-        rel.areas[0].data,
-        [Chunk {
-            offset: 0,
-            bytes: vec![0xC9]
-        }]
-    );
+    assert_eq!(areas, [("_CODE", 1), ("_DATA", 0x1000)]);
     assert!(rel.areas[1].data.is_empty());
-    let def = |name: &str, value| Symbol {
-        name: name.to_string(),
-        def: Some(Def {
-            area: Some(1),
-            value,
-        }),
-    };
-    assert_eq!(rel.symbols, [def("_a", 0), def("_b", 0x800)]);
+    assert_eq!(rel.symbols, [def("_a", 1, 0), def("_b", 1, 0x800)]);
+}
+
+#[test]
+fn sections_go_to_the_areas_sdcc_uses() {
+    let mut obj = new_object();
+    let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
+    obj.append_section_data(text, &[0xC9], 1);
+    let rodata = obj.add_section(Vec::new(), b".rodata".to_vec(), SectionKind::ReadOnlyData);
+    obj.append_section_data(rodata, &[1, 2], 1);
+    let data = obj.add_section(Vec::new(), b".data".to_vec(), SectionKind::Data);
+    obj.append_section_data(data, &[7, 8, 9], 1);
+    add_symbol(&mut obj, "_d", data);
+    let bss = obj.add_section(Vec::new(), b".bss".to_vec(), SectionKind::UninitializedData);
+    obj.append_section_bss(bss, 4, 1);
+    let header = obj.add_section(Vec::new(), b"_HEADER".to_vec(), SectionKind::ReadOnlyData);
+    obj.append_section_data(header, &[0x42], 1);
+
+    let rel = convert(obj);
+    let areas: Vec<(&str, u32)> = rel
+        .areas
+        .iter()
+        .map(|a| (a.name.as_str(), a.size))
+        .collect();
+    assert_eq!(
+        areas,
+        [
+            ("_CODE", 3),
+            ("_DATA", 4),
+            ("_INITIALIZED", 3),
+            ("_INITIALIZER", 3),
+            ("_HEADER", 1),
+        ]
+    );
+    assert_eq!(rel.areas[0].data, chunk(&[0xC9, 1, 2]));
+    assert!(rel.areas[2].data.is_empty());
+    assert_eq!(rel.areas[3].data, chunk(&[7, 8, 9]));
+    assert_eq!(rel.areas[4].data, chunk(&[0x42]));
+    assert_eq!(rel.symbols, [def("_d", 2, 0)]);
 }
