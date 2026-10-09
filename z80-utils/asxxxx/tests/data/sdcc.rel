@@ -1,0 +1,40 @@
+XL4
+H 9 areas 7 global symbols
+M sdcc
+O -mz80 sdcccall(1)
+S .__.ABS. Def00000000
+S _tbl Ref00000000
+S _ext Ref00000000
+A _CODE size 9 flags 0 addr 0
+S _tail Def00000006
+S _hi Def00000000
+S _lo Def00000003
+A _DATA size 0 flags 0 addr 0
+A _INITIALIZED size 1 flags 0 addr 0
+S _g Def00000000
+A _DABS size 0 flags 8 addr 0
+A _HOME size 0 flags 0 addr 0
+A _GSINIT size 0 flags 0 addr 0
+A _GSFINAL size 0 flags 0 addr 0
+A _INITIALIZER size 1 flags 0 addr 0
+A _CABS size 0 flags 8 addr 0
+T 00 00 00 00
+R 00 00 02 00
+T 00 00 00 00
+R 00 00 02 00
+T 00 00 00 00
+R 00 00 00 00
+T 00 00 00 00 3E 2C 01 00 00 C9
+R 00 00 00 00 8B 05 01 00
+T 03 00 00 00
+R 00 00 00 00
+T 03 00 00 00 3E 2C 01 00 00 C9
+R 00 00 00 00 0B 05 01 00
+T 06 00 00 00
+R 00 00 00 00
+T 06 00 00 00 C3 00 00
+R 00 00 00 00 02 05 02 00
+T 00 00 00 00
+R 00 00 07 00
+T 00 00 00 00 03
+R 00 00 07 00

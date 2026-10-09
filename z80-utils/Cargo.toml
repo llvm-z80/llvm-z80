@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "test-runner",
+    "asxxxx",
     "elf2rel",
     "rel2elf",
 ]

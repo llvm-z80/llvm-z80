@@ -1,0 +1,13 @@
+XL3
+H 2 areas 2 global symbols
+M f8
+S ext Ref000000
+S .__.ABS. Def000000
+A _CODE size 0 flags 0 addr 0
+A CODE size 8 flags 0 addr 0
+T 00 00 00
+R 00 00 01 00
+T 00 00 00 D0 FF FF FF D3 FF FF FF 80 00 00 00 80
+R 00 00 01 00 0F 04 00 00 0F 08 00 00 0B 0C 00 00
+T 07 00 00 00 00 00
+R 00 00 01 00 8B 03 00 00
