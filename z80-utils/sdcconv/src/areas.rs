@@ -52,10 +52,10 @@ pub fn area_for_section(name: &str, sh_type: u32, flags: u32) -> Place<'_> {
 
 /// The section an area becomes, as name, type and flags. `empty` says the
 /// area holds nothing but zeros, so it can take no file space.
-pub fn section_for_area(area: &str, empty: bool) -> (&str, u32, u32) {
+pub fn section_for_area(area: &str, empty: bool) -> (String, u32, u32) {
     let code = SHF_ALLOC | SHF_EXECINSTR;
     let data = SHF_ALLOC | SHF_WRITE;
-    match area {
+    let (name, sh_type, flags) = match area {
         "_CODE" => (".text", SHT_PROGBITS, code),
         "_HOME" => (".text.home", SHT_PROGBITS, code),
         "_GSINIT" => (".text.gsinit", SHT_PROGBITS, code),
@@ -65,7 +65,11 @@ pub fn section_for_area(area: &str, empty: bool) -> (&str, u32, u32) {
         INITIALIZED | INITIALIZER => (".data", SHT_PROGBITS, data),
         "_DATA" | "_BSS" if empty => (".bss", SHT_NOBITS, data),
         "_DATA" | "_BSS" => (".data", SHT_PROGBITS, data),
+        // elf2rel passes a section back under its own name only when the
+        // name starts with `_`.
+        other if !other.starts_with('_') => return section_for_area(&format!("_{other}"), empty),
         other if empty => (other, SHT_NOBITS, data),
         other => (other, SHT_PROGBITS, SHF_ALLOC),
-    }
+    };
+    (name.to_string(), sh_type, flags)
 }

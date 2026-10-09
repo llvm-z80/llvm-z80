@@ -57,22 +57,33 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         )));
     }
 
+    // An area that relocations or symbols refer to needs a section, even an
+    // empty one.
+    let mut needed = vec![false; obj.areas.len()];
+    for reloc in obj.areas.iter().flat_map(|a| &a.relocs) {
+        if let Target::Area(a) = reloc.target {
+            needed[a] = true;
+        }
+    }
+    for def in obj.symbols.iter().filter_map(|s| s.def) {
+        if let Some(a) = def.area {
+            needed[a] = true;
+        }
+    }
+
     let mut sections: Vec<Section> = Vec::new();
     let mut section_of = vec![None; obj.areas.len()];
     for (a, area) in obj.areas.iter().enumerate() {
         // Initialized data is one section, holding the bytes of
         // `_INITIALIZER` and the symbols of `_INITIALIZED`.
         let paired = [initialized, initializer].contains(&Some(a));
-        let contents = if paired { initializer } else { Some(a) };
         if paired && section_of[a].is_some() {
             continue;
         }
-        let Some(contents) = contents else {
-            continue;
-        };
+        let contents = if paired { initializer.unwrap_or(a) } else { a };
         let source = &obj.areas[contents];
         let data = layout(source, base(contents));
-        if data.is_empty() && source.relocs.is_empty() && source.size == 0 {
+        if data.is_empty() && source.relocs.is_empty() && source.size == 0 && !needed[a] {
             continue;
         }
         let empty = source.relocs.is_empty() && data.iter().all(|&b| b == 0);
@@ -85,7 +96,7 @@ pub fn rel_to_elf(obj: &Object) -> Result<Vec<u8>, Error> {
         }
         sections.push(Section {
             area: contents,
-            name: name.to_string(),
+            name,
             nobits: sh_type == elf::SHT_NOBITS,
             flags,
             addr: if source.is_absolute() { source.addr } else { 0 },

@@ -100,6 +100,57 @@ R 00 00 00 00
 }
 
 #[test]
+fn empty_areas_keep_what_refers_to_them() {
+    // A label in an empty _DATA, and words against that area and an
+    // _INITIALIZED that has no _INITIALIZER.
+    let rel = "\
+XL4
+H 3 areas 2 global symbols
+S .__.ABS. Def00000000
+A _CODE size 6 flags 0 addr 0
+A _DATA size 0 flags 0 addr 0
+S _s Def00000000
+A _INITIALIZED size 0 flags 0 addr 0
+T 00 00 00 00 00 00 00 00 00 00
+R 00 00 00 00 02 04 01 00 00 06 01 00 00 08 02 00
+";
+    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
+    let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let area_name = |a: Option<usize>| a.map(|a| back.areas[a].name.as_str());
+    assert_eq!(area_name(back.symbols[0].def.unwrap().area), Some("_DATA"));
+    let targets: Vec<_> = back.areas[0]
+        .relocs
+        .iter()
+        .filter_map(|r| match r.target {
+            asxxxx::Target::Area(a) => area_name(Some(a)),
+            asxxxx::Target::Symbol(_) => None,
+        })
+        .collect();
+    assert_eq!(targets, ["_DATA", "_INITIALIZED"]);
+}
+
+#[test]
+fn other_areas_keep_their_name_through_elf() {
+    // Without a leading `_`, elf2rel would drop the first and read the
+    // second as _HOME.
+    let rel = "\
+XL4
+H 2 areas 1 global symbols
+S .__.ABS. Def00000000
+A .note size 1 flags 0 addr 0
+A .text.home size 1 flags 0 addr 0
+T 00 00 00 00 01
+R 00 00 00 00
+T 00 00 00 00 02
+R 00 00 01 00
+";
+    let elf = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap();
+    let back = sdcconv::elf_to_rel(&elf, "m").unwrap();
+    let names: Vec<&str> = back.areas.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, ["_.note", "_.text.home"]);
+}
+
+#[test]
 fn other_ports_relocations_are_refused() {
     // One byte of a 24-bit address, as the 8051 assembler writes it.
     let rel = "\

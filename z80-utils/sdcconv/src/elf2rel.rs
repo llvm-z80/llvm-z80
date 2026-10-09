@@ -183,7 +183,7 @@ pub fn elf_to_rel(data: &[u8], module: &str) -> Result<Object, Error> {
         }
     }
 
-    keep_used_areas(areas, model_symbols, module)
+    Ok(keep_used_areas(areas, model_symbols, module))
 }
 
 /// The area named `name`, added after the others if there is none.
@@ -213,21 +213,21 @@ fn is_global(sym: &elf::Sym32<LE>) -> bool {
     matches!(sym.st_bind(), elf::STB_GLOBAL | elf::STB_WEAK)
 }
 
-/// Drop the areas that are empty and define no symbol.
-fn keep_used_areas(
-    areas: Vec<Area>,
-    mut symbols: Vec<Symbol>,
-    module: &str,
-) -> Result<Object, Error> {
+/// Drop the areas that are empty, define no symbol and no relocation refers
+/// to.
+fn keep_used_areas(areas: Vec<Area>, mut symbols: Vec<Symbol>, module: &str) -> Object {
     let defines = |i: usize| {
         symbols
             .iter()
             .any(|s| s.def.is_some_and(|d| d.area == Some(i)))
     };
-    let used: Vec<bool> = areas
-        .iter()
-        .enumerate()
-        .map(|(i, a)| a.size > 0 || defines(i))
+    let referred = |i: usize| {
+        areas
+            .iter()
+            .any(|a| a.relocs.iter().any(|r| r.target == Target::Area(i)))
+    };
+    let used: Vec<bool> = (0..areas.len())
+        .map(|i| areas[i].size > 0 || defines(i) || referred(i))
         .collect();
     let mut new_index = vec![None; areas.len()];
     let mut kept = Vec::new();
@@ -245,18 +245,16 @@ fn keep_used_areas(
     }
     for area in &mut kept {
         for reloc in &mut area.relocs {
-            if let Target::Area(a) = reloc.target {
-                let a = new_index[a]
-                    .ok_or_else(|| Error::new(format!("relocation against empty area {a}")))?;
-                reloc.target = Target::Area(a);
+            if let Target::Area(a) = &mut reloc.target {
+                *a = new_index[*a].expect("an area relocations refer to is kept");
             }
         }
     }
 
-    Ok(Object {
+    Object {
         name: Some(module.to_string()),
         areas: kept,
         symbols,
         ..Object::default()
-    })
+    }
 }
