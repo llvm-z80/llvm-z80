@@ -1,5 +1,5 @@
 use crate::raw::{self, Entry, Record, TextKind};
-use crate::write::symbol_order;
+use crate::write::{check_counts, symbol_order};
 use crate::{
     ABS_SYMBOL, Area, Chunk, Def, Error, Field, Object, Page, PageBase, PdkPart, Reloc, Symbol,
     T_LINE_VALUES, Target, address_space, mode,
@@ -124,6 +124,8 @@ impl<'a> Decoder<'a> {
                 Record::Text { .. } => {}
             }
         }
+
+        check_counts(&self.obj)?;
 
         // List the symbols as write does, so a file that lists them in
         // another order reads the same once rewritten.

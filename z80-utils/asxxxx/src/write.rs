@@ -20,11 +20,7 @@ fn encode(obj: &Object) -> Result<raw::Object, Error> {
         return Err(Error::new(0, message));
     }
     check_text(obj)?;
-    // Lines name symbols and areas in 16 bits, and area FFFF stands for a
-    // fixed address in an 11-bit jump.
-    if obj.symbols.len() > 0xFFFF || obj.areas.len() > 0xFFFF {
-        return Err(Error::new(0, "too many symbols or areas for a .rel object"));
-    }
+    check_counts(obj)?;
     let order = symbol_order(obj)?;
     let mut file_index = vec![0; obj.symbols.len()];
     for (i, &s) in order.iter().enumerate() {
@@ -87,6 +83,15 @@ fn encode(obj: &Object) -> Result<raw::Object, Error> {
         format: obj.format,
         records: e.records,
     })
+}
+
+/// Refuse more symbols or areas than lines can name in 16 bits, where area
+/// FFFF also stands for a fixed address in an 11-bit jump.
+pub(crate) fn check_counts(obj: &Object) -> Result<(), Error> {
+    if obj.symbols.len() > 0xFFFF || obj.areas.len() > 0xFFFF {
+        return Err(Error::new(0, "too many symbols or areas for a .rel object"));
+    }
+    Ok(())
 }
 
 /// Refuse names and lines that would not read back the same.
@@ -180,7 +185,8 @@ impl Encoder<'_> {
                     match relocs.get(next) {
                         Some(r) if r.offset < pos => return Err(outside(r)),
                         Some(r) if r.offset == pos => {
-                            if r.offset + r.field.size() > chunk.end() {
+                            let end = u64::from(r.offset) + u64::from(r.field.size());
+                            if end > u64::from(chunk.end()) {
                                 return Err(outside(r));
                             }
                             let len = field_len(r.field, addr_bytes);
@@ -536,6 +542,35 @@ mod tests {
         assert_eq!(
             write(&obj).unwrap_err().message,
             "contents at FFFF in _CODE run past the address space"
+        );
+    }
+
+    #[test]
+    fn refuses_a_field_past_its_contents() {
+        let obj = Object {
+            areas: vec![Area {
+                name: "_CODE".into(),
+                size: 3,
+                data: vec![Chunk {
+                    offset: 0xFFFF_FFFC,
+                    bytes: vec![0; 3],
+                }],
+                relocs: vec![Reloc {
+                    offset: 0xFFFF_FFFE,
+                    field: Field::Word24,
+                    pc_relative: false,
+                    unsigned: false,
+                    page: Page::None,
+                    target: Target::Area(0),
+                    addend: 0,
+                }],
+                ..Area::default()
+            }],
+            ..Object::default()
+        };
+        assert_eq!(
+            write(&obj).unwrap_err().message,
+            "relocation at FFFFFFFE in _CODE is outside its contents"
         );
     }
 
