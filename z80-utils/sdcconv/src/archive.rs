@@ -31,8 +31,7 @@ fn rel_symbols(
 }
 
 /// Convert an archive of ELF objects to an SDCC library of `.rel` objects,
-/// also returning warnings. Members that fail to convert are left out with a
-/// warning.
+/// also returning warnings. A member that cannot be converted is an error.
 pub fn elf_archive_to_lib(data: &[u8]) -> Result<(Vec<u8>, Vec<String>), Error> {
     convert_members(data, "rel", &REL_READER, |name, data| {
         let module = Path::new(name)
@@ -46,7 +45,7 @@ pub fn elf_archive_to_lib(data: &[u8]) -> Result<(Vec<u8>, Vec<String>), Error> 
 
 /// Convert an SDCC library of `.rel` objects to an archive of ELF objects,
 /// renaming clashing C library functions if asked to, and also returning
-/// warnings. Members that fail to convert are left out with a warning.
+/// warnings. A member that cannot be converted is an error.
 pub fn lib_to_elf_archive(data: &[u8], rename_libc: bool) -> Result<(Vec<u8>, Vec<String>), Error> {
     convert_members(data, "o", &DEFAULT_OBJECT_READER, |_, data| {
         let text = std::str::from_utf8(data).map_err(|_| Error::new("not a text object"))?;
@@ -70,26 +69,23 @@ fn convert_members(
     for member in archive.members() {
         let member = member?;
         let name = String::from_utf8_lossy(member.name()).into_owned();
-        match convert(&name, member.data(data)?) {
-            Ok((converted, member_warnings)) => {
-                warnings.extend(member_warnings.iter().map(|w| format!("{name}: {w}")));
-                members.push(NewArchiveMember {
-                    buf: Box::new(converted),
-                    object_reader: reader,
-                    member_name: Path::new(&name)
-                        .with_extension(extension)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned(),
-                    mtime: 0,
-                    uid: 0,
-                    gid: 0,
-                    perms: 0o644,
-                });
-            }
-            Err(e) => warnings.push(format!("skipping '{name}': {e}")),
-        }
+        let (converted, member_warnings) =
+            convert(&name, member.data(data)?).map_err(|e| Error::new(format!("{name}: {e}")))?;
+        warnings.extend(member_warnings.iter().map(|w| format!("{name}: {w}")));
+        members.push(NewArchiveMember {
+            buf: Box::new(converted),
+            object_reader: reader,
+            member_name: Path::new(&name)
+                .with_extension(extension)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            mtime: 0,
+            uid: 0,
+            gid: 0,
+            perms: 0o644,
+        });
     }
     let mut out = Cursor::new(Vec::new());
     write_archive_to_stream(&mut out, &members, ArchiveKind::Gnu, false, None)?;

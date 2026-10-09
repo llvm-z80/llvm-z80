@@ -186,3 +186,29 @@ R 00 00 00 00 F1 03 03 01 00
     let err = sdcconv::rel_to_elf(&asxxxx::parse(rel).unwrap()).unwrap_err();
     assert_eq!(err.to_string(), "unsupported relocation at 0x0000 in CSEG");
 }
+
+#[test]
+fn a_member_that_cannot_be_converted_fails_the_library() {
+    use ar_archive_writer::{ArchiveKind, DEFAULT_OBJECT_READER, NewArchiveMember};
+    let big_endian = "XH4\nH 1 areas 0 global symbols\nA _CODE size 0 flags 0 addr 0\n";
+    let members: Vec<NewArchiveMember> = [("good.rel", REL), ("bad.rel", big_endian)]
+        .into_iter()
+        .map(|(name, text)| NewArchiveMember {
+            buf: Box::new(text.as_bytes().to_vec()),
+            object_reader: &DEFAULT_OBJECT_READER,
+            member_name: name.to_string(),
+            mtime: 0,
+            uid: 0,
+            gid: 0,
+            perms: 0o644,
+        })
+        .collect();
+    let mut lib = std::io::Cursor::new(Vec::new());
+    ar_archive_writer::write_archive_to_stream(&mut lib, &members, ArchiveKind::Gnu, false, None)
+        .unwrap();
+    let err = sdcconv::lib_to_elf_archive(&lib.into_inner(), false).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "bad.rel: a big-endian object is not a Z80 one"
+    );
+}

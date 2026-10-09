@@ -25,8 +25,8 @@ rel2elf [--rename-sdcc-libc] input.lib [output.a]
 
 Without an output path, the result is written next to the input with the new
 extension. `--help` lists the options. Warnings, such as a weak symbol becoming
-an ordinary one or an archive member that could not be converted and was left
-out, go to standard error.
+an ordinary one, go to standard error. An archive is converted only if every
+member can be.
 
 ### Cross-linking
 
