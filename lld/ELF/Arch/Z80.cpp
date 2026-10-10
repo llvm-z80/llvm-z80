@@ -46,7 +46,7 @@ Z80::Z80(Ctx &ctx) : TargetInfo(ctx) {
 RelExpr Z80::getRelExpr(RelType type, const Symbol &s,
                         const uint8_t *loc) const {
   switch (type) {
-  case R_Z80_PCREL_8:
+  case R_Z80_8_PCREL:
     return R_PC;
   case R_Z80_NONE:
     return R_NONE;
@@ -59,58 +59,54 @@ void Z80::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   switch (rel.type) {
   case R_Z80_NONE:
     break;
-  case R_Z80_IMM8:
-  case R_Z80_ADDR8:
-    checkIntUInt(ctx, loc, val, 8, rel);
+  case R_Z80_8: {
+    // Same range check as binutils, which also accepts an LDH high-page
+    // address.
+    uint8_t hi = (val >> 8) & 0xff;
+    if (hi != 0 && hi != 0xff)
+      reportRangeError(ctx, loc, rel, Twine((int64_t)val), -256, 255);
     *loc = val;
     break;
-  case R_Z80_ADDR16:
-  case R_Z80_IMM16:
-  case R_Z80_ADDR24_SEGMENT:
+  }
+  case R_Z80_8_DIS:
+  case R_Z80_8_PCREL:
+    checkInt(ctx, loc, (int64_t)val, 8, rel);
+    *loc = val;
+    break;
+  case R_Z80_16:
     checkIntUInt(ctx, loc, val, 16, rel);
     write16le(loc, val);
     break;
-  case R_Z80_ADDR16_LO:
-  case R_Z80_ADDR24_SEGMENT_LO:
+  case R_Z80_16_BE:
+    checkIntUInt(ctx, loc, val, 16, rel);
+    write16be(loc, val);
+    break;
+  case R_Z80_24:
+    checkIntUInt(ctx, loc, val, 24, rel);
+    loc[0] = val;
+    loc[1] = val >> 8;
+    loc[2] = val >> 16;
+    break;
+  case R_Z80_32:
+    write32le(loc, val);
+    break;
+  case R_Z80_BYTE0:
     *loc = val;
     break;
-  case R_Z80_ADDR16_HI:
-  case R_Z80_ADDR24_SEGMENT_HI:
+  case R_Z80_BYTE1:
     *loc = val >> 8;
     break;
-  case R_Z80_PCREL_8: {
-    // Z80 JR displacement: target = PC_after_instr + d = (loc + 1) + d
-    // lld computes val = S + A - P where P = loc, so d = val - 1
-    int64_t offset = (int64_t)val - 1;
-    checkInt(ctx, loc, offset, 8, rel);
-    *loc = offset;
-    break;
-  }
-  case R_Z80_ADDR24: {
-    checkIntUInt(ctx, loc, val, 24, rel);
-    uint32_t existing = read32le(loc);
-    write32le(loc, (existing & 0xFF000000) | (val & 0x00FFFFFF));
-    break;
-  }
-  case R_Z80_ADDR24_BANK:
+  case R_Z80_BYTE2:
     *loc = val >> 16;
     break;
-  case R_Z80_DISP8: {
-    // 8-bit signed displacement for indexed addressing (IX+d, IY+d).
-    int64_t sval = (int64_t)val;
-    checkInt(ctx, loc, sval, 8, rel);
-    *loc = sval;
+  case R_Z80_BYTE3:
+    *loc = val >> 24;
     break;
-  }
-  case R_SM83_LDH8: {
-    // SM83 LDH instruction: operand is (address - 0xFF00).
-    int64_t offset = (int64_t)val - 0xFF00;
-    checkUInt(ctx, loc, offset, 8, rel);
-    *loc = offset;
+  case R_Z80_WORD0:
+    write16le(loc, val);
     break;
-  }
-  case R_Z80_FK_DATA_4:
-    write32le(loc, val);
+  case R_Z80_WORD1:
+    write16le(loc, val >> 16);
     break;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << rel.type;
