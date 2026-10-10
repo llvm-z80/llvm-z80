@@ -12,8 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "InputFiles.h"
+#include "OutputSections.h"
 #include "Symbols.h"
 #include "Target.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/Endian.h"
 
@@ -32,6 +35,10 @@ public:
                      const uint8_t *loc) const override;
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
+  void relocateAlloc(InputSection &sec, uint8_t *buf) const override;
+
+private:
+  void checkLDH(InputSection &sec, uint8_t *buf) const;
 };
 } // namespace
 
@@ -60,8 +67,7 @@ void Z80::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_Z80_NONE:
     break;
   case R_Z80_8: {
-    // Same range check as binutils, which also accepts an LDH high-page
-    // address.
+    // SM83: checkLDH() checks that an LDH operand is in the high page.
     uint8_t hi = (val >> 8) & 0xff;
     if (hi != 0 && hi != 0xff)
       reportRangeError(ctx, loc, rel, Twine((int64_t)val), -256, 255);
@@ -111,6 +117,55 @@ void Z80::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << rel.type;
   }
+}
+
+// Whether the byte at off is code, from the $x and $d mapping symbols.
+static std::optional<bool> isCodeAt(const InputSection &sec, uint64_t off) {
+  std::optional<bool> code;
+  uint64_t start = 0;
+  for (Symbol *sym : cast<ELFFileBase>(sec.file)->getLocalSymbols()) {
+    auto *d = dyn_cast_or_null<Defined>(sym);
+    if (!d || d->section != &sec || d->value > off ||
+        (code && d->value < start) ||
+        (d->getName() != "$x" && d->getName() != "$d"))
+      continue;
+    start = d->value;
+    code = d->getName() == "$x";
+  }
+  return code;
+}
+
+// relocate() lets an LDH operand like 0x0080 pass,
+// so check that an R_Z80_8 after an LDH opcode is in 0xFF00-0xFFFF.
+void Z80::checkLDH(InputSection &sec, uint8_t *buf) const {
+  uint64_t secAddr = sec.getOutputSection()->addr + sec.outSecOff;
+  ArrayRef<uint8_t> data = sec.content();
+  for (const Relocation &rel : sec.relocs()) {
+    if (rel.type != R_Z80_8 || rel.offset == 0 ||
+        (data[rel.offset - 1] != 0xe0 && data[rel.offset - 1] != 0xf0))
+      continue;
+    uint64_t val = sec.getRelocTargetVA(ctx, rel, secAddr + rel.offset);
+    if (((val >> 8) & 0xff) != 0)
+      continue;
+    std::optional<bool> code = isCodeAt(sec, rel.offset);
+    if (code == false)
+      continue;
+    auto diag = code ? Err(ctx) : Warn(ctx);
+    diag << getErrorLoc(ctx, buf + rel.offset)
+         << (code ? "LDH address 0x" : "possible LDH address 0x")
+         << utohexstr(uint32_t(val)) << " is not in [0xff00, 0xffff]";
+    if (rel.sym && !rel.sym->isSection())
+      diag << "; references '" << rel.sym << '\'';
+  }
+}
+
+void Z80::relocateAlloc(InputSection &sec, uint8_t *buf) const {
+  TargetInfo::relocateAlloc(sec, buf);
+  auto *file = dyn_cast_or_null<ObjFile<ELF32LE>>(sec.file);
+  if ((sec.flags & SHF_EXECINSTR) && file &&
+      (file->getObj().getHeader().e_flags & EF_Z80_MACH_MSK) ==
+          EF_Z80_MACH_SM83)
+    checkLDH(sec, buf);
 }
 
 void elf::setZ80TargetInfo(Ctx &ctx) { ctx.target.reset(new Z80(ctx)); }

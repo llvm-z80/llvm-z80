@@ -10,6 +10,7 @@
 #define LLVM_LIB_TARGET_Z80_MCTARGETDESC_Z80MCELFSTREAMER_H
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCELFStreamer.h"
@@ -31,8 +32,12 @@ public:
 
   void initSections(const MCSubtargetInfo &STI) override;
   void changeSection(MCSection *Section, uint32_t Subsection = 0) override;
+  void reset() override;
 
   void emitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) override;
+  void emitBytes(StringRef Data) override;
+  void emitFill(const MCExpr &NumBytes, uint64_t FillValue, SMLoc Loc) override;
+  void emitValueImpl(const MCExpr *Value, unsigned Size, SMLoc Loc) override;
 
   bool hasBSS() const { return HasBSS; }
   bool hasData() const { return HasData; }
@@ -40,10 +45,17 @@ public:
   bool hasFiniArray() const { return HasFiniArray; }
 
 private:
+  enum MappingKind { MK_None, MK_Code, MK_Data };
+
+  void emitMappingSymbol(MappingKind Kind);
+
   bool HasBSS = false;
   bool HasData = false;
   bool HasInitArray = false;
   bool HasFiniArray = false;
+
+  DenseMap<const MCSection *, MappingKind> LastMappingKinds;
+  MappingKind LastMappingKind = MK_None;
 };
 
 MCStreamer *createZ80MCELFStreamer(const Triple &T, MCContext &Ctx,
