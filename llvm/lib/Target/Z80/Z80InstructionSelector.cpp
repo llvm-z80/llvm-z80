@@ -3937,14 +3937,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return false;
 
     bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
-    const char *FuncName = IsSigned ? "__divmodhi4" : "__udivmodhi4";
-    Module *M = const_cast<Module *>(MF.getFunction().getParent());
-    FunctionCallee Func = M->getOrInsertFunction(
-        FuncName, FunctionType::get(Type::getInt16Ty(M->getContext()),
-                                    {Type::getInt16Ty(M->getContext()),
-                                     Type::getInt16Ty(M->getContext())},
-                                    false));
-    GlobalValue *GV = cast<GlobalValue>(Func.getCallee());
+    const char *FuncName = STI.getTargetLowering()->getRequiredLibcallName(
+        IsSigned ? RTLIB::SDIVREM_I16 : RTLIB::UDIVREM_I16,
+        IsSigned ? "16-bit signed divmod" : "16-bit unsigned divmod");
 
     if (STI.hasSM83()) {
       // SM83: DE=dividend, BC=divisor → BC=quot, HL=rem
@@ -3953,7 +3948,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::BC)
           .addReg(RHSReg);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
-          .addGlobalAddress(GV)
+          .addExternalSymbol(FuncName)
           .addUse(Z80::DE, RegState::Implicit)
           .addUse(Z80::BC, RegState::Implicit);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
@@ -3967,7 +3962,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
           .addReg(RHSReg);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
-          .addGlobalAddress(GV)
+          .addExternalSymbol(FuncName)
           .addUse(Z80::HL, RegState::Implicit)
           .addUse(Z80::DE, RegState::Implicit);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)

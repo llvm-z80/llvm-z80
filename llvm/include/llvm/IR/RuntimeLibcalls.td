@@ -95,6 +95,8 @@ def IsX86_64 : LibcallPredicate<[{TT.getArch() == Triple::x86_64}]>;
 def IsX86 : LibcallPredicate<[{TT.isX86()}]>;
 def IsXCore : LibcallPredicate<[{TT.getArch() == Triple::xcore}]>;
 def IsZ80Family : LibcallPredicate<[{TT.isZ80Family()}]>;
+def IsZ80 : LibcallPredicate<[{TT.isZ80()}]>;
+def IsSM83 : LibcallPredicate<[{TT.isSM83()}]>;
 
 def IsOSzOS : LibcallPredicate<[{TT.isOSzOS()}]>;
 def IsSystemZ : LibcallPredicate<[{TT.isSystemZ()}]>;
@@ -806,6 +808,10 @@ def HEXAGON_VOLATILE_MEMCPY : RuntimeLibcall;
 
 // XCore calls
 def MEMCPY_ALIGN_4 : RuntimeLibcall;
+
+// Z80 calls
+def Z80_CALL_IY : RuntimeLibcall;
+def Z80_CALL_HL : RuntimeLibcall;
 
 // Objective-C calls
 def OBJC_AUTORELEASE : RuntimeLibcall;
@@ -3737,10 +3743,19 @@ def Z80MemCalls : LibcallsWithCC<
   (add __z80_memcpy_builtin, __z80_memmove_builtin, __z80_memset_builtin),
   Z80_BUILTIN>;
 
+// Indirect CALL trampoline
+def _call_iy : RuntimeLibcallImpl<Z80_CALL_IY>;
+def _call_hl : RuntimeLibcallImpl<Z80_CALL_HL>;
+
 def isZ80Family : RuntimeLibcallAvailability<(all_of IsZ80Family)>;
+def isZ80 : RuntimeLibcallAvailability<(all_of IsZ80)>;
+def isSM83 : RuntimeLibcallAvailability<(all_of IsSM83)>;
 
 def Z80CompilerRt : LibcallLibrary<"compiler-rt",
-  (add Z80MemCalls), isZ80Family>;
+  (add Z80MemCalls,
+       __divmodhi4, __udivmodhi4,
+       LibcallImpls<(add _call_iy), isZ80>,
+       LibcallImpls<(add _call_hl), isSM83>), isZ80Family>;
 
 def Z80SystemLibrary
     : SystemRuntimeLibrary<isZ80Family,
