@@ -812,6 +812,11 @@ def MEMCPY_ALIGN_4 : RuntimeLibcall;
 // Z80 calls
 def Z80_CALL_IY : RuntimeLibcall;
 def Z80_CALL_HL : RuntimeLibcall;
+def Z80_ADD_F32_FAST : RuntimeLibcall;
+def Z80_SUB_F32_FAST : RuntimeLibcall;
+def Z80_MUL_F32_FAST : RuntimeLibcall;
+def Z80_DIV_F32_FAST : RuntimeLibcall;
+def Z80_FCMP3_F32_FAST : RuntimeLibcall;
 
 // Objective-C calls
 def OBJC_AUTORELEASE : RuntimeLibcall;
@@ -3747,13 +3752,22 @@ def Z80MemCalls : LibcallsWithCC<
 def _call_iy : RuntimeLibcallImpl<Z80_CALL_IY>;
 def _call_hl : RuntimeLibcallImpl<Z80_CALL_HL>;
 
+// Soft-float operations for nnan, ninf and nsz, which skip the special cases.
+def __addsf3_fast : RuntimeLibcallImpl<Z80_ADD_F32_FAST>;
+def __subsf3_fast : RuntimeLibcallImpl<Z80_SUB_F32_FAST>;
+def __mulsf3_fast : RuntimeLibcallImpl<Z80_MUL_F32_FAST>;
+def __divsf3_fast : RuntimeLibcallImpl<Z80_DIV_F32_FAST>;
+def __cmpsf2_fast : RuntimeLibcallImpl<Z80_FCMP3_F32_FAST>;
+
 def isZ80Family : RuntimeLibcallAvailability<(all_of IsZ80Family)>;
 def isZ80 : RuntimeLibcallAvailability<(all_of IsZ80)>;
 def isSM83 : RuntimeLibcallAvailability<(all_of IsSM83)>;
 
 def Z80CompilerRt : LibcallLibrary<"compiler-rt",
   (add Z80MemCalls,
-       __divmodhi4, __udivmodhi4,
+       __divmodhi4, __udivmodhi4, __divmodsi4, __udivmodsi4,
+       __addsf3_fast, __subsf3_fast, __mulsf3_fast, __divsf3_fast,
+       __cmpsf2_fast,
        LibcallImpls<(add _call_iy), isZ80>,
        LibcallImpls<(add _call_hl), isSM83>), isZ80Family>;
 

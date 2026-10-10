@@ -929,12 +929,12 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     int FI = MF.getFrameInfo().CreateStackObject(4, Align(1),
                                                  /*isSpillSlot=*/false);
     auto Slot = MIRBuilder.buildFrameIndex(LLT::pointer(0, 16), FI);
-    if (Helper.createLibcall(
-            IsSigned ? "__divmodsi4" : "__udivmodsi4", {QuotReg, I32Ty, 0},
-            {{MI.getOperand(2).getReg(), I32Ty, 0},
-             {MI.getOperand(3).getReg(), I32Ty, 1},
-             {Slot.getReg(0), PointerType::get(Ctx, 0), 2}},
-            CallingConv::C, LocObserver, &MI) != LegalizerHelper::Legalized)
+    if (Helper.createLibcall(IsSigned ? RTLIB::SDIVREM_I32 : RTLIB::UDIVREM_I32,
+                             {QuotReg, I32Ty, 0},
+                             {{MI.getOperand(2).getReg(), I32Ty, 0},
+                              {MI.getOperand(3).getReg(), I32Ty, 1},
+                              {Slot.getReg(0), PointerType::get(Ctx, 0), 2}},
+                             LocObserver, &MI) != LegalizerHelper::Legalized)
       return false;
     auto *MMO =
         MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
@@ -1039,27 +1039,27 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     Register RHS = MI.getOperand(2).getReg();
 
     bool Fast = hasAllFastFlags(MI, MIRBuilder);
-    const char *FuncName;
+    RTLIB::Libcall LC;
     switch (MI.getOpcode()) {
     case TargetOpcode::G_FADD:
-      FuncName = Fast ? "__addsf3_fast" : "__addsf3";
+      LC = Fast ? RTLIB::Z80_ADD_F32_FAST : RTLIB::ADD_F32;
       break;
     case TargetOpcode::G_FSUB:
-      FuncName = Fast ? "__subsf3_fast" : "__subsf3";
+      LC = Fast ? RTLIB::Z80_SUB_F32_FAST : RTLIB::SUB_F32;
       break;
     case TargetOpcode::G_FMUL:
-      FuncName = Fast ? "__mulsf3_fast" : "__mulsf3";
+      LC = Fast ? RTLIB::Z80_MUL_F32_FAST : RTLIB::MUL_F32;
       break;
     case TargetOpcode::G_FDIV:
-      FuncName = Fast ? "__divsf3_fast" : "__divsf3";
+      LC = Fast ? RTLIB::Z80_DIV_F32_FAST : RTLIB::DIV_F32;
       break;
     default:
       llvm_unreachable("unexpected opcode");
     }
 
-    auto Status = Helper.createLibcall(FuncName, {Dst, F32Ty, 0},
+    auto Status = Helper.createLibcall(LC, {Dst, F32Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                       CallingConv::C, LocObserver, &MI);
+                                       LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
       return false;
     MI.eraseFromParent();
@@ -1087,10 +1087,9 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     MachineFunction &MF = MIRBuilder.getMF();
     auto &Ctx = MF.getFunction().getContext();
     Type *F32Ty = Type::getFloatTy(Ctx);
-    const char *FuncName = IsMin ? "fminimum_numf" : "fmaximum_numf";
-    auto Status = Helper.createLibcall(FuncName, {Dst, F32Ty, 0},
-                                       {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                       CallingConv::C, LocObserver, &MI);
+    auto Status = Helper.createLibcall(
+        IsMin ? RTLIB::FMINIMUM_NUM_F32 : RTLIB::FMAXIMUM_NUM_F32,
+        {Dst, F32Ty, 0}, {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}}, LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
       return false;
     MI.eraseFromParent();
@@ -1254,20 +1253,10 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   }
 
   case TargetOpcode::G_FCMP: {
-    // Custom FCMP lowering: call a comparison libcall that returns i16
-    // (-1/0/+1), then use G_ICMP on the result. We can't use the default
-    // FCMP libcall path because it returns i32, and our G_ICMP only
-    // supports up to i16.
-    //
-    // GCC convention:
-    //   __cmpsf2: returns -1 (a<b), 0 (a==b), +1 (a>b or NaN)
-    //   __gtsf2/__gesf2: returns -1 (a<b or NaN), 0 (a==b), +1 (a>b)
-    //   __unordsf2: returns nonzero if either operand is NaN, 0 otherwise
-    //
-    // Ordered predicates return false for NaN - handled naturally by the
-    // libcall return values. Unordered predicates return true for NaN -
-    // need an additional __unordsf2 call. FCMP_ONE also needs __unordsf2
-    // because __cmpsf2 returns +1 for NaN which falsely satisfies != 0.
+    // Lower to a three-way compare libcall tested against zero. On NaN the
+    // libcalls return +1, except __gtsf2 and __gesf2, which return -1.
+    //   OEQ, OLT, OLE, OGT, OGE, UNE: the test is already right on NaN.
+    //   ONE, UEQ, ULT, ULE, UGT, UGE: also call __unordsf2.
     MachineFunction &MF = MIRBuilder.getMF();
     auto Pred =
         static_cast<CmpInst::Predicate>(MI.getOperand(1).getPredicate());
@@ -1282,7 +1271,6 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
 
     bool Fast = hasAllFastFlags(MI, MIRBuilder);
 
-    // FCMP_ORD/UNO: only need __unordsf2.
     if (Pred == CmpInst::FCMP_ORD || Pred == CmpInst::FCMP_UNO) {
       if (Fast) {
         // nnan+ninf+nsz: ORD is always true, UNO is always false.
@@ -1291,9 +1279,9 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
         return true;
       }
       Register UnordResult = MRI.createGenericVirtualRegister(S16);
-      auto Status = Helper.createLibcall("__unordsf2", {UnordResult, I16Ty, 0},
+      auto Status = Helper.createLibcall(RTLIB::UO_F32, {UnordResult, I16Ty, 0},
                                          {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                         CallingConv::C, LocObserver, &MI);
+                                         LocObserver, &MI);
       if (Status != LegalizerHelper::Legalized)
         return false;
       auto Zero = MIRBuilder.buildConstant(S16, 0);
@@ -1304,66 +1292,62 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
       return true;
     }
 
-    // Determine if we need an __unordsf2 call for NaN handling.
-    // UNE is already correct without it (__cmpsf2 returns +1 for NaN).
-    // With nnan, NaN never occurs so extra NaN check is never needed.
     bool IsUnordered = CmpInst::isUnordered(Pred);
     bool IsONE = (Pred == CmpInst::FCMP_ONE);
     bool NeedsNaNCheck =
         !Fast && ((IsUnordered && Pred != CmpInst::FCMP_UNE) || IsONE);
 
-    // Map unordered predicates to their ordered equivalents.
     CmpInst::Predicate OrderedPred =
         IsUnordered ? CmpInst::getOrderedPredicate(Pred) : Pred;
 
-    const char *LibcallName;
+    RTLIB::Libcall LC;
     CmpInst::Predicate ICmpPred;
     switch (OrderedPred) {
     case CmpInst::FCMP_OEQ:
-      LibcallName = Fast ? "__cmpsf2_fast" : "__cmpsf2";
+      LC = RTLIB::FCMP3_PRED_OEQ_F32;
       ICmpPred = CmpInst::ICMP_EQ;
       break;
     case CmpInst::FCMP_OLT:
-      LibcallName = Fast ? "__cmpsf2_fast" : "__cmpsf2";
+      LC = RTLIB::FCMP3_PRED_OLT_F32;
       ICmpPred = CmpInst::ICMP_SLT;
       break;
     case CmpInst::FCMP_OLE:
-      LibcallName = Fast ? "__cmpsf2_fast" : "__cmpsf2";
+      LC = RTLIB::FCMP3_PRED_OLE_F32;
       ICmpPred = CmpInst::ICMP_SLE;
       break;
     case CmpInst::FCMP_OGT:
-      LibcallName = Fast ? "__cmpsf2_fast" : "__gtsf2";
+      LC = RTLIB::FCMP3_PRED_OGT_F32;
       ICmpPred = CmpInst::ICMP_SGT;
       break;
     case CmpInst::FCMP_OGE:
-      LibcallName = Fast ? "__cmpsf2_fast" : "__gesf2";
+      LC = RTLIB::FCMP3_PRED_OGE_F32;
       ICmpPred = CmpInst::ICMP_SGE;
       break;
     case CmpInst::FCMP_ONE:
-      LibcallName = Fast ? "__cmpsf2_fast" : "__cmpsf2";
+      LC = RTLIB::FCMP3_PRED_UNE_F32;
       ICmpPred = CmpInst::ICMP_NE;
       break;
     default:
       return false;
     }
+    if (Fast)
+      LC = RTLIB::Z80_FCMP3_F32_FAST;
 
     Register CmpResult = MRI.createGenericVirtualRegister(S16);
-    auto Status = Helper.createLibcall(LibcallName, {CmpResult, I16Ty, 0},
+    auto Status = Helper.createLibcall(LC, {CmpResult, I16Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                       CallingConv::C, LocObserver, &MI);
+                                       LocObserver, &MI);
     if (Status != LegalizerHelper::Legalized)
       return false;
 
     if (!NeedsNaNCheck) {
-      // Ordered predicates (except ONE) and UNE: no extra NaN handling.
       auto Zero = MIRBuilder.buildConstant(S16, 0);
       MIRBuilder.buildICmp(ICmpPred, Dst, CmpResult, Zero);
     } else {
-      // Need __unordsf2 call for NaN handling.
       Register UnordResult = MRI.createGenericVirtualRegister(S16);
-      auto UStatus = Helper.createLibcall("__unordsf2", {UnordResult, I16Ty, 0},
-                                          {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                          CallingConv::C, LocObserver, &MI);
+      auto UStatus = Helper.createLibcall(
+          RTLIB::UO_F32, {UnordResult, I16Ty, 0},
+          {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}}, LocObserver, &MI);
       if (UStatus != LegalizerHelper::Legalized)
         return false;
 
@@ -1373,11 +1357,9 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
 
       Register NaNBool = MRI.createGenericVirtualRegister(S1);
       if (IsONE) {
-        // ONE: (cmp != 0) AND NOT unordered
         MIRBuilder.buildICmp(CmpInst::ICMP_EQ, NaNBool, UnordResult, Zero);
         MIRBuilder.buildAnd(Dst, CmpBool, NaNBool);
       } else {
-        // Unordered: ordered_result OR unordered
         MIRBuilder.buildICmp(CmpInst::ICMP_NE, NaNBool, UnordResult, Zero);
         MIRBuilder.buildOr(Dst, CmpBool, NaNBool);
       }
