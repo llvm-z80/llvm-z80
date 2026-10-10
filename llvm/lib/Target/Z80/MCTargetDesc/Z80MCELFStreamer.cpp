@@ -7,14 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/Z80MCELFStreamer.h"
-#include "MCTargetDesc/Z80MCExpr.h"
 #include "Z80MCTargetDesc.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCObjectFileInfo.h"
-#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 
@@ -43,26 +41,6 @@ void Z80MCELFStreamer::changeSection(MCSection *Section, uint32_t Subsection) {
 void Z80MCELFStreamer::emitInstruction(const MCInst &Inst,
                                        const MCSubtargetInfo &STI) {
   MCELFStreamer::emitInstruction(Inst, STI);
-}
-
-void Z80MCELFStreamer::emitValueImpl(const MCExpr *Value, unsigned Size,
-                                     SMLoc Loc) {
-  if (const auto *MME = dyn_cast<Z80MCExpr>(Value)) {
-    if (MME->getKind() == Z80MCExpr::VK_ADDR_ASCIZ) {
-      emitMosAddrAsciz(MME->getSubExpr(), Size, Loc);
-      return;
-    }
-  }
-  MCELFStreamer::emitValueImpl(Value, Size, Loc);
-}
-
-void Z80MCELFStreamer::emitMosAddrAsciz(const MCExpr *Value, unsigned Size,
-                                        SMLoc Loc) {
-  visitUsedExpr(*Value);
-  MCDwarfLineEntry::make(this, getCurrentSectionOnly());
-  addFixup(Value, (MCFixupKind)Z80::AddrAsciz);
-  SmallVector<char> Zeroes(Size, 0);
-  appendContents(Zeroes);
 }
 
 MCStreamer *createZ80MCELFStreamer(const Triple & /*T*/, MCContext &Ctx,

@@ -48,21 +48,11 @@ ELF_RELOC(R_Z80_ADDR24_SEGMENT_LO,     10)
 // The high byte from the segment value in a 24-bit address.
 ELF_RELOC(R_Z80_ADDR24_SEGMENT_HI,     11)
 
-// A 16-bit PC-relative jump value.
-ELF_RELOC(R_Z80_PCREL_16,              12)
-
 // Relocations for DWARF.
 ELF_RELOC(R_Z80_FK_DATA_4,             13)
-ELF_RELOC(R_Z80_FK_DATA_8,             14)
-
-// Decimal ASCII address encoding.
-ELF_RELOC(R_Z80_ADDR_ASCIZ,            15)
 
 // A 16-bit immediate value.
 ELF_RELOC(R_Z80_IMM16,                 16)
-
-// A 13-bit address.  Reserved for future use.
-ELF_RELOC(R_Z80_ADDR13,                17)
 
 // An 8-bit signed displacement for indexed addressing (IX+d, IY+d).
 ELF_RELOC(R_Z80_DISP8,                 18)

@@ -36,9 +36,7 @@ const R_Z80_ADDR16: u32 = 3;
 const R_Z80_ADDR16_LO: u32 = 4;
 const R_Z80_ADDR16_HI: u32 = 5;
 const R_Z80_PCREL_8: u32 = 6;
-const R_Z80_PCREL_16: u32 = 12;
 const R_Z80_FK_DATA_4: u32 = 13;
-const R_Z80_FK_DATA_8: u32 = 14;
 const R_Z80_IMM16: u32 = 16;
 const R_SM83_LDH8: u32 = 19;
 
@@ -302,10 +300,11 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
     let endian = LE;
 
     let machine = header.e_machine.get(endian);
-    if machine != 0x1F90 {
+    if machine != elf::EM_Z80 {
         return Err(format!(
-            "not a Z80 ELF (e_machine=0x{:04X}, expected 0x1F90)",
-            machine
+            "not a Z80 ELF (e_machine={}, expected {})",
+            machine,
+            elf::EM_Z80
         ));
     }
 
@@ -466,10 +465,9 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
                 R_Z80_ADDR16 | R_Z80_IMM16 => (2, 0u8),
                 R_Z80_ADDR8 | R_Z80_IMM8 | R_SM83_LDH8 => (1, R_BYTE),
                 R_Z80_PCREL_8 => (1, R_BYTE | R_PCR),
-                R_Z80_PCREL_16 => (2, R_PCR),
                 R_Z80_ADDR16_LO => (1, R_BYTE),
                 R_Z80_ADDR16_HI => (1, R_BYTE),
-                R_Z80_FK_DATA_4 | R_Z80_FK_DATA_8 => continue,
+                R_Z80_FK_DATA_4 => continue,
                 _ => {
                     eprintln!(
                         "warning: unsupported relocation type {} at offset 0x{:04X}",
