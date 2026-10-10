@@ -13,7 +13,8 @@ ELF_RELOC(R_Z80_NONE,     0)
 // An 8-bit value. An SM83 LDH operand uses it with the full high-page address.
 ELF_RELOC(R_Z80_8,        1)
 
-// An 8-bit signed displacement for indexed addressing (IX+d, IY+d).
+// An 8-bit signed displacement:
+// IX+d, IY+d, and the SM83 ADD SP,e and LD HL,SP+e offset.
 ELF_RELOC(R_Z80_8_DIS,    2)
 
 // An 8-bit PC-relative displacement (JR, DJNZ), measured from the relocated

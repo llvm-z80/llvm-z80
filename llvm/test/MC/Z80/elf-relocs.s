@@ -2,9 +2,9 @@
 ; RUN: llvm-mc -triple=sm83 -filetype=obj --defsym=SM83=1 %s -o - | llvm-readelf -r - | FileCheck %s --check-prefix=SM83
 ; RUN: not llvm-mc -triple=z80 -filetype=obj --defsym=QUAD=1 %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=QUAD
 
-; Relocations use the GNU binutils types. Like GNU as, a DJNZ relocation
-; carries the instruction-end adjustment in its addend, and an LDH operand is
-; an ordinary 8-bit relocation against the high-page address.
+; Relocations use the GNU binutils types. As in GNU as, a DJNZ addend holds the
+; instruction-end adjustment, an LDH operand is a plain R_Z80_8, and an SM83 SP
+; offset is an R_Z80_8_DIS.
 
 .ifdef QUAD
 	.quad	ext
@@ -12,6 +12,8 @@
 .ifdef SM83
 	ldh	(hram), a
 	ldh	a, (hram)
+	add	sp, disp
+	ldhl	sp, disp
 .else
 	ld	a, ext
 	ld	hl, ext
@@ -41,5 +43,7 @@
 
 ; SM83:      00000001 {{.*}} R_Z80_8 {{.*}} hram + 0
 ; SM83-NEXT: 00000003 {{.*}} R_Z80_8 {{.*}} hram + 0
+; SM83-NEXT: 00000005 {{.*}} R_Z80_8_DIS {{.*}} disp + 0
+; SM83-NEXT: 00000007 {{.*}} R_Z80_8_DIS {{.*}} disp + 0
 
 ; QUAD: error: 8-byte data relocations are not supported
