@@ -647,7 +647,7 @@ static void emitSPRelativeAddr(MachineBasicBlock &MBB,
     if (PreserveFlags)
       emitFlagSavePush(MBB, InsertBefore, DL, TII);
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::LDHL_SP_e))
-        .addImm(AdjOffset & 0xFF);
+        .addImm(AdjOffset);
     if (PreserveFlags)
       BuildMI(MBB, InsertBefore, DL, TII.get(Z80::POP_AF));
     return;

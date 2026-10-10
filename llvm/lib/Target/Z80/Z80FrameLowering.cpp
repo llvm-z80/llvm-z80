@@ -236,7 +236,7 @@ MachineBasicBlock::iterator Z80FrameLowering::eliminateCallFramePseudoInstr(
   if (STI.hasSM83() && Amount <= 127) {
     // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
     assert(callFrameDestroyScratch(STI, Amount) == Register());
-    BuildMI(MBB, MI, DL, TII.get(Z80::ADD_SP_e)).addImm(Amount & 0xFF);
+    BuildMI(MBB, MI, DL, TII.get(Z80::ADD_SP_e)).addImm(Amount);
   } else if (Amount <= 16) {
     // Small amounts: use POP AF (each pops 2 bytes, clobbers A but not HL).
     // More compact than INC SP (1 byte per 2 bytes vs 1 byte per 1 byte).
@@ -335,7 +335,7 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
     if (STI.hasSM83() && LocalSize <= 128) {
       // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
       BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_SP_e))
-          .addImm(-(int64_t)LocalSize & 0xFF);
+          .addImm(-(int64_t)LocalSize);
     } else {
       unsigned PushCount = LocalSize / 2;
       // Check if HL might hold an incoming argument (live-in to entry block).
@@ -408,7 +408,7 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
     const auto &STI = MF.getSubtarget<Z80Subtarget>();
     if (STI.hasSM83() && LocalSize <= 127) {
       // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
-      BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_SP_e)).addImm(LocalSize & 0xFF);
+      BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_SP_e)).addImm(LocalSize);
     } else if (LocalSize <= 4) {
       // Small: INC SP loop (1 byte each, no clobber).
       for (unsigned i = 0; i < LocalSize; ++i)

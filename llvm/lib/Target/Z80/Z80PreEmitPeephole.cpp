@@ -1066,7 +1066,7 @@ static bool hoistLDHLOutOfFlagSave(MachineBasicBlock &MBB,
 
     LLVM_DEBUG(dbgs() << "  Flag save: hoisting " << *LDHL);
     BuildMI(MBB, At, LDHL->getDebugLoc(), TII->get(Z80::LDHL_SP_e))
-        .addImm(Disp & 0xFF);
+        .addImm(Disp);
     auto After = std::next(Pop);
     MBB.erase(Pop);
     MBB.erase(LDHL);

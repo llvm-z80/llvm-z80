@@ -2167,7 +2167,7 @@ void Z80InstrInfo::buildOutlinedFrame(
   for (MachineInstr &MI : MBB)
     if (MI.getOpcode() == Z80::LDHL_SP_e) {
       int64_t Disp = SignExtend64<8>(MI.getOperand(0).getImm()) + 2;
-      MI.getOperand(0).setImm(Disp & 0xFF);
+      MI.getOperand(0).setImm(Disp);
     }
 
   MBB.insert(MBB.end(), BuildMI(MF, DebugLoc(), get(Z80::RET)));
