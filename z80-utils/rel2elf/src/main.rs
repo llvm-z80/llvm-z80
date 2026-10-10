@@ -735,7 +735,7 @@ fn transform(raw: &mut RawModule) -> ElfModule {
                     (true, true) => R_Z80_8_PCREL,
                     (true, false) => if is_msb { R_Z80_BYTE1 } else { R_Z80_8 },
                     (false, true) => {
-                         eprintln!("warning: unsupported 16-bit PC-relative relocation at offset 0x{r_offset:04X}");
+                        eprintln!("warning: unsupported 16-bit PC-relative relocation at offset 0x{r_offset:04X}");
                         continue;
                     }
                     (false, false) => R_Z80_16,

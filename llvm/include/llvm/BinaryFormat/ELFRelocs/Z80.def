@@ -3,9 +3,11 @@
 #error "ELF_RELOC must be defined"
 #endif
 
-// Relocation types for Z80 ELF files, with the numbers and meanings GNU
-// binutils gives them.
+// Relocation types for Z80 ELF files,
+// written to be compatible with GNU binutils.
 
+// No relocation type. Should not be emitted by the writer.
+// Readers should recognize this as an error in the ELF file.
 ELF_RELOC(R_Z80_NONE,     0)
 
 // An 8-bit value. An SM83 LDH operand uses it with the full high-page address.
