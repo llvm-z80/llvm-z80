@@ -38,7 +38,15 @@ rel2elf input.rel output.o
 # Archive conversion
 elf2rel input.a output.lib
 rel2elf input.lib output.a
+
+# Name the CPU of modules assembled with sdas, which do not record one
+rel2elf --cpu=sm83 input.lib output.a
 ```
+
+rel2elf writes the CPU into the ELF header so that lld can refuse to mix
+objects for different CPUs. SDCC-compiled modules record their CPU and
+rel2elf uses that; for other modules it uses `--cpu` (`z80`, `z180`, `r800`,
+`ez80`, `sm83` or `z80n`). A module with neither is treated as Z80.
 
 ### Cross-linking workflow
 
