@@ -37,6 +37,10 @@ Z80TargetInfo::Z80TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
   LongLongAlign = 8;
   Int128Align = 8;
   FloatAlign = 8;
+  // double and long double are binary32, 
+  // since the runtime has no binary64 arithmetic.
+  DoubleWidth = LongDoubleWidth = 32;
+  DoubleFormat = LongDoubleFormat = &llvm::APFloat::IEEEsingle();
   DoubleAlign = 8;
   LongDoubleAlign = 8;
   // The fixed-point types (_Accum/_Fract) and the storage-only float types
