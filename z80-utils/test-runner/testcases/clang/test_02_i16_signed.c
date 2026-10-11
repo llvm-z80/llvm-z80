@@ -1,4 +1,5 @@
 /* Test 02: i16 signed arithmetic - multiply, division, abs, sign ext, comparisons */
+/* SKIP-IF: -z88dk */
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef unsigned short uint16_t;

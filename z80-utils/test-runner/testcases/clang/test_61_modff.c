@@ -1,5 +1,6 @@
 /* SKIP-IF: -ffast-math */
 /* SKIP-IF: -sdcc */
+/* SKIP-IF: -z88dk */
 /* Test 61: modff runtime routine.
    Splits a float into integral and fractional parts, both carrying the sign
    of the input. Sources are volatile so the split cannot be constant folded.

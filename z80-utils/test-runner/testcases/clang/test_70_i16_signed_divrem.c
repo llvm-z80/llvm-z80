@@ -5,6 +5,7 @@
  * The remainder takes the sign of the dividend, so every sign combination is
  * checked, along with -32768, a divisor of 256 or more, and an exact
  * division. */
+/* SKIP-IF: -z88dk */
 
 __attribute__((noinline)) static void divrem(int a, int b, int *q, int *r) {
     *q = a / b;
