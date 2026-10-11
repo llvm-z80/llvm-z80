@@ -128,6 +128,7 @@ add_clang_library(clangBasic
   Warnings.cpp
   XRayInstr.cpp
   XRayLists.cpp
+  Z80CallingConv.cpp
   ${version_inc}
 
   DEPENDS

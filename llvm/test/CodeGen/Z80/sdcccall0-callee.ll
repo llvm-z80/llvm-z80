@@ -1,6 +1,6 @@
 ; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 ;
-; __sdcccall(0) __z88dk_callee (cc 132 = CallingConv::Z80_SDCCCall0Callee).
+; __sdcccall(0) __z88dk_callee (cc 245 = CallingConv::Z80_SDCCCall0Callee).
 ; Arguments are pushed on the stack exactly like __sdcccall(0), but the CALLEE
 ; cleans them up on return (Z80 has no `ret N`, so the backend uses the RET_CLEANUP pseudo).
 ; Return values use the z88dk classic registers (i8=L, i16=HL, i32=DE:HL), same
@@ -15,7 +15,7 @@
 ; (a) caller side, pushes the args, does NOT clean up (the callee will)
 ; ============================================================================
 
-declare cc 132 void @sink2(i16, i16)
+declare cc 245 void @sink2(i16, i16)
 
 ; CHECK-LABEL: _call_callee:
 ; CHECK:      ld hl,#2
@@ -27,7 +27,7 @@ declare cc 132 void @sink2(i16, i16)
 ; CHECK-NOT:  inc sp
 ; CHECK:      ret
 define void @call_callee() {
-  call cc 132 void @sink2(i16 1, i16 2)
+  call cc 245 void @sink2(i16 1, i16 2)
   ret void
 }
 
@@ -57,7 +57,7 @@ define void @call_callee() {
 ; CHECK-NEXT: inc sp
 ; CHECK-NEXT: push bc
 ; CHECK-NEXT: ret
-define cc 132 void @callee_void(i16 %a, i16 %b) {
+define cc 245 void @callee_void(i16 %a, i16 %b) {
   %scaled_a = mul i16 %a, 10
   %s = add i16 %scaled_a, %b
   store i16 %s, ptr inttoptr(i16 16384 to ptr)
@@ -87,13 +87,13 @@ define cc 132 void @callee_void(i16 %a, i16 %b) {
 ; CHECK-NEXT: inc sp
 ; CHECK-NEXT: push bc
 ; CHECK-NEXT: ret
-define cc 132 i16 @callee_reti16(i16 %a, i16 %b) {
+define cc 245 i16 @callee_reti16(i16 %a, i16 %b) {
   %s = sub i16 %a, %b
   ret i16 %s
 }
 
 ; i32 return: callee cleanup is FORCED even though the return is > 16 bits.
-; sdcccall(1) would caller-clean here; cc 132 must still pop its own 4 arg
+; sdcccall(1) would caller-clean here; cc 245 must still pop its own 4 arg
 ; bytes (BC-fallback pop/push).  Return value is in DE:HL.
 ; CHECK-LABEL: _callee_reti32:
 ; CHECK:      ld hl,#2
@@ -106,7 +106,7 @@ define cc 132 i16 @callee_reti16(i16 %a, i16 %b) {
 ; CHECK-NEXT: inc sp
 ; CHECK-NEXT: push bc
 ; CHECK-NEXT: ret
-define cc 132 i32 @callee_reti32(i16 %a, i16 %b) {
+define cc 245 i32 @callee_reti32(i16 %a, i16 %b) {
   %z = zext i16 %a to i32
   ret i32 %z
 }
@@ -119,6 +119,6 @@ define cc 132 i32 @callee_reti32(i16 %a, i16 %b) {
 ; CHECK-NOT:  pop
 ; CHECK-NOT:  inc sp
 ; CHECK:      ret
-define cc 132 void @callee_noargs() {
+define cc 245 void @callee_noargs() {
   ret void
 }

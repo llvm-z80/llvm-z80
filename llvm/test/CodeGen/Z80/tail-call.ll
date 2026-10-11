@@ -9,8 +9,8 @@
 declare void @v()
 declare i16 @g(i16, i16)
 declare i16 @g3(i16, i16, i16)
-declare cc128 i16 @cc0()
-declare cc128 void @cc0v()
+declare cc241 i16 @cc0()
+declare cc241 void @cc0v()
 declare void @f(...)
 declare void @llvm.memcpy.p0.p0.i16(ptr, ptr, i16, i1)
 
@@ -107,7 +107,7 @@ define i16 @helper_used(i16 %a, i16 %b) {
 ; __sdcccall(0) returns i16 in HL on Z80 and DE on SM83, unlike the helper.
 ; CHECK-LABEL: _helper_cc0:
 ; CHECK:       call ___mulhi3
-define cc128 i16 @helper_cc0(i16 %a, i16 %b) {
+define cc241 i16 @helper_cc0(i16 %a, i16 %b) {
   %r = mul i16 %a, %b
   ret i16 %r
 }
@@ -117,7 +117,7 @@ define cc128 i16 @helper_cc0(i16 %a, i16 %b) {
 ; CHECK:       %bb.0:
 ; CHECK-NEXT:  jp _cc0v
 define void @void_cc0() {
-  tail call cc128 void @cc0v()
+  tail call cc241 void @cc0v()
   ret void
 }
 
@@ -161,7 +161,7 @@ define void @isr() "interrupt" {
 ; CHECK:       %bb.0:
 ; CHECK-NEXT:  call _cc0
 define i16 @ret_mismatch() {
-  %r = tail call cc128 i16 @cc0()
+  %r = tail call cc241 i16 @cc0()
   ret i16 %r
 }
 

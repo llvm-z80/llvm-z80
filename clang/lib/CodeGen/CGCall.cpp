@@ -32,6 +32,7 @@
 #include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/DiagnosticFrontend.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Basic/Z80CallingConv.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/CodeGen/SwiftCallingConv.h"
 #include "clang/CodeGenUtils/CallUtils.h"
@@ -129,6 +130,8 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
     CC_VLS_CASE(32768)
     CC_VLS_CASE(65536)
 #undef CC_VLS_CASE
+  case CC_Z80SDCCCall1:
+    return llvm::CallingConv::Z80_SDCCCall1;
   case CC_Z80SDCCCall0:
     return llvm::CallingConv::Z80_SDCCCall0;
   case CC_Z80SmallC:
@@ -353,7 +356,9 @@ static CallingConv getCallingConventionForDecl(const ObjCMethodDecl *D,
   }
 
   if (SDCCCallAttr *SCC = D->getAttr<SDCCCallAttr>())
-    return SCC->getABI() == 0 ? CC_Z80SDCCCall0 : CC_C;
+    return joinZ80CC(
+        {SCC->getABI() == 0 ? Z80CCBase::SDCCCall0 : Z80CCBase::SDCCCall1},
+        D->getASTContext().getTargetInfo().getTriple());
 
   return CC_C;
 }
