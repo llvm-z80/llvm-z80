@@ -2,9 +2,8 @@
 ; RUN: llvm-mc -triple=sm83 -filetype=obj --defsym=SM83=1 %s -o - | llvm-readelf -r - | FileCheck %s --check-prefix=SM83
 ; RUN: not llvm-mc -triple=z80 -filetype=obj --defsym=QUAD=1 %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=QUAD
 
-; Relocations use the GNU binutils types. As in GNU as, a DJNZ addend holds the
-; instruction-end adjustment, an LDH operand is a plain R_Z80_8, and an SM83 SP
-; offset is an R_Z80_8_DIS.
+; As in GNU as, a DJNZ addend holds the instruction-end adjustment and an LDH
+; operand is a plain R_Z80_8. An SM83 SP offset is an R_Z80_8_DIS.
 
 .ifdef QUAD
 	.quad	ext

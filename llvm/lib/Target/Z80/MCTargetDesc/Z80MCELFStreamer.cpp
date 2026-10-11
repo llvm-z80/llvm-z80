@@ -48,8 +48,7 @@ void Z80MCELFStreamer::reset() {
   MCELFStreamer::reset();
 }
 
-// $x and $d mark code and data in an executable section for the linker's LDH
-// operand check.
+// $x and $d mark where code and data start in an executable section.
 void Z80MCELFStreamer::emitMappingSymbol(MappingKind Kind) {
   auto *Sec = static_cast<const MCSectionELF *>(getCurrentSectionOnly());
   if (Kind == LastMappingKind || !(Sec->getFlags() & ELF::SHF_EXECINSTR))

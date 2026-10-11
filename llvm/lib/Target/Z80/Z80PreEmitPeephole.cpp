@@ -1151,7 +1151,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
     }
 
     if (Opc == Z80::LDHL_SP_e) {
-      // The stored immediate is the masked byte of a signed displacement.
+      // The immediate is a signed 8-bit displacement.
       int64_t N = SignExtend64<8>(MI.getOperand(0).getImm() & 0xFF);
       if (Known && isRegDeadAfter(Next, MBB, TRI, Z80::FLAGS)) {
         int64_t D = N - Off;

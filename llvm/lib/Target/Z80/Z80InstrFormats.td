@@ -119,7 +119,7 @@ def addr16 : addr16at<1>;
 def addr16at2 : addr16at<2>;
 
 /// 8-bit signed immediate operand (for SM83 ADD SP,e / LDHL SP,e). A symbol
-/// operand gets the signed displacement relocation, as GNU as gives it.
+/// operand gets the signed displacement relocation.
 class simm8at<int offset> : Operand<i32> {
   let ParserMatchClass = ImmediateAsmOperand<"Disp8">;
   let EncoderMethod = "encodeImm<Z80::Disp8, " # offset # ">";

@@ -38,7 +38,7 @@ const STT_SECTION: u8 = 3;
 const SHN_UNDEF: u16 = 0;
 const SHN_ABS: u16 = 0xFFF1;
 
-// Z80 ELF relocation types, numbered as in GNU binutils
+// Z80 ELF relocation types
 const R_Z80_8: u32 = 1;
 const R_Z80_8_PCREL: u32 = 3;
 const R_Z80_16: u32 = 4;
