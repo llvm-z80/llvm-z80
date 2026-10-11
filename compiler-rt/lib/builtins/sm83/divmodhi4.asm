@@ -7,7 +7,7 @@
 ;
 ; Input:  DE = dividend, BC = divisor
 ; Output: BC = quotient (truncated toward zero)
-;         HL = remainder (sign of the dividend)
+;         DE = remainder (sign of the dividend)
 ; Method: determine both signs, make operands positive, call ___udivmodhi4
 ;
 ; A quotient and a remainder of the same operands are fused into one call to
@@ -27,18 +27,18 @@ ___divmodhi4_pos_dividend:
 	jr	z, ___divmodhi4_pos_divisor
 	call	__neg_bc
 ___divmodhi4_pos_divisor:
-	call	___udivmodhi4	; BC = |quotient|, HL = |remainder|
+	call	___udivmodhi4	; BC = |quotient|, DE = |remainder|
 	pop	af
 	jr	z, ___divmodhi4_rem_done
-	; Negate remainder, keeping the quotient sign in E
-	ld	e, a
-	xor	a
-	sub	l
+	; Negate remainder, keeping the quotient sign in L
 	ld	l, a
+	xor	a
+	sub	e
+	ld	e, a
 	sbc	a, a
-	sub	h
-	ld	h, a
-	ld	a, e
+	sub	d
+	ld	d, a
+	ld	a, l
 ___divmodhi4_rem_done:
 	bit	7, a
 	ret	z		; positive quotient
