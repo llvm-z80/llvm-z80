@@ -481,8 +481,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .clampScalar(0, S8, S128);
 
   // Combined div+rem: one runtime call returns both results.
-  //   i16: __(u)divmodhi4, selected in ISel; quotient and remainder come back
-  //        in registers (Z80 HL÷DE → DE, HL; SM83 DE÷BC → BC, HL).
+  //   i16: __(u)divmodhi4 in legalizeCustom, returning {quotient, remainder};
+  //        with the inline runtime ISel expands both.
   //   i32: __(u)divmodsi4 in legalizeCustom; the quotient is returned and the
   //        remainder stored through a pointer.
   // Other widths are split back into div and rem.
@@ -1195,17 +1195,29 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
 
   case TargetOpcode::G_UDIVREM:
   case TargetOpcode::G_SDIVREM: {
-    // i16 is selected in ISel.
-    Register QuotReg = MI.getOperand(0).getReg();
-    if (MRI.getType(QuotReg).getSizeInBits() != 32)
-      return true;
-
-    // quotient = __(u)divmodsi4(dividend, divisor, &remainder), with a
-    // byte-aligned slot for the remainder as for G_FMODF.
     bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
+    Register QuotReg = MI.getOperand(0).getReg();
     Register RemReg = MI.getOperand(1).getReg();
     MachineFunction &MF = MIRBuilder.getMF();
     LLVMContext &Ctx = MF.getFunction().getContext();
+
+    if (MRI.getType(QuotReg).getSizeInBits() == 16) {
+      if (MF.getSubtarget<Z80Subtarget>().inlineI16Runtime())
+        return true;
+      Type *I16Ty = Type::getInt16Ty(Ctx);
+      if (Helper.createLibcall(
+              IsSigned ? RTLIB::SDIVREM_I16 : RTLIB::UDIVREM_I16,
+              {{QuotReg, RemReg}, StructType::get(I16Ty, I16Ty), 0},
+              {{MI.getOperand(2).getReg(), I16Ty, 0},
+               {MI.getOperand(3).getReg(), I16Ty, 1}},
+              LocObserver, &MI) != LegalizerHelper::Legalized)
+        return false;
+      MI.eraseFromParent();
+      return true;
+    }
+
+    // quotient = __(u)divmodsi4(dividend, divisor, &remainder), with a
+    // byte-aligned slot for the remainder as for G_FMODF.
     Type *I32Ty = Type::getInt32Ty(Ctx);
     int FI = MF.getFrameInfo().CreateStackObject(4, Align(1),
                                                  /*isSpillSlot=*/false);

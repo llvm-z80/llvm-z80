@@ -22,9 +22,9 @@ ___modhi3_pos_dividend:
 	jr	z, ___modhi3_pos_divisor
 	call	__neg_bc
 ___modhi3_pos_divisor:
-	call	___udivhi3	; BC = quotient, HL = remainder
-	ld	c, l		; BC = |remainder|
-	ld	b, h
+	call	___udivhi3	; BC = quotient, DE = remainder
+	ld	c, e		; BC = |remainder|
+	ld	b, d
 	pop	af
 	bit	7, a
 	ret	z		; dividend was positive

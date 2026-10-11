@@ -1,6 +1,9 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___divmodsi4
+	.globl __divmodsi_abs
+	.globl __divmodsi_neg
+	.globl __udivmodsi
 
 ;===------------------------------------------------------------------------===;
 ; ___divmodsi4 - 32-bit signed quotient and remainder

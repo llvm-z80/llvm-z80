@@ -21,6 +21,19 @@ pub fn symbol_addr_from_map(map_file: &Path, name: &str) -> Option<u32> {
     None
 }
 
+/// Find a symbol's address in a z88dk-z80asm map file. Its lines read
+/// "NAME = $ADDR ; ...".
+pub fn symbol_addr_from_z80asm_map(map_file: &Path, name: &str) -> Option<u32> {
+    let content = std::fs::read_to_string(map_file).ok()?;
+    for line in content.lines() {
+        let mut parts = line.split_whitespace();
+        if parts.next() == Some(name) && parts.next() == Some("=") {
+            return u32::from_str_radix(parts.next()?.trim_start_matches('$'), 16).ok();
+        }
+    }
+    None
+}
+
 /// Find the `_halt` symbol address from an SDCC linker map file (.map).
 pub fn halt_addr_from_map(map_file: &Path) -> Option<String> {
     symbol_addr_from_map(map_file, "_halt").map(|a| format!("0x{a:04X}"))

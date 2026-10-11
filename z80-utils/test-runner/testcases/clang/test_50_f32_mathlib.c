@@ -1,5 +1,6 @@
 /* Test 50: f32 math library - truncf, floorf, ceilf, roundf, rintf,
    fminf, fmaxf, fmodf, lroundf */
+/* SKIP-IF: -z88dk */
 typedef unsigned short uint16_t;
 
 float truncf(float);

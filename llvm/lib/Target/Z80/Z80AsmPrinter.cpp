@@ -68,6 +68,7 @@ public:
   void EmitToStreamer(MCStreamer &S, MCInst &Inst);
 
   void emitInstruction(const MachineInstr *MI) override;
+  void emitCallExx(const MachineInstr *MI);
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        const char *ExtraCode, raw_ostream &OS) override;
@@ -103,6 +104,14 @@ void Z80AsmPrinter::EmitToStreamer(MCStreamer &S, MCInst &Inst) {
 }
 
 void Z80AsmPrinter::emitInstruction(const MachineInstr *MI) {
+  switch (MI->getOpcode()) {
+  case Z80::CALL_EXX:
+  case Z80::CALL_EXX_HIGH:
+  case Z80::CALL_EXX_DIVREM:
+    emitCallExx(MI);
+    return;
+  }
+
   // Do any auto-generated pseudo lowerings.
   if (MCInst OutInst; lowerPseudoInstExpansion(MI, OutInst)) {
     EmitToStreamer(*OutStreamer, OutInst);
@@ -112,6 +121,41 @@ void Z80AsmPrinter::emitInstruction(const MachineInstr *MI) {
   MCInst Inst;
   InstLowering.lower(MI, Inst);
   EmitToStreamer(*OutStreamer, Inst);
+}
+
+/// Expand a call to a z88dk 32-bit integer math core.
+void Z80AsmPrinter::emitCallExx(const MachineInstr *MI) {
+  auto Emit = [&](unsigned Opc, ArrayRef<MCOperand> Ops = {}) {
+    MCInst Inst;
+    Inst.setOpcode(Opc);
+    for (const MCOperand &Op : Ops)
+      Inst.addOperand(Op);
+    EmitToStreamer(*OutStreamer, Inst);
+  };
+  bool DivRem = MI->getOpcode() == Z80::CALL_EXX_DIVREM;
+  // EXX swaps BC too, so the pointer moves to IY first.
+  if (DivRem) {
+    Emit(Z80::PUSH_BC);
+    Emit(Z80::POP_IY);
+  }
+  Emit(Z80::EXX);
+  Emit(Z80::POP_HL);
+  Emit(Z80::POP_DE);
+  Emit(Z80::PUSH_IX);
+  MCOperand Target;
+  lowerOperand(MI->getOperand(0), Target);
+  Emit(Z80::CALL_nn, Target);
+  Emit(Z80::POP_IX);
+  if (MI->getOpcode() == Z80::CALL_EXX)
+    return;
+  Emit(Z80::EXX);
+  if (!DivRem)
+    return;
+  static const MCPhysReg Bytes[] = {Z80::L, Z80::H, Z80::E, Z80::D};
+  for (unsigned I = 0; I != 4; ++I)
+    Emit(Z80::LD_IYd_r,
+         {MCOperand::createImm(I), MCOperand::createReg(Bytes[I])});
+  Emit(Z80::EXX);
 }
 
 void Z80AsmPrinter::lowerOperand(const MachineOperand &MO, MCOperand &MCOp) {

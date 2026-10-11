@@ -102,6 +102,30 @@ pub fn ensure_sdcc_crt0(paths: &Paths, target: Target) -> Result<PathBuf, String
     Ok(obj)
 }
 
+/// Assemble the harness's z88dk-toolchain crt0 into the build tree, with
+/// z88dk's `lib` directory on the include path for its section order.
+pub fn ensure_z88dk_crt0(paths: &Paths, target: Target, z88dk_lib: &Path) -> Result<PathBuf, String> {
+    let src = paths.harness_crt0_z88dk(target);
+    if !src.is_file() {
+        return Err(format!("harness crt0 not found: {}", src.display()));
+    }
+    let stage = paths.elf_runtime_stage(target);
+    std::fs::create_dir_all(&stage).map_err(|e| format!("create {}: {e}", stage.display()))?;
+    let obj = stage.join("harness_crt0_z88dk.o");
+    if needs_rebuild(&src, &obj) {
+        let status = Command::new("z88dk-z80asm")
+            .arg(format!("-I{}", z88dk_lib.display()))
+            .arg(format!("-o={}", obj.display()))
+            .arg(&src)
+            .status()
+            .map_err(|e| format!("z88dk-z80asm: {e}"))?;
+        if !status.success() {
+            return Err(format!("z88dk-z80asm failed on {}", src.display()));
+        }
+    }
+    Ok(obj)
+}
+
 /// The line of sdld's output that makes its image unusable: an error, an
 /// undefined symbol, or a symbol two libraries define. sdld still writes the
 /// image and exits 0 for the last two.
