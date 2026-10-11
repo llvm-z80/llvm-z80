@@ -40,8 +40,8 @@ pub struct ClangConfig {
     /// Caveat: host `int` is 32-bit vs Z80's 16-bit, so tests relying on 16-bit
     /// `int` wraparound can legitimately differ - triage such hits.
     pub native_oracle: bool,
-    /// Build through the SDCC toolchain (the `-sdcc` triple, sdas and sdld)
-    /// and link SDCC's library after the runtime, instead of building ELF.
+    /// Build with the `-sdcc` triple through sdas and sdld, and link SDCC's
+    /// library before `<target>_sdcc_rt.lib`.
     pub sdcc: bool,
     pub pattern: Option<String>,
 }
@@ -132,7 +132,7 @@ pub fn run(paths: &Paths, config: &ClangConfig, on_result: &mut OnResult) -> Sui
     let toolchain = if config.sdcc {
         runtime::ensure_sdcc_crt0(paths, config.target).map(|crt0| Toolchain::Sdcc {
             crt0,
-            rt_lib: paths.rt_lib(config.target),
+            rt_lib: paths.sdcc_rt_lib(config.target),
             sdcc_lib: config::find_sdcc_lib(config.target),
         })
     } else {
@@ -455,31 +455,26 @@ fn run_sdcc(
     let ihx = out_base.with_extension("ihx");
     let bin = out_base.with_extension("bin");
 
-    // Link: sdld -m -i <out> crt0.rel test.rel -l <runtime> -l <SDCC library>
+    // Link: sdld -m -i <out> crt0.rel test.rel -l <SDCC library> -l <runtime>
     let mut link = Command::new(target.linker());
     link.args(["-m", "-i"]);
     link.arg(&out_base);
     link.arg(crt0);
     link.arg(test_obj);
-    link.arg("-l").arg(rt_lib);
     if let Some(lib) = sdcc_lib {
         link.arg("-l").arg(lib);
     }
+    link.arg("-l").arg(rt_lib);
     match run_cmd_timeout(&mut link, COMPILE_TIMEOUT) {
         Err(e) => {
             remove_tmp_dir(tmp_dir);
             return TestResult::fatal(tag, format!("link {e}"));
         }
-        // sdld reports an undefined symbol but still writes the image.
         Ok((code, stdout, stderr)) => {
             let output = format!("{stdout}{stderr}");
-            if code != 0 || !ihx.exists() || output.contains("Undefined Global") {
-                let err = output
-                    .lines()
-                    .find(|l| l.contains("Undefined Global") || l.contains("rror"))
-                    .unwrap_or("link failed")
-                    .trim()
-                    .to_string();
+            let problem = runtime::sdld_problem(&output);
+            if code != 0 || !ihx.exists() || problem.is_some() {
+                let err = problem.unwrap_or("link failed").to_string();
                 remove_tmp_dir(tmp_dir);
                 return TestResult::fatal(tag, format!("link: {err}"));
             }

@@ -129,7 +129,7 @@ Usage: z80-test-runner clang [options] [name-filter]
                        with the host's computed value (catches consistently-wrong
                        values; reference is computed, not a hand-written expect).
   -sdcc                Build with the -sdcc triple through sdas and sdld, and
-                       link SDCC's library after the runtime."
+                       link SDCC's library before <target>_sdcc_rt.lib."
     );
 }
 

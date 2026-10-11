@@ -102,6 +102,15 @@ pub fn ensure_sdcc_crt0(paths: &Paths, target: Target) -> Result<PathBuf, String
     Ok(obj)
 }
 
+/// The line of sdld's output that makes its image unusable: an error, an
+/// undefined symbol, or a symbol two libraries define. sdld still writes the
+/// image and exits 0 for the last two.
+pub fn sdld_problem(output: &str) -> Option<&str> {
+    output.lines().map(str::trim).find(|l| {
+        l.contains("rror") || l.contains("Undefined Global") || l.contains("found more than once")
+    })
+}
+
 fn assemble_if_stale(clang: &Path, target: Target, src: &Path, obj: &Path) -> Result<(), String> {
     if !needs_rebuild(src, obj) {
         return Ok(());
