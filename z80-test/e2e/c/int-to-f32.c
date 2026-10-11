@@ -1,5 +1,6 @@
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0xFFFF %t
+// UNSUPPORTED: sdcc
 
 /* Integer to float conversion through __floatdisf, __floatundisf, __floattisf
    and __floatuntisf. Each row holds a 128-bit value and four expected floats:

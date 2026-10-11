@@ -1,5 +1,6 @@
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0xFFFF %t
+// UNSUPPORTED: sdcc
 
 /* The float to integer conversion routines __fixsfdi, __fixunssfdi, __fixsfti
    and __fixunssfti: truncation toward zero, saturation, and 0 for a NaN or
