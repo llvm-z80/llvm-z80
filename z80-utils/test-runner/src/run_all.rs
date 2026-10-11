@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::clang::ClangConfig;
+use crate::clang::{ClangConfig, Env};
 use crate::config::{OptLevel, Paths, Target};
 use crate::display;
 use crate::report;
@@ -266,8 +266,9 @@ fn build_suites(mode: &Mode) -> Vec<SuiteDef> {
     add_sdcc(&mut suites, &format_suite_label("sdcc Z80", &sdcc_opts), Target::Z80, sdcc_opts.clone(), false);
     add_sdcc(&mut suites, &format_suite_label("sdcc SM83", &sdcc_opts), Target::SM83, sdcc_opts.clone(), false);
     add_sdcc(&mut suites, &format_suite_label("sdcc Z80 -omit-fp", &sdcc_opts), Target::Z80, sdcc_opts.clone(), true);
-    add_clang_sdcc(&mut suites, &format_suite_label("clang Z80 -sdcc", &sdcc_opts), Target::Z80, sdcc_opts.clone());
-    add_clang_sdcc(&mut suites, &format_suite_label("clang SM83 -sdcc", &sdcc_opts), Target::SM83, sdcc_opts);
+    add_clang_env(&mut suites, &format_suite_label("clang Z80 -sdcc", &sdcc_opts), Target::Z80, sdcc_opts.clone(), Env::Sdcc);
+    add_clang_env(&mut suites, &format_suite_label("clang SM83 -sdcc", &sdcc_opts), Target::SM83, sdcc_opts.clone(), Env::Sdcc);
+    add_clang_env(&mut suites, &format_suite_label("clang Z80 -z88dk", &sdcc_opts), Target::Z80, sdcc_opts, Env::Z88dk);
     add_llc(&mut suites, &format_suite_label("llc Z80", &llc_opts), Target::Z80, llc_opts.clone());
     add_llc(&mut suites, &format_suite_label("llc SM83", &llc_opts), Target::SM83, llc_opts);
 
@@ -309,7 +310,7 @@ fn add_clang_filtered(
     omit_fp: bool,
     pattern: Option<String>,
 ) {
-    let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, verify: false, diff_opt: false, native_oracle: false, sdcc: false, pattern };
+    let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, verify: false, diff_opt: false, native_oracle: false, env: Env::Elf, pattern };
     push_clang(suites, label, config);
 }
 
@@ -321,20 +322,21 @@ fn add_clang_inline_rt(
 ) {
     let config = ClangConfig {
                 target, opt_levels: opts, fast_math: false, omit_fp: false,
-                inline_runtime: true, verify: false, diff_opt: false, native_oracle: false, sdcc: false, pattern: None,
+                inline_runtime: true, verify: false, diff_opt: false, native_oracle: false, env: Env::Elf, pattern: None,
             };
     push_clang(suites, label, config);
 }
 
-fn add_clang_sdcc(
+fn add_clang_env(
     suites: &mut Vec<SuiteDef>,
     label: &str,
     target: Target,
     opts: Vec<OptLevel>,
+    env: Env,
 ) {
     let config = ClangConfig {
                 target, opt_levels: opts, fast_math: false, omit_fp: false,
-                inline_runtime: false, verify: false, diff_opt: false, native_oracle: false, sdcc: true, pattern: None,
+                inline_runtime: false, verify: false, diff_opt: false, native_oracle: false, env, pattern: None,
             };
     push_clang(suites, label, config);
 }

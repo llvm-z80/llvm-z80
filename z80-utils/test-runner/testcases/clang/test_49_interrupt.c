@@ -1,6 +1,7 @@
 /* Test 49: __attribute__((interrupt)) - ISR register preservation via inline asm */
 /* Uses inline asm "call" to bypass compiler's caller-save convention,
    directly testing that the interrupt handler pushes/pops all registers. */
+/* SKIP-IF: -z88dk */
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 
