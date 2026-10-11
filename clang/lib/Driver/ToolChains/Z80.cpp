@@ -152,6 +152,8 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(Args.MakeArgString(*Dir));
       CmdArgs.push_back("-l");
       CmdArgs.push_back(SubDir);
+    } else {
+      TC.getDriver().Diag(diag::err_drv_z80_sdcc_lib_not_found) << SubDir;
     }
 
     // Then the supplementary runtime. -k <dir> -l <name> links only the

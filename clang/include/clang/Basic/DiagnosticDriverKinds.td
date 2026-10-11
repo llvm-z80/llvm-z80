@@ -56,6 +56,9 @@ def warn_drv_avr_stdlib_not_linked: Warning<
   "standard library not linked and so no interrupt vector table or "
   "compiler runtime routines will be linked">,
   InGroup<AVRRtlibLinkingQuirks>;
+def err_drv_z80_sdcc_lib_not_found : Error<
+  "cannot find SDCC's library '%0.lib'; is SDCC installed? Provide its location "
+  "via 'SDCC_LIB' or 'SDCC_HOME', or pass '-nostdlib' to link without it">;
 def err_drv_cuda_bad_gpu_arch : Error<"unsupported CUDA gpu architecture: %0">;
 def err_drv_offload_bad_gpu_arch : Error<"unsupported %0 gpu architecture: %1">;
 def err_drv_offload_missing_gpu_arch : Error<
