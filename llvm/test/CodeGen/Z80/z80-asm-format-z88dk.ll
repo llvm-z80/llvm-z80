@@ -1,6 +1,9 @@
 ; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=z88dk < %s \
 ; RUN:   | FileCheck %s --implicit-check-not='{{^[[:blank:]]*\.}}' \
 ; RUN:     --implicit-check-not=EXTERN --implicit-check-not=__do_
+; The z88dk environment picks the format without the option.
+; RUN: llc -mtriple=z80-unknown-none-z88dk < %s 2>/dev/null \
+; RUN:   | FileCheck %s --check-prefix=ENV --implicit-check-not='{{^[[:blank:]]*\.}}'
 ; PIC is ignored, so no $local alias appears.
 ; RUN: llc -mtriple=z80 -z80-asm-format=z88dk -relocation-model=pic < %s \
 ; RUN:   | FileCheck %s --check-prefix=PIC --implicit-check-not='$local'
@@ -9,6 +12,8 @@
 
 ; CHECK:        SECTION code_compiler
 ; CHECK-NEXT:   GLOBAL _test_branch
+; ENV:          SECTION code_compiler
+; ENV-NEXT:     GLOBAL _test_branch
 ; CHECK-LABEL: _test_branch:
 ; CHECK:        ld de,(_ext_var)
 ; CHECK:        jr nz,LBB0_2
