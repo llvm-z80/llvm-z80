@@ -348,6 +348,10 @@ Z80CallLowering::Z80CallLowering(const TargetLowering *TL)
 // Z80CallLoweringCommon — shared implementation
 //===----------------------------------------------------------------------===//
 
+static bool isMain(const Function *F) {
+  return F && F->getName() == "main" && F->hasExternalLinkage();
+}
+
 bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
                                         const Value *Val,
                                         ArrayRef<Register> VRegs,
@@ -392,8 +396,9 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
   }
 
   // Select register config based on calling convention.
-  Z80CC CC = getZ80CC(MF.getFunction().getCallingConv(),
-                      MF.getTarget().getTargetTriple());
+  const Function &F = MF.getFunction();
+  Z80CC CC = getZ80CC(F.getCallingConv(), MF.getTarget().getTargetTriple(),
+                      F.isVarArg(), isMain(&F));
   const CallingConvRegs &Regs = getRegsForCC(CC);
 
   // Return value conventions: i8->Ret_I8, i16->Ret_I16,
@@ -643,7 +648,8 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   MachineFrameInfo &MFI = MF.getFrameInfo();
 
   bool IsVarArg = F.isVarArg();
-  Z80CC CC = getZ80CC(F.getCallingConv(), MF.getTarget().getTargetTriple());
+  Z80CC CC = getZ80CC(F.getCallingConv(), MF.getTarget().getTargetTriple(),
+                      F.isVarArg(), isMain(&F));
 
   if (isUnsupportedCCForSubtarget(MF, CC))
     return false;
@@ -942,7 +948,9 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                       CallLoweringInfo &Info) const {
   MachineFunction &MF = MIRBuilder.getMF();
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  Z80CC CC = getZ80CC(Info.CallConv, MF.getTarget().getTargetTriple());
+  const Function *Callee = Info.CB ? Info.CB->getCalledFunction() : nullptr;
+  Z80CC CC = getZ80CC(Info.CallConv, MF.getTarget().getTargetTriple(),
+                      Info.IsVarArg, isMain(Callee));
 
   if (isUnsupportedCCForSubtarget(MF, CC))
     return false;
