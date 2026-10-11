@@ -265,7 +265,9 @@ fn build_suites(mode: &Mode) -> Vec<SuiteDef> {
 
     add_sdcc(&mut suites, &format_suite_label("sdcc Z80", &sdcc_opts), Target::Z80, sdcc_opts.clone(), false);
     add_sdcc(&mut suites, &format_suite_label("sdcc SM83", &sdcc_opts), Target::SM83, sdcc_opts.clone(), false);
-    add_sdcc(&mut suites, &format_suite_label("sdcc Z80 -omit-fp", &sdcc_opts), Target::Z80, sdcc_opts, true);
+    add_sdcc(&mut suites, &format_suite_label("sdcc Z80 -omit-fp", &sdcc_opts), Target::Z80, sdcc_opts.clone(), true);
+    add_clang_sdcc(&mut suites, &format_suite_label("clang Z80 -sdcc", &sdcc_opts), Target::Z80, sdcc_opts.clone());
+    add_clang_sdcc(&mut suites, &format_suite_label("clang SM83 -sdcc", &sdcc_opts), Target::SM83, sdcc_opts);
     add_llc(&mut suites, &format_suite_label("llc Z80", &llc_opts), Target::Z80, llc_opts.clone());
     add_llc(&mut suites, &format_suite_label("llc SM83", &llc_opts), Target::SM83, llc_opts);
 
@@ -307,19 +309,8 @@ fn add_clang_filtered(
     omit_fp: bool,
     pattern: Option<String>,
 ) {
-    let label = label.to_string();
-    let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, verify: false, diff_opt: false, native_oracle: false, pattern };
-    let for_count = config.clone();
-    suites.push(SuiteDef {
-        label: label.clone(),
-        count: Box::new(move |paths| clang::count(paths, &for_count)),
-        runner: Box::new(move |paths, state, idx, shared| {
-            let _ = shared;
-            let mut cb = progress_callback(state.clone(), idx, shared.cloned());
-            let result = clang::run(paths, &config, &mut cb);
-            state.lock().unwrap()[idx].result = Some(result);
-        }),
-    });
+    let config = ClangConfig { target, opt_levels: opts, fast_math, omit_fp, inline_runtime: false, verify: false, diff_opt: false, native_oracle: false, sdcc: false, pattern };
+    push_clang(suites, label, config);
 }
 
 fn add_clang_inline_rt(
@@ -328,11 +319,28 @@ fn add_clang_inline_rt(
     target: Target,
     opts: Vec<OptLevel>,
 ) {
-    let label = label.to_string();
     let config = ClangConfig {
                 target, opt_levels: opts, fast_math: false, omit_fp: false,
-                inline_runtime: true, verify: false, diff_opt: false, native_oracle: false, pattern: None,
+                inline_runtime: true, verify: false, diff_opt: false, native_oracle: false, sdcc: false, pattern: None,
             };
+    push_clang(suites, label, config);
+}
+
+fn add_clang_sdcc(
+    suites: &mut Vec<SuiteDef>,
+    label: &str,
+    target: Target,
+    opts: Vec<OptLevel>,
+) {
+    let config = ClangConfig {
+                target, opt_levels: opts, fast_math: false, omit_fp: false,
+                inline_runtime: false, verify: false, diff_opt: false, native_oracle: false, sdcc: true, pattern: None,
+            };
+    push_clang(suites, label, config);
+}
+
+fn push_clang(suites: &mut Vec<SuiteDef>, label: &str, config: ClangConfig) {
+    let label = label.to_string();
     let for_count = config.clone();
     suites.push(SuiteDef {
         label: label.clone(),
