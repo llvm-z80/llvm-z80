@@ -6,9 +6,17 @@
 //
 //===---------------------------------------------------------------------===//
 
-// Pre-legalization: use all standard combines.
+// srem (sext a), (sext b) -> sext (G_Z80_SREM8 a, b)
+// low byte of sdiv (sext a), (sext b) -> G_Z80_SDIV8 a, b
+def narrow_sdiv_srem_of_sext : GICombineRule<
+  (defs root:$root, build_fn_matchinfo:$matchinfo),
+  (match (wip_match_opcode G_SREM, G_TRUNC, G_AND):$root,
+         [{ return matchNarrowSDivSRemOfSExt(*${root}, MRI, ${matchinfo}); }]),
+  (apply [{ Helper.applyBuildFn(*${root}, ${matchinfo}); }])>;
+
+// Pre-legalization: all standard combines.
 def Z80PreLegalizerCombiner : GICombiner<
-  "Z80PreLegalizerCombinerImpl", [all_combines]>;
+  "Z80PreLegalizerCombinerImpl", [narrow_sdiv_srem_of_sext, all_combines]>;
 
 // ptr_add (global_value @g + o), c -> global_value @g + (o + c)
 def fold_global_offset_matchdata :

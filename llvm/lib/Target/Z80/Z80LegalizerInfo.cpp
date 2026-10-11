@@ -251,11 +251,12 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .clampScalar(0, S8, S16);
 
   // Multiply - Z80 has no hardware multiply
-  // i8:  legal (handled in instruction selector via zero-extend + __mulhi3)
-  // i16: legal (handled in instruction selector via call to __mulhi3)
+  // i8:  legal (inline loop in instruction selector)
+  // i16: custom (shifts and adds for a constant, else __mulhi3)
   // i32: libcall (__mulsi3) — avoids narrowing to 4 separate i16 multiplies
   getActionDefinitionsBuilder(G_MUL)
-      .legalFor({S8, S16})
+      .legalFor({S8})
+      .customFor({S16})
       .scalarize(0)
       .libcallFor({S32, S64})
       .narrowScalarIf(LegalityPredicates::typeIs(0, S128),
@@ -264,11 +265,11 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .clampScalar(0, S8, S64);
 
   // G_UMULH - Upper half of multiply (needed when narrowing s32 mul)
-  // s16: legal (native __mulhi3-based)
+  // s16: custom (__umulhi3)
   // s32+: narrow to s16 (avoid lower→mul 2x→narrow→G_UMULH recursion)
   // s8: lower to zext s16 + mul s16 + shift + trunc
   getActionDefinitionsBuilder(G_UMULH)
-      .legalFor({S16})
+      .customFor({S16})
       .maxScalar(0, S16)
       .lower();
 
@@ -283,13 +284,13 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   getActionDefinitionsBuilder({G_UMULO, G_SMULO}).lower();
 
   // Division - Z80 has no hardware divide
-  // i8: legal (inline DJNZ loop in instruction selector)
-  // i16: legal (handled in instruction selector via call)
+  // i8: custom (inline DJNZ loop in instruction selector, or a call)
+  // i16: custom (inline under +inline-i16-runtime, else a call)
   // i32: libcall (__divsi3, __udivsi3, __modsi3, __umodsi3)
   // i64: libcall (__divdi3, __udivdi3, __moddi3, __umoddi3)
   // i128: libcall (__divti3, __udivti3, __modti3, __umodti3)
   getActionDefinitionsBuilder({G_UDIV, G_UREM, G_SDIV, G_SREM})
-      .legalFor({S8, S16})
+      .customFor({S8, S16})
       .scalarize(0)
       .libcallFor({S32, S64, S128})
       .widenScalarToNextPow2(0)
@@ -718,6 +719,75 @@ bool Z80LegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
   }
 }
 
+std::optional<std::pair<Register, uint64_t>>
+Z80::matchShiftAddMul(const MachineInstr &MI, const MachineRegisterInfo &MRI) {
+  auto ConstantOf = [&](Register Reg) -> std::optional<uint64_t> {
+    const MachineInstr *Def = MRI.getVRegDef(Reg);
+    if (Def && Def->getOpcode() == TargetOpcode::G_CONSTANT)
+      return Def->getOperand(1).getCImm()->getZExtValue() & 0xFFFF;
+    return std::nullopt;
+  };
+  Register LHS = MI.getOperand(1).getReg();
+  Register RHS = MI.getOperand(2).getReg();
+  std::pair<Register, uint64_t> Match;
+  if (auto C = ConstantOf(RHS))
+    Match = {LHS, *C};
+  else if (auto C = ConstantOf(LHS))
+    Match = {RHS, *C};
+  else
+    return std::nullopt;
+
+  // A shift per bit below the top one and an add per further set bit, up to
+  // twelve in all.
+  uint64_t C = Match.second;
+  if (C > 1 && Log2_64(C) + llvm::popcount(C) - 1 > 12)
+    return std::nullopt;
+  return Match;
+}
+
+// Byte and 16-bit division and remainder: the inline forms instruction
+// selection has, or a runtime call.
+static bool legalizeDivRem(LegalizerHelper &Helper, MachineInstr &MI,
+                           LostDebugLocObserver &LocObserver) {
+  MachineIRBuilder &B = Helper.MIRBuilder;
+  MachineRegisterInfo &MRI = *B.getMRI();
+  MachineFunction &MF = B.getMF();
+  const auto &STI = MF.getSubtarget<Z80Subtarget>();
+  bool MinSize = MF.getFunction().hasMinSize();
+  unsigned Opc = MI.getOpcode();
+  bool IsSigned = Opc == TargetOpcode::G_SDIV || Opc == TargetOpcode::G_SREM;
+  Register Dst = MI.getOperand(0).getReg();
+  LLT S16 = LLT::scalar(16);
+
+  if (MRI.getType(Dst) != S16) {
+    // The call is shorter but slower than the inline loop, so only minsize
+    // takes it, except for unsigned division on SM83, where it wins on both.
+    if (!MinSize && (IsSigned || !STI.hasSM83()))
+      return true;
+    if (!IsSigned)
+      return Helper.libcall(MI, LocObserver) == LegalizerHelper::Legalized;
+
+    // There is no signed byte routine, so divide the sign-extended bytes.
+    Type *I16Ty = Type::getInt16Ty(MF.getFunction().getContext());
+    auto LHS = B.buildSExt(S16, MI.getOperand(1));
+    auto RHS = B.buildSExt(S16, MI.getOperand(2));
+    Register Wide = MRI.createGenericVirtualRegister(S16);
+    if (Helper.createLibcall(
+            Opc == TargetOpcode::G_SDIV ? RTLIB::SDIV_I16 : RTLIB::SREM_I16,
+            {Wide, I16Ty, 0},
+            {{LHS.getReg(0), I16Ty, 0}, {RHS.getReg(0), I16Ty, 1}}, LocObserver,
+            &MI) != LegalizerHelper::Legalized)
+      return false;
+    B.buildTrunc(Dst, Wide);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  if (STI.inlineI16Runtime())
+    return true;
+  return Helper.libcall(MI, LocObserver) == LegalizerHelper::Legalized;
+}
+
 bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
                                       LostDebugLocObserver &LocObserver) const {
   MachineIRBuilder &MIRBuilder = Helper.MIRBuilder;
@@ -911,6 +981,33 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     MI.eraseFromParent();
     return true;
   }
+
+  case TargetOpcode::G_MUL:
+    // i16: instruction selection expands a multiply by a constant, and every
+    // multiply under +inline-i16-runtime.
+    if (Z80::matchShiftAddMul(MI, MRI) ||
+        MIRBuilder.getMF().getSubtarget<Z80Subtarget>().inlineI16Runtime())
+      return true;
+    return Helper.libcall(MI, LocObserver) == LegalizerHelper::Legalized;
+
+  case TargetOpcode::G_UMULH: {
+    Type *I16Ty =
+        Type::getInt16Ty(MIRBuilder.getMF().getFunction().getContext());
+    if (Helper.createLibcall(RTLIB::Z80_UMULH_I16,
+                             {MI.getOperand(0).getReg(), I16Ty, 0},
+                             {{MI.getOperand(1).getReg(), I16Ty, 0},
+                              {MI.getOperand(2).getReg(), I16Ty, 1}},
+                             LocObserver, &MI) != LegalizerHelper::Legalized)
+      return false;
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case TargetOpcode::G_UDIV:
+  case TargetOpcode::G_UREM:
+  case TargetOpcode::G_SDIV:
+  case TargetOpcode::G_SREM:
+    return legalizeDivRem(Helper, MI, LocObserver);
 
   case TargetOpcode::G_UDIVREM:
   case TargetOpcode::G_SDIVREM: {

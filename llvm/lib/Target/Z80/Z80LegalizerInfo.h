@@ -14,9 +14,15 @@
 #define LLVM_LIB_TARGET_Z80_Z80LEGALIZERINFO_H
 
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
+#include "llvm/CodeGen/Register.h"
+
+#include <optional>
+#include <utility>
 
 namespace llvm {
 
+class MachineInstr;
+class MachineRegisterInfo;
 class Z80Subtarget;
 
 class Z80LegalizerInfo : public LegalizerInfo {
@@ -29,6 +35,13 @@ public:
   bool legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
                       LostDebugLocObserver &LocObserver) const override;
 };
+
+namespace Z80 {
+/// The variable operand and the constant of a 16-bit G_MUL that instruction
+/// selection expands into shifts and adds instead of calling the runtime.
+std::optional<std::pair<Register, uint64_t>>
+matchShiftAddMul(const MachineInstr &MI, const MachineRegisterInfo &MRI);
+} // namespace Z80
 
 } // namespace llvm
 

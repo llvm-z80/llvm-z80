@@ -812,6 +812,7 @@ def MEMCPY_ALIGN_4 : RuntimeLibcall;
 // Z80 calls
 def Z80_CALL_IY : RuntimeLibcall;
 def Z80_CALL_HL : RuntimeLibcall;
+def Z80_UMULH_I16 : RuntimeLibcall;
 def Z80_ADD_F32_FAST : RuntimeLibcall;
 def Z80_SUB_F32_FAST : RuntimeLibcall;
 def Z80_MUL_F32_FAST : RuntimeLibcall;
@@ -3752,6 +3753,8 @@ def Z80MemCalls : LibcallsWithCC<
 def _call_iy : RuntimeLibcallImpl<Z80_CALL_IY>;
 def _call_hl : RuntimeLibcallImpl<Z80_CALL_HL>;
 
+def __umulhi3 : RuntimeLibcallImpl<Z80_UMULH_I16>;
+
 // Soft-float operations for nnan, ninf and nsz, which skip the special cases.
 def __addsf3_fast : RuntimeLibcallImpl<Z80_ADD_F32_FAST>;
 def __subsf3_fast : RuntimeLibcallImpl<Z80_SUB_F32_FAST>;
@@ -3765,7 +3768,8 @@ def isSM83 : RuntimeLibcallAvailability<(all_of IsSM83)>;
 
 def Z80CompilerRt : LibcallLibrary<"compiler-rt",
   (add Z80MemCalls,
-       __divmodhi4, __udivmodhi4, __divmodsi4, __udivmodsi4,
+       LibcallsWithCC<(add __udivqi3, __umodqi3), Z80_BUILTIN>,
+       __umulhi3, __divmodhi4, __udivmodhi4, __divmodsi4, __udivmodsi4,
        __addsf3_fast, __subsf3_fast, __mulsf3_fast, __divsf3_fast,
        __cmpsf2_fast,
        LibcallImpls<(add _call_iy), isZ80>,
@@ -3773,7 +3777,8 @@ def Z80CompilerRt : LibcallLibrary<"compiler-rt",
 
 def Z80SystemLibrary
     : SystemRuntimeLibrary<isZ80Family,
-    (add CompilerRtLibgcc,
+    // Z80CompilerRt re-adds these with every argument in a register.
+    (add LibraryRef<CompilerRtLibgcc, [__udivqi3, __umodqi3]>,
          Z80CompilerRt,
          Libm,
          // Replaced by Z80MemCalls.
