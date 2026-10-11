@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include <memory>
 
@@ -295,6 +296,33 @@ ArgAssignment classifyArg(const CallingConvRegs &Regs, unsigned &RegParamCount,
   }
 
   return Result;
+}
+
+/// Whether \p Reg holds an address in the caller's own frame, which a tail
+/// call frees before the callee runs.
+static bool pointsIntoFrame(Register Reg, const MachineRegisterInfo &MRI) {
+  while (const MachineInstr *Def = getDefIgnoringCopies(Reg, MRI)) {
+    if (Def->getOpcode() == TargetOpcode::G_FRAME_INDEX)
+      return true;
+    if (Def->getOpcode() != TargetOpcode::G_PTR_ADD)
+      return false;
+    Reg = Def->getOperand(1).getReg();
+  }
+  return false;
+}
+
+/// The jump that stands in for \p CallOpc in a tail call.
+static unsigned getTailCallOpcode(unsigned CallOpc) {
+  switch (CallOpc) {
+  case Z80::CALL_nn:
+    return Z80::TCRETURN_nn;
+  case Z80::CALL_IY:
+    return Z80::TCRETURN_IY;
+  case Z80::CALL_HL:
+    return Z80::TCRETURN_HL;
+  default:
+    llvm_unreachable("not a call opcode");
+  }
 }
 } // anonymous namespace
 
@@ -939,6 +967,58 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   return true;
 }
 
+bool Z80CallLoweringCommon::canLowerTailCall(MachineFunction &MF,
+                                             const CallLoweringInfo &Info,
+                                             unsigned StackArgBytes,
+                                             ArrayRef<Register> ArgRegs) const {
+  if (!Info.IsTailCall)
+    return false;
+
+  // The jump leaves our return address on top, where stack arguments would go.
+  if (StackArgBytes > 0)
+    return false;
+
+  // Only a plain RET can be replaced: an interrupt handler returns with RETI,
+  // and a callee-cleanup function pops its own arguments on the way out.
+  const Function &Caller = MF.getFunction();
+  if (Caller.hasFnAttribute("interrupt") ||
+      MF.getInfo<Z80FunctionInfo>()->StackParamBytes > 0)
+    return false;
+
+  // The callee returns straight to our caller, which looks for the value
+  // where our convention puts it. The generic code assumes a memcpy helper
+  // returns its destination, but ours return nothing.
+  if (!Caller.getReturnType()->isVoidTy()) {
+    if (Info.OrigRet.Ty->isVoidTy())
+      return false;
+    const CallingConvRegs &Ours = getRegsForCC(Caller.getCallingConv());
+    const CallingConvRegs &Theirs = getRegsForCC(Info.CallConv);
+    if (Ours.Ret_I8 != Theirs.Ret_I8 || Ours.Ret_I16 != Theirs.Ret_I16 ||
+        Ours.Ret_I32_Hi != Theirs.Ret_I32_Hi ||
+        Ours.Ret_I32_Lo != Theirs.Ret_I32_Lo)
+      return false;
+  }
+
+  // The jump target is loaded alongside the arguments.
+  if (Info.Callee.isReg()) {
+    Register Target = getRegsForCC(Info.CallConv).IndirectCallReg;
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    if (any_of(ArgRegs,
+               [&](Register Reg) { return TRI->regsOverlap(Reg, Target); }))
+      return false;
+  }
+
+  // A call marked tail promises not to look into our frame; a libcall does
+  // not.
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  for (const ArgInfo &Arg : Info.OrigArgs)
+    if (any_of(Arg.Regs,
+               [&](Register Reg) { return pointsIntoFrame(Reg, MRI); }))
+      return false;
+
+  return true;
+}
+
 bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                       CallLoweringInfo &Info) const {
   MachineFunction &MF = MIRBuilder.getMF();
@@ -981,6 +1061,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   unsigned RegParamCount = 0;
   unsigned StackArgBytes = 0;
   SmallVector<unsigned, 4> StackArgIndices;
+  SmallVector<Register, 4> InRegArgs;
 
   unsigned ArgIdx = 0;
   for (const ArgInfo &Arg : Info.OrigArgs) {
@@ -1036,6 +1117,10 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
       }
       StackArgIndices.push_back(ArgIdx);
       StackArgBytes += stackSlotBytes(BitWidth, decodeZ80CC(CC));
+    } else {
+      InRegArgs.push_back(Assign.PhysReg);
+      if (Assign.PhysReg2.isValid())
+        InRegArgs.push_back(Assign.PhysReg2);
     }
 
     ++ArgIdx;
@@ -1045,10 +1130,24 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   if (SRetPtrReg.isValid())
     StackArgBytes += 2;
 
+  // A musttail call that cannot become a jump is still emitted as a call, so
+  // compilation goes on to report anything else.
+  bool IsTailCall = canLowerTailCall(MF, Info, StackArgBytes, InRegArgs);
+  if (Info.IsMustTailCall && !IsTailCall) {
+    const Function &F = MF.getFunction();
+    F.getContext().diagnose(DiagnosticInfoUnsupported(
+        F, "musttail call cannot be lowered as a tail call",
+        MIRBuilder.getDebugLoc()));
+  }
+  Info.IsTailCall = IsTailCall;
+
   // --- Pass 2: Emit code ---
 
   // Emit ADJCALLSTACKDOWN
-  MIRBuilder.buildInstr(Z80::ADJCALLSTACKDOWN).addImm(StackArgBytes).addImm(0);
+  if (!IsTailCall)
+    MIRBuilder.buildInstr(Z80::ADJCALLSTACKDOWN)
+        .addImm(StackArgBytes)
+        .addImm(0);
 
   // Push stack arguments so the callee sees the expected layout.
   // sdcccall(0)/__z88dk_callee: right-to-left (last arg pushed first, so the
@@ -1222,18 +1321,28 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   }
 
   // Build the call instruction with dynamic implicit uses for argument regs
+  unsigned CallOpc = Info.Callee.isReg() ? Regs.IndirectCallOpc : Z80::CALL_nn;
+  if (IsTailCall)
+    CallOpc = getTailCallOpcode(CallOpc);
   MachineInstrBuilder CallMI;
   if (Info.Callee.isReg()) {
     MIRBuilder.buildCopy(Regs.IndirectCallReg, Info.Callee.getReg());
-    CallMI = MIRBuilder.buildInstr(Regs.IndirectCallOpc);
+    CallMI = MIRBuilder.buildInstr(CallOpc);
   } else {
-    CallMI = MIRBuilder.buildInstr(Z80::CALL_nn);
+    CallMI = MIRBuilder.buildInstr(CallOpc);
     CallMI.add(Info.Callee);
   }
 
   // Add implicit uses for each physical register used as an argument
   for (Register Reg : ArgRegs)
     CallMI.addUse(Reg, RegState::Implicit);
+
+  // The jump ends the block, and the callee returns straight to our caller.
+  if (IsTailCall) {
+    MF.getFrameInfo().setHasTailCall();
+    Info.LoweredTailCall = true;
+    return true;
+  }
 
   // Compute callee-cleanup amount before emitting return value handling.
   // For callee-cleanup calls, ADJCALLSTACKUP must be emitted BEFORE sret loads
