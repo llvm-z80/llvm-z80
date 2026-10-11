@@ -3890,6 +3890,8 @@ StringRef FunctionType::getNameForCallConv(CallingConv CC) {
     return "m68k_rtd";
   case CC_PreserveNone:
     return "preserve_none";
+  case CC_Z80SDCCCall1:
+    return "sdcccall(1)";
   case CC_Z80SDCCCall0:
     return "sdcccall(0)";
   case CC_Z80SmallC:

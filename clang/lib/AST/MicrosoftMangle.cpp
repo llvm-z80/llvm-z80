@@ -3438,6 +3438,7 @@ void MicrosoftCXXNameMangler::mangleCallingConvention(CallingConv CC,
       else
         Out << "w";
       return;
+    case CC_Z80SDCCCall1:
     case CC_Z80SDCCCall0:
     case CC_Z80Z88dkFastCall:
     case CC_Z80Z88dkCallee:

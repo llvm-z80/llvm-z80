@@ -393,7 +393,8 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
   }
 
   // Select register config based on calling convention.
-  CallingConv::ID CC = MF.getFunction().getCallingConv();
+  CallingConv::ID CC = resolveZ80CC(MF.getFunction().getCallingConv(),
+                                    MF.getTarget().getTargetTriple());
   const CallingConvRegs &Regs = getRegsForCC(CC);
 
   // Return value conventions: i8->Ret_I8, i16->Ret_I16,
@@ -644,7 +645,8 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   MachineFrameInfo &MFI = MF.getFrameInfo();
 
   bool IsVarArg = F.isVarArg();
-  CallingConv::ID CC = F.getCallingConv();
+  CallingConv::ID CC =
+      resolveZ80CC(F.getCallingConv(), MF.getTarget().getTargetTriple());
 
   if (isUnsupportedCCForSubtarget(MF, CC))
     return false;
@@ -943,7 +945,8 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                       CallLoweringInfo &Info) const {
   MachineFunction &MF = MIRBuilder.getMF();
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  CallingConv::ID CC = Info.CallConv;
+  CallingConv::ID CC =
+      resolveZ80CC(Info.CallConv, MF.getTarget().getTargetTriple());
 
   if (isUnsupportedCCForSubtarget(MF, CC))
     return false;

@@ -1,21 +1,21 @@
 ; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 ;
-; Controls for __z88dk_callee (cc 132): the neighbouring conventions it must not
+; Controls for __z88dk_callee (cc 245): the neighbouring conventions it must not
 ; disturb.
 
 ; ----------------------------------------------------------------------------
-; __sdcccall(0) (cc 128): the caller pushes the args and the CALLER pops them
+; __sdcccall(0) (cc 241): the caller pushes the args and the CALLER pops them
 ; after the call (`pop af` x2 for two i16 args).  That cleanup side is exactly
 ; what distinguishes it from __z88dk_callee, whose caller does not clean up.
 ; ----------------------------------------------------------------------------
-declare cc 128 void @sc2(i16, i16)
+declare cc 241 void @sc2(i16, i16)
 define void @sc_caller() {
 ; CHECK-LABEL: _sc_caller:
 ; CHECK:      push hl
 ; CHECK:      call _sc2
 ; CHECK:      pop af
 ; CHECK:      pop af
-  call cc 128 void @sc2(i16 1, i16 2)
+  call cc 241 void @sc2(i16 1, i16 2)
   ret void
 }
 

@@ -110,6 +110,7 @@ Z80TargetInfo::CallingConvCheckResult
 Z80TargetInfo::checkCallingConvention(CallingConv CC) const {
   switch (CC) {
   case CC_C:
+  case CC_Z80SDCCCall1:
   case CC_Z80SDCCCall0:
   case CC_Z80SmallC:
   case CC_Z80Z88dkCallee:
