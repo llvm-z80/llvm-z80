@@ -1,5 +1,6 @@
 /* Test 44: IEEE 754 signed zero, subnormals, and boundary values */
 /* SKIP-IF: -ffast-math */
+/* SKIP-IF: -sdcc */
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned long uint32_t;
