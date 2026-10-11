@@ -1,126 +1,144 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
-	.area _CODE
-	.globl _modff
-
+    .area   _CODE
+    .globl  _modff
 ;===------------------------------------------------------------------------===;
-; _modff - Split a float into its integral and fractional parts
-;
-; Input:  HLDE = x, stack SP+2,3 = float *iptr (callee-cleanup)
-; Output: HLDE = fractional part, *iptr = integral part
-;
-; Both parts carry the sign of x, so the integral part is a truncation toward
-; zero and the fraction is what is left over:
-;
-;   *iptr = truncf(x)
-;   return x - *iptr
-;
-; The subtraction is wrong for the two inputs where the parts are not a
-; difference: an infinity would give NaN rather than a zero, and a zero would
-; lose its sign. Both are answered by handing x back unchanged for both parts.
+;@ float modff(float x, float *iptr)
+;@     modifies
+;@         *iptr;
+;@     ensures
+;@         same(result, modff(x, &(float){0}));
+;@         same(*iptr, truncf(x));
+;@     tests
+;@         samples 40000000;
+;@         example x = -0.0f;
+;@         example x = -INFINITY;
+;@         example x = NAN;
+;@         example x = 0x1p-149f;
+;@         example x = -1.5f;
+;@         example x = 0x1.000002p0f;
+;@         example x = 0x1.fffffep22f;
 ;===------------------------------------------------------------------------===;
 _modff:
-	push	ix
-	ld	ix, #0
-	add	ix, sp
-	; IX+0,1: saved IX   IX+2,3: return address   IX+4,5: iptr
-
-	; Exponent into A, so the two cases that are not a difference can be seen.
-	ld	a, h
-	add	a, a
-	ld	b, a
-	ld	a, l
-	rlca
-	and	#1
-	or	b		; A = exponent
-
-	; An exponent of 255 with an empty mantissa is an infinity.
-	inc	a
-	jr	nz, __modff_finite
-	ld	a, l
-	and	#0x7F
-	or	d
-	or	e
-	jr	z, __modff_whole
-	jr	__modff_split	; a NaN: both parts come out of the split as NaN
-
-__modff_finite:
-	; A zero is an empty mantissa at exponent 0. Both halves are x itself,
-	; and going through the subtraction would return +0 for -0.
-	dec	a		; undo the test above
-	or	a
-	jr	nz, __modff_split
-	ld	a, l
-	and	#0x7F
-	or	d
-	or	e
-	jr	nz, __modff_split
-
-__modff_whole:
-	; *iptr = x, and the other part is x with the magnitude taken out.
-	call	__modff_store
-	ld	a, h
-	and	#0x80		; keep the sign
-	ld	h, a
-	ld	l, #0
-	ld	d, #0
-	ld	e, #0
-	jr	__modff_ret
-
-__modff_split:
-	; Keep x below the frame, since truncf and the subtraction need it again.
-	push	hl
-	push	de		; IX-4..-1: x_E, x_D, x_L, x_H
-
-	call	_truncf		; HLDE = truncf(x)
-	call	__modff_store	; *iptr = truncf(x)
-
-	; x - truncf(x), with the integral part as the second argument.
-	push	hl
-	push	de
-	ld	h, -1(ix)
-	ld	l, -2(ix)
-	ld	d, -3(ix)
-	ld	e, -4(ix)
-	call	___subsf3	; callee-cleanup, HLDE = x - truncf(x)
-
-	; Subtracting equal values gives +0 whatever their sign, but the fraction
-	; carries the sign of x, so an integral negative needs it put back.
-	ld	a, h
-	and	#0x7F
-	or	l
-	or	d
-	or	e
-	jr	nz, __modff_ret
-	ld	a, -1(ix)	; the sign byte of the saved x
-	and	#0x80
-	ld	h, a
-	ld	l, #0
-	ld	d, l
-	ld	e, l
-
-__modff_ret:
-	ld	sp, ix
-	pop	ix
-	; Callee-cleanup: step over iptr on the way out.
-	pop	bc		; return address
-	inc	sp
-	inc	sp
-	push	bc
-	ret
-
-; Write HLDE to *iptr, little-endian, leaving HLDE alone.
+    push    hl
+    push    de
+    ld      a, l
+    rlca
+    ld      a, h
+    rla                         ; A = exponent
+    cp      #150
+    jr      nc, __modff_store   ; |x| >= 2^23, infinity or NaN
+    cp      #127
+    jr      nc, __modff_trunc
+    ld      a, h                ; |x| < 1
+    and     #0x80
+    ld      h, a
+    xor     a
+    ld      l, a
+    ld      d, a
+    ld      e, a
+    jr      __modff_store
+__modff_trunc:
+    call    _truncf
 __modff_store:
-	ld	c, 4(ix)
-	ld	b, 5(ix)
-	ld	a, e
-	ld	(bc), a
-	inc	bc
-	ld	a, d
-	ld	(bc), a
-	inc	bc
-	ld	a, l
-	ld	(bc), a
-	inc	bc
-	ld	a, h
-	ld	(bc), a
-	ret
+    push    hl
+    ld      hl, #8
+    add     hl, sp
+    ld      c, (hl)
+    inc     hl
+    ld      b, (hl)             ; BC = iptr
+    pop     hl
+    ld      a, e
+    ld      (bc), a
+    inc     bc
+    ld      a, d
+    ld      (bc), a
+    inc     bc
+    ld      a, l
+    ld      (bc), a
+    inc     bc
+    ld      a, h
+    ld      (bc), a
+    pop     de
+    pop     hl                  ; HLDE = x
+    ld      a, l
+    rlca
+    ld      a, h
+    rla                         ; A = exponent
+    cp      #127
+    jr      c, __modff_ret      ; |x| < 1 is all fraction
+    cp      #150
+    jr      c, __modff_frac
+    inc     a
+    jr      nz, __modff_zero    ; |x| >= 2^23 is an integer
+    ld      a, l
+    add     a, a
+    or      d
+    or      e
+    jr      nz, __modff_ret     ; NaN
+    jr      __modff_zero        ; infinity
+__modff_frac:
+    ; The bits x has and its integral part lacks are the fraction.
+    push    af
+    dec     bc
+    ld      a, (bc)
+    xor     l
+    ld      l, a
+    dec     bc
+    ld      a, (bc)
+    xor     d
+    ld      d, a
+    dec     bc
+    ld      a, (bc)
+    xor     e
+    ld      e, a
+    pop     af
+    ld      b, a                ; B = exponent
+    ld      a, l
+    or      d
+    or      e
+    jr      z, __modff_zero     ; x is an integer
+    ; Shift the fraction up to the hidden bit, lowering the exponent.
+__modff_byte:
+    ld      a, l
+    or      a
+    jr      nz, __modff_bit
+    ld      l, d
+    ld      d, e
+    ld      e, a
+    ld      a, b
+    sub     #8
+    ld      b, a
+    jr      __modff_byte
+__modff_bit:
+    bit     7, l
+    jr      nz, __modff_pack
+    sla     e
+    rl      d
+    rl      l
+    dec     b
+    jr      __modff_bit
+__modff_pack:
+    ld      a, l
+    add     a, a            ; drop the hidden bit
+    srl     b
+    rra
+    ld      l, a
+    ld      a, h
+    and     #0x80
+    or      b
+    ld      h, a
+    jr      __modff_ret
+__modff_zero:
+    ld      a, h
+    and     #0x80
+    ld      h, a
+    xor     a
+    ld      l, a
+    ld      d, a
+    ld      e, a
+__modff_ret:
+    pop     bc
+    inc     sp
+    inc     sp
+    push    bc
+    ret
