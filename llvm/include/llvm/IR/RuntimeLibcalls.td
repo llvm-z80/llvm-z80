@@ -97,6 +97,7 @@ def IsXCore : LibcallPredicate<[{TT.getArch() == Triple::xcore}]>;
 def IsZ80Family : LibcallPredicate<[{TT.isZ80Family()}]>;
 def IsZ80 : LibcallPredicate<[{TT.isZ80()}]>;
 def IsSM83 : LibcallPredicate<[{TT.isSM83()}]>;
+def IsSDCCEnv : LibcallPredicate<[{TT.getEnvironment() == Triple::SDCC}]>;
 
 def IsOSzOS : LibcallPredicate<[{TT.isOSzOS()}]>;
 def IsSystemZ : LibcallPredicate<[{TT.isSystemZ()}]>;
@@ -3762,26 +3763,98 @@ def __mulsf3_fast : RuntimeLibcallImpl<Z80_MUL_F32_FAST>;
 def __divsf3_fast : RuntimeLibcallImpl<Z80_DIV_F32_FAST>;
 def __cmpsf2_fast : RuntimeLibcallImpl<Z80_FCMP3_F32_FAST>;
 
-def isZ80Family : RuntimeLibcallAvailability<(all_of IsZ80Family)>;
 def isZ80 : RuntimeLibcallAvailability<(all_of IsZ80)>;
 def isSM83 : RuntimeLibcallAvailability<(all_of IsSM83)>;
+def isZ80DefaultEnv : RuntimeLibcallAvailability<
+  (all_of IsZ80Family, (not IsSDCCEnv))>;
+def isZ80SDCCEnv : RuntimeLibcallAvailability<(all_of IsZ80Family, IsSDCCEnv)>;
 
-def Z80CompilerRt : LibcallLibrary<"compiler-rt",
+// The universal Z80 helpers in compiler-rt.
+defvar Z80CompilerRtImpls =
   (add Z80MemCalls,
        LibcallsWithCC<(add __udivqi3, __umodqi3), Z80_BUILTIN>,
        __umulhi3, __divmodhi4, __udivmodhi4, __divmodsi4, __udivmodsi4,
        __addsf3_fast, __subsf3_fast, __mulsf3_fast, __divsf3_fast,
-       __cmpsf2_fast,
+       __cmpsf2_fast);
+
+def Z80CompilerRt : LibcallLibrary<"compiler-rt",
+  (add Z80CompilerRtImpls,
        LibcallImpls<(add _call_iy), isZ80>,
-       LibcallImpls<(add _call_hl), isSM83>), isZ80Family>;
+       LibcallImpls<(add _call_hl), isSM83>), isZ80DefaultEnv>;
 
 def Z80SystemLibrary
-    : SystemRuntimeLibrary<isZ80Family,
+    : SystemRuntimeLibrary<isZ80DefaultEnv,
     // Z80CompilerRt re-adds these with every argument in a register.
     (add LibraryRef<CompilerRtLibgcc, [__udivqi3, __umodqi3]>,
          Z80CompilerRt,
          Libm,
          // Replaced by Z80MemCalls.
+         LibraryRef<Libc, [memcpy, memmove, memset]>,
+         ExceptionRuntime)>;
+
+// SDCC's own runtime
+def _mulint : RuntimeLibcallImpl<MUL_I16>;
+def _divsint : RuntimeLibcallImpl<SDIV_I16>;
+def _divuint : RuntimeLibcallImpl<UDIV_I16>;
+def _modsint : RuntimeLibcallImpl<SREM_I16>;
+def _moduint : RuntimeLibcallImpl<UREM_I16>;
+def _mullong : RuntimeLibcallImpl<MUL_I32>;
+def _divslong : RuntimeLibcallImpl<SDIV_I32>;
+def _divulong : RuntimeLibcallImpl<UDIV_I32>;
+def _modslong : RuntimeLibcallImpl<SREM_I32>;
+def _modulong : RuntimeLibcallImpl<UREM_I32>;
+def _mullonglong : RuntimeLibcallImpl<MUL_I64>;
+def _divslonglong : RuntimeLibcallImpl<SDIV_I64>;
+def _divulonglong : RuntimeLibcallImpl<UDIV_I64>;
+def _modslonglong : RuntimeLibcallImpl<SREM_I64>;
+def _modulonglong : RuntimeLibcallImpl<UREM_I64>;
+def __fsadd : RuntimeLibcallImpl<ADD_F32>;
+def __fssub : RuntimeLibcallImpl<SUB_F32>;
+def __fsmul : RuntimeLibcallImpl<MUL_F32>;
+def __fsdiv : RuntimeLibcallImpl<DIV_F32>;
+def __slong2fs : RuntimeLibcallImpl<SINTTOFP_I32_F32>;
+def __ulong2fs : RuntimeLibcallImpl<UINTTOFP_I32_F32>;
+def __slonglong2fs : RuntimeLibcallImpl<SINTTOFP_I64_F32>;
+def __ulonglong2fs : RuntimeLibcallImpl<UINTTOFP_I64_F32>;
+def __fs2slong : RuntimeLibcallImpl<FPTOSINT_F32_I32>;
+def __fs2ulong : RuntimeLibcallImpl<FPTOUINT_F32_I32>;
+def __fs2slonglong : RuntimeLibcallImpl<FPTOSINT_F32_I64>;
+def __fs2ulonglong : RuntimeLibcallImpl<FPTOUINT_F32_I64>;
+def __sdcc_call_iy : RuntimeLibcallImpl<Z80_CALL_IY>;
+def __sdcc_call_hl : RuntimeLibcallImpl<Z80_CALL_HL>;
+
+def Libsdcc : LibcallLibrary<"libsdcc",
+  (add _mulint, _divsint, _divuint, _modsint, _moduint,
+       _mullong, _divslong, _divulong, _modslong, _modulong,
+       _mullonglong, _divslonglong, _divulonglong, _modslonglong,
+       _modulonglong,
+       __fsadd, __fssub, __fsmul, __fsdiv,
+       __slong2fs, __ulong2fs, __slonglong2fs, __ulonglong2fs,
+       __fs2slong, __fs2ulong, __fs2slonglong, __fs2ulonglong,
+       LibcallImpls<(add __sdcc_call_iy), isZ80>,
+       LibcallImpls<(add __sdcc_call_hl), isSM83>), isZ80SDCCEnv>;
+
+// compiler-rt for what libsdcc lacks.
+def Z80SDCCCompilerRt : LibcallLibrary<"compiler-rt", Z80CompilerRtImpls,
+                                       isZ80SDCCEnv>;
+
+// The compiler-rt functions libsdcc replaces.
+defvar Z80LibsdccOptOut = [
+  __mulhi3, __divhi3, __udivhi3, __modhi3, __umodhi3,
+  __mulsi3, __divsi3, __udivsi3, __modsi3, __umodsi3,
+  __muldi3, __divdi3, __udivdi3, __moddi3, __umoddi3,
+  __addsf3, __subsf3, __mulsf3, __divsf3,
+  __floatsisf, __floatunsisf, __floatdisf, __floatundisf,
+  __fixsfsi, __fixunssfsi, __fixsfdi, __fixunssfdi
+];
+
+def Z80SDCCSystemLibrary
+    : SystemRuntimeLibrary<isZ80SDCCEnv,
+    (add LibraryRef<CompilerRtLibgcc,
+                    !listconcat([__udivqi3, __umodqi3], Z80LibsdccOptOut)>,
+         Z80SDCCCompilerRt,
+         Libsdcc,
+         Libm,
          LibraryRef<Libc, [memcpy, memmove, memset]>,
          ExceptionRuntime)>;
 

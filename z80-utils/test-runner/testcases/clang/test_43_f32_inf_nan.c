@@ -1,5 +1,6 @@
 /* Test 43: IEEE 754 infinity and NaN edge cases */
 /* SKIP-IF: -ffast-math */
+/* SKIP-IF: -sdcc */
 /* Uses union for bit-level float construction/inspection */
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;

@@ -15,6 +15,7 @@
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 
 using namespace clang::driver;
 using namespace clang::driver::toolchains;
@@ -74,6 +75,39 @@ void z80::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 // SDCC Linker (sdldz80 / sdldgb) — used with -fno-integrated-as
 //===----------------------------------------------------------------------===//
 
+// The directory of SDCC's library for \p Port, searched as sdcc does: under
+// $SDCC_LIB, under $SDCC_HOME, then next to the installation of \p Linker.
+static std::optional<std::string>
+findSDCCLibDir(StringRef Port, StringRef Linker, StringRef SysRoot) {
+  SmallVector<SmallString<256>, 6> Dirs;
+  auto AddDir = [&](const Twine &Base, const Twine &Sub) {
+    SmallString<256> Dir;
+    llvm::sys::path::append(Dir, Base, Sub);
+    Dirs.push_back(Dir);
+  };
+  if (std::optional<std::string> Lib = llvm::sys::Process::GetEnv("SDCC_LIB")) {
+    AddDir(*Lib, Port);
+    AddDir(*Lib, "");
+  }
+  if (std::optional<std::string> Home = llvm::sys::Process::GetEnv("SDCC_HOME"))
+    AddDir(*Home, "share/sdcc/lib/" + Port);
+  if (llvm::sys::path::is_absolute(Linker)) {
+    StringRef Prefix =
+        llvm::sys::path::parent_path(llvm::sys::path::parent_path(Linker));
+    AddDir(Prefix, "share/sdcc/lib/" + Port);
+  }
+  AddDir(SysRoot + "/usr/local", "share/sdcc/lib/" + Port);
+  AddDir(SysRoot + "/usr", "share/sdcc/lib/" + Port);
+
+  for (const SmallString<256> &Dir : Dirs) {
+    SmallString<256> Lib(Dir);
+    llvm::sys::path::append(Lib, Port + ".lib");
+    if (llvm::sys::fs::exists(Lib))
+      return std::string(Dir);
+  }
+  return std::nullopt;
+}
+
 void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
                                    const InputInfo &Output,
                                    const InputInfoList &Inputs,
@@ -123,11 +157,24 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
+  std::string Linker = TC.GetProgramPath(LinkerName);
+
+  // Link SDCC's library.
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
+    if (std::optional<std::string> Dir =
+            findSDCCLibDir(SubDir, Linker, TC.getDriver().SysRoot)) {
+      CmdArgs.push_back("-k");
+      CmdArgs.push_back(Args.MakeArgString(*Dir));
+      CmdArgs.push_back("-l");
+      CmdArgs.push_back(SubDir);
+    }
+  }
+
   // Forward user linker flags (-Wl, -Xlinker).
   Args.AddAllArgs(CmdArgs, options::OPT_Wl_COMMA);
   Args.AddAllArgs(CmdArgs, options::OPT_Xlinker);
 
-  const char *Exec = Args.MakeArgString(TC.GetProgramPath(LinkerName));
+  const char *Exec = Args.MakeArgString(Linker);
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
                                          Exec, CmdArgs, Inputs, Output));
 

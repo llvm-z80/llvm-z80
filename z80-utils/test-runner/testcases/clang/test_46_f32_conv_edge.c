@@ -1,5 +1,6 @@
 /* Test 46: IEEE 754 conversion edge cases, mixed arithmetic stress */
 /* SKIP-IF: -ffast-math */
+/* SKIP-IF: -sdcc */
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned long uint32_t;
