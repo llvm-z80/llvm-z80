@@ -23,3 +23,9 @@
 // RUN: env SDCC_LIB=%t/env PATH=%t/bin %clang --target=z80-unknown-none-sdcc -ccc-install-dir %t/bin -nostdlib -### %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=NOSTDLIB
 // NOSTDLIB-NOT: "-l"
+
+// Without SDCC's library, linking is an error.
+// RUN: mkdir -p %t/none/bin && touch %t/none/bin/sdldz80 && chmod +x %t/none/bin/sdldz80
+// RUN: not env -u SDCC_LIB -u SDCC_HOME PATH=%t/none/bin %clang --target=z80-unknown-none-sdcc --sysroot=%t/none -ccc-install-dir %t/none/bin -### %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=MISSING
+// MISSING: error: cannot find SDCC's library 'z80.lib'; is SDCC installed?
