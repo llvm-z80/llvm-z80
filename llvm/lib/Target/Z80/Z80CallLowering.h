@@ -77,6 +77,8 @@ enum class Z80CCBase {
   SmallC,        ///< Every argument on the stack, left-to-right.
   Z88dkFastCall, ///< A single argument, in the return registers.
   Builtin,       ///< Backend-internal rtlib helpers: everything in registers.
+  Z88dkIMath,    ///< z88dk's integer math cores.
+  Sccz80Runtime, ///< sccz80's runtime routines.
 };
 
 /// What a Z80 calling convention actually does.  SDCC builds its conventions
@@ -92,16 +94,25 @@ struct Z80CCAxes {
   /// 16 bits.
   bool ForcedCalleeCleanup = false;
 
+  /// The call takes the high half of a z88dk math core's result.
+  bool HighResult = false;
+
   /// No argument is passed in a register.
   bool stackArgsOnly() const {
     return Base == Z80CCBase::SDCCCall0 || Base == Z80CCBase::SmallC;
   }
   /// __smallc order: the first declared argument is pushed first, so the
   /// callee finds the LAST one nearest the return address.
-  bool isLeftToRight() const { return Base == Z80CCBase::SmallC; }
+  bool isLeftToRight() const {
+    return Base == Z80CCBase::SmallC || Base == Z80CCBase::Sccz80Runtime;
+  }
   bool isFastCall() const { return Base == Z80CCBase::Z88dkFastCall; }
   /// A backend-internal rtlib helper, whose arguments are all in registers.
   bool isBuiltin() const { return Base == Z80CCBase::Builtin; }
+  /// One of z88dk's runtime conventions, used only for calls.
+  bool isZ88dkRuntime() const {
+    return Base == Z80CCBase::Z88dkIMath || Base == Z80CCBase::Sccz80Runtime;
+  }
 
   /// True for the bases that return in the z88dk classic registers
   /// (Z80 i8->L, i16->HL, i32->DE:HL) rather than in __sdcccall(1)'s.
@@ -164,10 +175,32 @@ inline Z80CCAxes decodeZ80CC(Z80CC CC) {
     Axes.Base = Z80CCBase::SmallC;
     Axes.ForcedCalleeCleanup = true;
     break;
+  case CallingConv::Z80_Z88dkIMathLow:
+    Axes.Base = Z80CCBase::Z88dkIMath;
+    Axes.ForcedCalleeCleanup = true;
+    break;
+  case CallingConv::Z80_Z88dkIMathHigh:
+    Axes.Base = Z80CCBase::Z88dkIMath;
+    Axes.ForcedCalleeCleanup = true;
+    Axes.HighResult = true;
+    break;
+  case CallingConv::Z80_Sccz80Runtime:
+    Axes.Base = Z80CCBase::Sccz80Runtime;
+    Axes.ForcedCalleeCleanup = true;
+    break;
   default:
     break;
   }
   return Axes;
+}
+
+/// The external symbol a call to \p Name in \p CC uses.  z88dk's runtime
+/// routines have assembly names, so they skip the C symbol prefix.
+inline const char *getZ80CalleeName(MachineFunction &MF, const char *Name,
+                                    Z80CC CC) {
+  if (!decodeZ80CC(CC).isZ88dkRuntime())
+    return Name;
+  return MF.createExternalSymbolName((Twine("\1") + Name).str());
 }
 
 /// Common call lowering implementation for Z80-family targets.

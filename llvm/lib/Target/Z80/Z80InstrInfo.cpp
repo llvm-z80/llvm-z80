@@ -13,6 +13,8 @@
 #include "Z80InstrInfo.h"
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
+#include "Z80CallLowering.h"
+#include "Z80ISelLowering.h"
 #include "Z80OpcodeUtils.h"
 #include "Z80RegisterInfo.h"
 #include "Z80Subtarget.h"
@@ -728,6 +730,8 @@ bool Z80InstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
   MachineInstr *Def = MRI->getVRegDef(SrcReg);
   while (Def && Def->isFullCopy() && Def->getOperand(1).getReg().isVirtual())
     Def = MRI->getVRegDef(Def->getOperand(1).getReg());
+  if (Def && Def->isCopy() && Def->getOperand(1).getReg() == Z80::L)
+    return optimizeCarryCompare(CmpInstr, *Def);
   MachineBasicBlock &MBB = *CmpInstr.getParent();
   if (!Def || Def->getParent() != &MBB)
     return false;
@@ -785,6 +789,100 @@ bool Z80InstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
     return true;
   }
   if (MachineOperand *FlagsDef = Def->findRegisterDefOperand(Z80::FLAGS, TRI))
+    FlagsDef->setIsDead(false);
+  return true;
+}
+
+/// The branch on C or NC that replaces \p Opc, a branch on NZ or Z, or 0.
+static unsigned getCarryBranch(unsigned Opc) {
+  switch (Opc) {
+  case Z80::JP_NZ_nn:
+    return Z80::JP_C_nn;
+  case Z80::JP_Z_nn:
+    return Z80::JP_NC_nn;
+  case Z80::JR_NZ_e:
+    return Z80::JR_C_e;
+  case Z80::JR_Z_e:
+    return Z80::JR_NC_e;
+  default:
+    return 0;
+  }
+}
+
+/// Whether \p MI calls a float comparison that also sets the carry to its
+/// result.
+static bool isCarryCompareCall(const MachineInstr &MI,
+                               const Z80Subtarget &STI) {
+  if (MI.getOpcode() != Z80::CALL_nn || !MI.getOperand(0).isSymbol())
+    return false;
+  StringRef Callee = MI.getOperand(0).getSymbolName();
+  Callee.consume_front("\1");
+  const Z80TargetLowering &TLI = *STI.getTargetLowering();
+  for (RTLIB::Libcall LC : {RTLIB::OEQ_F32, RTLIB::UNE_F32, RTLIB::OLT_F32,
+                            RTLIB::OLE_F32, RTLIB::OGT_F32, RTLIB::OGE_F32}) {
+    RTLIB::LibcallImpl Impl = TLI.getLibcallImpl(LC);
+    if (Impl != RTLIB::Unsupported &&
+        TLI.getLibcallImplCallingConv(Impl) == CallingConv::Z80_Sccz80Runtime &&
+        TLI.getLibcallImplName(Impl) == Callee)
+      return true;
+  }
+  return false;
+}
+
+/// Whether \p MI ends a call sequence with nothing to pop.
+static bool isEmptyCallFrameDestroy(const MachineInstr &MI) {
+  return MI.getOpcode() == Z80::ADJCALLSTACKUP &&
+         MI.getOperand(0).getImm() == MI.getOperand(1).getImm();
+}
+
+/// Drop a test of the boolean a float comparison returned in L, and make the
+/// branches on it branch on the carry the comparison set.
+bool Z80InstrInfo::optimizeCarryCompare(MachineInstr &CmpInstr,
+                                        MachineInstr &Copy) const {
+  MachineBasicBlock &MBB = *CmpInstr.getParent();
+  if (Copy.getParent() != &MBB)
+    return false;
+
+  MachineInstr *Call = nullptr;
+  for (MachineInstr &MI : make_range(
+           std::next(MachineBasicBlock::reverse_iterator(Copy)), MBB.rend())) {
+    if (MI.isCall()) {
+      Call = &MI;
+      break;
+    }
+    if (!MI.isCopy() && !MI.isDebugInstr() && !isEmptyCallFrameDestroy(MI))
+      return false;
+  }
+  if (!Call || !isCarryCompareCall(*Call, *STI))
+    return false;
+
+  const TargetRegisterInfo *TRI = STI->getRegisterInfo();
+  for (auto I = std::next(Call->getIterator()); &*I != &CmpInstr; ++I)
+    if (I->modifiesRegister(Z80::FLAGS, TRI) || I->isCall() ||
+        (I->hasUnmodeledSideEffects() && !isEmptyCallFrameDestroy(*I)))
+      return false;
+
+  SmallVector<MachineInstr *, 2> Branches;
+  bool Redefined = false;
+  for (MachineBasicBlock::iterator I = std::next(CmpInstr.getIterator()),
+                                   E = MBB.end();
+       I != E && !Redefined; ++I) {
+    if (I->readsRegister(Z80::FLAGS, TRI)) {
+      if (!getCarryBranch(I->getOpcode()))
+        return false;
+      Branches.push_back(&*I);
+    }
+    Redefined = I->modifiesRegister(Z80::FLAGS, TRI);
+  }
+  if (!Redefined && any_of(MBB.successors(), [](const MachineBasicBlock *S) {
+        return S->isLiveIn(Z80::FLAGS);
+      }))
+    return false;
+
+  CmpInstr.eraseFromParent();
+  for (MachineInstr *Branch : Branches)
+    Branch->setDesc(get(getCarryBranch(Branch->getOpcode())));
+  if (MachineOperand *FlagsDef = Call->findRegisterDefOperand(Z80::FLAGS, TRI))
     FlagsDef->setIsDead(false);
   return true;
 }
@@ -1437,12 +1535,17 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   case Z80::CALL_HL: {
     // Indirect call: CALL the runtime trampoline that jumps through IY (Z80)
     // or HL (SM83).
-    const auto &TLI =
-        *MBB.getParent()->getSubtarget<Z80Subtarget>().getTargetLowering();
+    MachineFunction &MF = *MBB.getParent();
+    const auto &TLI = *MF.getSubtarget<Z80Subtarget>().getTargetLowering();
     bool IsIY = MI.getOpcode() == Z80::CALL_IY;
-    const char *Name = TLI.getRequiredLibcallName(
-        IsIY ? RTLIB::Z80_CALL_IY : RTLIB::Z80_CALL_HL,
-        IsIY ? "the IY call trampoline" : "the HL call trampoline");
+    RTLIB::Libcall LC = IsIY ? RTLIB::Z80_CALL_IY : RTLIB::Z80_CALL_HL;
+    const char *Name = getZ80CalleeName(
+        MF,
+        TLI.getRequiredLibcallName(LC, IsIY ? "the IY call trampoline"
+                                            : "the HL call trampoline"),
+        getZ80CC(TLI.getLibcallImplCallingConv(TLI.getLibcallImpl(LC)),
+                 MF.getTarget().getTargetTriple(), /*IsVarArg=*/false,
+                 /*IsMain=*/false));
     auto NewMI =
         BuildMI(MBB, MI, DL, get(Z80::CALL_nn)).addExternalSymbol(Name);
     // Copy implicit operands (argument registers)
@@ -1789,6 +1892,12 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::ASHR16_VAR: return IsSM83 ? 11 : 10;
     // LD A,B; OR C; JR Z,e; LDIR
     case Z80::LDIR_GUARDED: return 6;
+    // EXX; POP HL; POP DE; PUSH IX; CALL nn; POP IX
+    case Z80::CALL_EXX:        return 10;
+    // The CALL_EXX sequence; EXX
+    case Z80::CALL_EXX_HIGH:   return 11;
+    // PUSH BC; POP IY; the CALL_EXX_HIGH sequence; four LD (IY+d),r; EXX
+    case Z80::CALL_EXX_DIVREM: return 27;
     // Callee-cleanup return.  The sequences are in expandPostRAPseudoImpl;
     // SM83 needs one ADD SP,e per 127 bytes because the displacement is
     // signed 8-bit.

@@ -178,6 +178,26 @@ def CALL_IY : Z80Inst<"call\t__call_iy">, InstCall {
   let Defs = [A, BC, DE, HL, IY, FLAGS];
 }
 
+// Calls to a z88dk 32-bit integer math core.  The caller pushes the second
+// operand and loads the first into DEHL; the AsmPrinter swaps the first into
+// DEHL', pops the second into DEHL and saves IX around the call.
+let isPseudo = true, isCodeGenOnly = true,
+    Defs = [A, BC, DE, HL, IY, FLAGS] in {
+// Takes the low half of the result, in DEHL.
+def CALL_EXX : Z80Inst<"">, InstCall {
+  let InOperandList = (ins imm16:$imm);
+}
+// Takes the high half of the result, from DEHL'.
+def CALL_EXX_HIGH : Z80Inst<"">, InstCall {
+  let InOperandList = (ins imm16:$imm);
+}
+// Takes the low half and stores the high half through the pointer in BC.
+def CALL_EXX_DIVREM : Z80Inst<"">, InstCall {
+  let InOperandList = (ins imm16:$imm);
+  let mayStore = true;
+}
+}
+
 // CALL cc,nn - Sign/parity conditions (Z80-only)
 def CALL_PO_nn : CALLcond<CC_PO>;
 def CALL_PE_nn : CALLcond<CC_PE>;

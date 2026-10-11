@@ -98,6 +98,7 @@ def IsZ80Family : LibcallPredicate<[{TT.isZ80Family()}]>;
 def IsZ80 : LibcallPredicate<[{TT.isZ80()}]>;
 def IsSM83 : LibcallPredicate<[{TT.isSM83()}]>;
 def IsSDCCEnv : LibcallPredicate<[{TT.getEnvironment() == Triple::SDCC}]>;
+def IsZ88dkEnv : LibcallPredicate<[{TT.getEnvironment() == Triple::Z88DK}]>;
 
 def IsOSzOS : LibcallPredicate<[{TT.isOSzOS()}]>;
 def IsSystemZ : LibcallPredicate<[{TT.isSystemZ()}]>;
@@ -3766,8 +3767,9 @@ def __cmpsf2_fast : RuntimeLibcallImpl<Z80_FCMP3_F32_FAST>;
 def isZ80 : RuntimeLibcallAvailability<(all_of IsZ80)>;
 def isSM83 : RuntimeLibcallAvailability<(all_of IsSM83)>;
 def isZ80DefaultEnv : RuntimeLibcallAvailability<
-  (all_of IsZ80Family, (not IsSDCCEnv))>;
+  (all_of IsZ80Family, (not IsSDCCEnv), (not IsZ88dkEnv))>;
 def isZ80SDCCEnv : RuntimeLibcallAvailability<(all_of IsZ80Family, IsSDCCEnv)>;
+def isZ80Z88dkEnv : RuntimeLibcallAvailability<(all_of IsZ80Family, IsZ88dkEnv)>;
 
 // The universal Z80 helpers in compiler-rt.
 defvar Z80CompilerRtImpls =
@@ -3861,6 +3863,105 @@ def Z80SDCCSystemLibrary
          Libm,
          LibraryRef<Libc, [memcpy, memmove, memset]>,
          ExceptionRuntime)>;
+
+// z88dk's runtime
+def l_mulu_16_16x16 : RuntimeLibcallImpl<MUL_I16>;
+def l_mulu_32_16x16 : RuntimeLibcallImpl<Z80_UMULH_I16>;
+def l_mulu_32_32x32 : RuntimeLibcallImpl<MUL_I32>;
+foreach S = ["s", "u"] in {
+  foreach W = ["16_16x16", "32_32x32"] in {
+    defvar Bits = !if(!eq(W, "16_16x16"), "I16", "I32");
+    defvar Name = "l_div"#S#"_"#W;
+    defvar Op = !if(!eq(S, "s"), "S", "U");
+    def Name#"" : RuntimeLibcallImpl<!cast<RuntimeLibcall>(Op#"DIV_"#Bits)>;
+    def Name#"_rem"
+        : RuntimeLibcallImpl<!cast<RuntimeLibcall>(Op#"REM_"#Bits), Name>;
+    def Name#"_divrem"
+        : RuntimeLibcallImpl<!cast<RuntimeLibcall>(Op#"DIVREM_"#Bits), Name>;
+  }
+}
+def l_f32_add : RuntimeLibcallImpl<ADD_F32>;
+def l_f32_sub : RuntimeLibcallImpl<SUB_F32>;
+def l_f32_mul : RuntimeLibcallImpl<MUL_F32>;
+def l_f32_div : RuntimeLibcallImpl<DIV_F32>;
+def l_f32_eq : RuntimeLibcallImpl<OEQ_F32>;
+def l_f32_ne : RuntimeLibcallImpl<UNE_F32>;
+def l_f32_lt : RuntimeLibcallImpl<OLT_F32>;
+def l_f32_le : RuntimeLibcallImpl<OLE_F32>;
+def l_f32_gt : RuntimeLibcallImpl<OGT_F32>;
+def l_f32_ge : RuntimeLibcallImpl<OGE_F32>;
+def l_f32_slong2f : RuntimeLibcallImpl<SINTTOFP_I32_F32>;
+def l_f32_ulong2f : RuntimeLibcallImpl<UINTTOFP_I32_F32>;
+def l_f32_f2slong : RuntimeLibcallImpl<FPTOSINT_F32_I32>;
+def l_f32_f2ulong : RuntimeLibcallImpl<FPTOUINT_F32_I32>;
+def l_jpiy : RuntimeLibcallImpl<Z80_CALL_IY>;
+
+// math32's double is a float, so the float libcalls use the double names.
+defvar Z88dkLibmNames = ["acos", "asin", "atan", "atan2", "ceil", "cos", "cosh",
+                         "exp", "exp10", "exp2", "floor", "fmax", "fmin",
+                         "frexp", "ldexp", "log", "log10", "log2", "modf",
+                         "pow", "round", "sin", "sinh", "sqrt", "tan", "tanh"];
+foreach Name = Z88dkLibmNames in
+  def z88dk_#Name
+      : RuntimeLibcallImpl<!cast<RuntimeLibcall>(!toupper(Name)#"_F32"), Name>;
+def z88dk_fmod : RuntimeLibcallImpl<REM_F32, "fmod">;
+
+def Z88dkLib : LibcallLibrary<"z88dk",
+  (add LibcallsWithCC<(add l_mulu_16_16x16, l_mulu_32_32x32,
+                           l_divs_16_16x16, l_divu_16_16x16,
+                           l_divs_32_32x32, l_divu_32_32x32,
+                           l_divs_16_16x16_divrem, l_divu_16_16x16_divrem,
+                           l_divs_32_32x32_divrem, l_divu_32_32x32_divrem),
+                      Z80_Z88DKIMATHLOW>,
+       LibcallsWithCC<(add l_divs_16_16x16_rem, l_divu_16_16x16_rem,
+                           l_divs_32_32x32_rem, l_divu_32_32x32_rem,
+                           l_mulu_32_16x16),
+                      Z80_Z88DKIMATHHIGH>,
+       LibcallsWithCC<(add l_f32_add, l_f32_sub, l_f32_mul, l_f32_div,
+                           l_f32_eq, l_f32_ne, l_f32_lt, l_f32_le, l_f32_gt,
+                           l_f32_ge, l_f32_slong2f, l_f32_ulong2f,
+                           l_f32_f2slong, l_f32_f2ulong, l_jpiy),
+                      Z80_SCCZ80RUNTIME>,
+       LibcallsWithCC<(add z88dk_fmod, z88dk_acos, z88dk_asin, z88dk_atan,
+                           z88dk_atan2, z88dk_ceil, z88dk_cos, z88dk_cosh,
+                           z88dk_exp, z88dk_exp10, z88dk_exp2, z88dk_floor,
+                           z88dk_fmax, z88dk_fmin, z88dk_frexp, z88dk_ldexp,
+                           z88dk_log, z88dk_log10, z88dk_log2, z88dk_modf,
+                           z88dk_pow, z88dk_round, z88dk_sin, z88dk_sinh,
+                           z88dk_sqrt, z88dk_tan, z88dk_tanh),
+                      Z80_C>), isZ80Z88dkEnv>;
+
+// The compiler-rt helpers used in the z88dk environment.
+def Z80Z88dkCompilerRt : LibcallLibrary<"compiler-rt",
+  (add Z80MemCalls, LibcallsWithCC<(add __udivqi3, __umodqi3), Z80_BUILTIN>),
+  isZ80Z88dkEnv>;
+
+// The compiler-rt functions z88dk replaces.
+defvar Z80Z88dkOptOut = [
+  __mulhi3, __divhi3, __udivhi3, __modhi3, __umodhi3,
+  __mulsi3, __divsi3, __udivsi3, __modsi3, __umodsi3,
+  __addsf3, __subsf3, __mulsf3, __divsf3,
+  __eqsf2, __nesf2, __ltsf2, __lesf2, __gtsf2, __gesf2, __unordsf2,
+  __floatsisf, __floatunsisf, __fixsfsi, __fixunssfsi
+];
+
+def Z80Z88dkSystemLibrary
+    : SystemRuntimeLibrary<isZ80Z88dkEnv,
+    (add LibraryRef<CompilerRtLibgcc,
+                    !listconcat([__udivqi3, __umodqi3], Z80Z88dkOptOut)>,
+         Z80Z88dkCompilerRt,
+         Z88dkLib,
+         // math32 defines these names for float, so double has none of them.
+         LibraryRef<Libm, !listconcat([fmodf, fmod],
+                                      !foreach(Name, Z88dkLibmNames,
+                                               !cast<RuntimeLibcallImpl>(Name#"f")),
+                                      !foreach(Name, Z88dkLibmNames,
+                                               !cast<RuntimeLibcallImpl>(Name)))>,
+         LibraryRef<Libc, [memcpy, memmove, memset]>,
+         ExceptionRuntime)> {
+  // compiler-rt is written for __sdcccall(1).
+  let DefaultLibcallCallingConv = Z80_SDCCCALL1;
+}
 
 //===----------------------------------------------------------------------===//
 // ZOS Runtime Libcalls
