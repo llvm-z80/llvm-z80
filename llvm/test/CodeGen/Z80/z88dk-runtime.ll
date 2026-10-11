@@ -39,6 +39,24 @@ define i1 @umulo16(i16 %a, i16 %b) {
   ret i1 %o
 }
 
+; A byte division is a call only at minsize.
+; CHECK-LABEL: _udiv8:
+; CHECK:       call l_fast_divu_8_8x8
+; CHECK-NEXT:  ret
+define i8 @udiv8(i8 %a, i8 %b) minsize {
+  %r = udiv i8 %a, %b
+  ret i8 %r
+}
+
+; CHECK-LABEL: _urem8:
+; CHECK:       call l_fast_divu_8_8x8
+; CHECK-NEXT:  ld l,e
+; CHECK-NEXT:  ret
+define i8 @urem8(i8 %a, i8 %b) minsize {
+  %r = urem i8 %a, %b
+  ret i8 %r
+}
+
 ; CHECK-LABEL: _mul32:
 ; CHECK:       exx
 ; CHECK-NEXT:  pop hl

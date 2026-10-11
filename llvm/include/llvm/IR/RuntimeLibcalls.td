@@ -3868,6 +3868,8 @@ def Z80SDCCSystemLibrary
 def l_mulu_16_16x16 : RuntimeLibcallImpl<MUL_I16>;
 def l_mulu_32_16x16 : RuntimeLibcallImpl<Z80_UMULH_I16>;
 def l_mulu_32_32x32 : RuntimeLibcallImpl<MUL_I32>;
+def l_fast_divu_8_8x8 : RuntimeLibcallImpl<UDIV_I8>;
+def l_fast_divu_8_8x8_rem : RuntimeLibcallImpl<UREM_I8, "l_fast_divu_8_8x8">;
 foreach S = ["s", "u"] in {
   foreach W = ["16_16x16", "32_32x32"] in {
     defvar Bits = !if(!eq(W, "16_16x16"), "I16", "I32");
@@ -3908,12 +3910,14 @@ def z88dk_fmod : RuntimeLibcallImpl<REM_F32, "fmod">;
 
 def Z88dkLib : LibcallLibrary<"z88dk",
   (add LibcallsWithCC<(add l_mulu_16_16x16, l_mulu_32_32x32,
+                           l_fast_divu_8_8x8,
                            l_divs_16_16x16, l_divu_16_16x16,
                            l_divs_32_32x32, l_divu_32_32x32,
                            l_divs_16_16x16_divrem, l_divu_16_16x16_divrem,
                            l_divs_32_32x32_divrem, l_divu_32_32x32_divrem),
                       Z80_Z88DKIMATHLOW>,
-       LibcallsWithCC<(add l_divs_16_16x16_rem, l_divu_16_16x16_rem,
+       LibcallsWithCC<(add l_fast_divu_8_8x8_rem,
+                           l_divs_16_16x16_rem, l_divu_16_16x16_rem,
                            l_divs_32_32x32_rem, l_divu_32_32x32_rem,
                            l_mulu_32_16x16),
                       Z80_Z88DKIMATHHIGH>,
@@ -3933,11 +3937,11 @@ def Z88dkLib : LibcallLibrary<"z88dk",
 
 // The compiler-rt helpers used in the z88dk environment.
 def Z80Z88dkCompilerRt : LibcallLibrary<"compiler-rt",
-  (add Z80MemCalls, LibcallsWithCC<(add __udivqi3, __umodqi3), Z80_BUILTIN>),
-  isZ80Z88dkEnv>;
+  (add Z80MemCalls), isZ80Z88dkEnv>;
 
 // The compiler-rt functions z88dk replaces.
 defvar Z80Z88dkOptOut = [
+  __udivqi3, __umodqi3,
   __mulhi3, __divhi3, __udivhi3, __modhi3, __umodhi3,
   __mulsi3, __divsi3, __udivsi3, __modsi3, __umodsi3,
   __addsf3, __subsf3, __mulsf3, __divsf3,
@@ -3947,8 +3951,7 @@ defvar Z80Z88dkOptOut = [
 
 def Z80Z88dkSystemLibrary
     : SystemRuntimeLibrary<isZ80Z88dkEnv,
-    (add LibraryRef<CompilerRtLibgcc,
-                    !listconcat([__udivqi3, __umodqi3], Z80Z88dkOptOut)>,
+    (add LibraryRef<CompilerRtLibgcc, Z80Z88dkOptOut>,
          Z80Z88dkCompilerRt,
          Z88dkLib,
          // math32 defines these names for float, so double has none of them.
