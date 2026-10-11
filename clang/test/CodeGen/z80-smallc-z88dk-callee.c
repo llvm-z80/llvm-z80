@@ -5,12 +5,12 @@
 // (left-to-right, from smallc) and stack cleanup (callee, from callee), so
 // writing both on one function COMPOSES them into the z88dk
 // `__smallc __z88dk_callee` convention instead of conflicting.  clang
-// lowers the composition to CallingConv::Z80_SmallCCallee = 133 (`cc133`) on
+// lowers the composition to CallingConv::Z80_SmallCCallee = 134 (`cc246`) on
 // both the definition and the call site.  The actual dual-axis stack discipline
 // (left-to-right push + callee cleanup) is pinned by the backend lit test
 // llvm/test/CodeGen/Z80/z80-smallc-callee.ll.
 
-// CHECK: define{{.*}}cc133 void @sink2(i16
+// CHECK: define{{.*}}cc246 void @sink2(i16
 __attribute__((smallc)) __attribute__((z88dk_callee))
 void sink2(unsigned short a, unsigned short b);
 __attribute__((smallc)) __attribute__((z88dk_callee))
@@ -20,7 +20,7 @@ void sink2(unsigned short a, unsigned short b) {
 }
 
 // The composition is order-independent: callee-then-smallc yields the same CC.
-// CHECK: define{{.*}}cc133 {{.*}}i16 @ordered2(i16
+// CHECK: define{{.*}}cc246 {{.*}}i16 @ordered2(i16
 __attribute__((z88dk_callee)) __attribute__((smallc))
 unsigned short ordered2(unsigned short a, unsigned short b) {
   return 10 * a + b;
@@ -28,7 +28,7 @@ unsigned short ordered2(unsigned short a, unsigned short b) {
 
 // The call site carries the same composed convention.
 // CHECK-LABEL: @call_sink2(
-// CHECK: call cc133 void @sink2(i16 noundef {{(zeroext )?}}1, i16 noundef {{(zeroext )?}}2)
+// CHECK: call cc246 void @sink2(i16 noundef {{(zeroext )?}}1, i16 noundef {{(zeroext )?}}2)
 void call_sink2(void) { sink2(1, 2); }
 
 // A call THROUGH A FUNCTION POINTER must carry the convention too, this is the
@@ -37,5 +37,5 @@ void call_sink2(void) { sink2(1, 2); }
 typedef void (*sink_fp)(unsigned short, unsigned short)
     __attribute__((smallc)) __attribute__((z88dk_callee));
 // CHECK-LABEL: @call_via_ptr(
-// CHECK: call cc133 void %{{.*}}(i16
+// CHECK: call cc246 void %{{.*}}(i16
 void call_via_ptr(sink_fp f) { f(3, 4); }

@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/Register.h"
+#include "llvm/TargetParser/Triple.h"
 
 namespace llvm {
 
@@ -109,13 +110,37 @@ struct Z80CCAxes {
   }
 };
 
+/// A calling convention resolved by getZ80CC.  The decoding helpers take only
+/// this type, because an unresolved CallingConv::C can decode to the wrong
+/// convention and miscompile the call.
+class Z80CC {
+  CallingConv::ID ID;
+  explicit Z80CC(CallingConv::ID ID) : ID(ID) {}
+  friend Z80CC getZ80CC(CallingConv::ID CC, const Triple &TT, bool IsVarArg,
+                        bool IsMain);
+
+public:
+  CallingConv::ID id() const { return ID; }
+};
+
+inline Z80CC getZ80CC(CallingConv::ID CC, const Triple &TT, bool IsVarArg,
+                      bool IsMain) {
+  if (CC != CallingConv::C || TT.getEnvironment() != Triple::Z88DK)
+    return Z80CC(CC);
+  return Z80CC(IsVarArg || IsMain ? CallingConv::Z80_SDCCCall0
+                                  : CallingConv::Z80_SmallC);
+}
+
 /// Decode \p CC into its base and modifiers.  This is the only place that
 /// knows which convention is built from what; everything else asks the axes.
-/// Any convention outside the set, meaning CallingConv::C (SDCC
-/// __sdcccall(1)), decodes to the plain default.
-inline Z80CCAxes decodeZ80CC(CallingConv::ID CC) {
+/// Any convention outside the set, CallingConv::C included, decodes to the
+/// plain default.
+inline Z80CCAxes decodeZ80CC(Z80CC CC) {
   Z80CCAxes Axes;
-  switch (CC) {
+  switch (CC.id()) {
+  case CallingConv::Z80_SDCCCall1:
+    Axes.Base = Z80CCBase::SDCCCall1;
+    break;
   case CallingConv::Z80_SDCCCall0:
     Axes.Base = Z80CCBase::SDCCCall0;
     break;
@@ -156,7 +181,7 @@ protected:
   /// __sdcccall(1) shares one set: the stack ones only ever read its return
   /// registers, and __z88dk_fastcall additionally passes its sole argument in
   /// them.
-  const CallingConvRegs &getRegsForCC(CallingConv::ID CC) const {
+  const CallingConvRegs &getRegsForCC(Z80CC CC) const {
     return decodeZ80CC(CC).usesZ88dkRegs() ? CCRegs0 : CCRegs;
   }
 

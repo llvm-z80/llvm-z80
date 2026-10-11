@@ -33,6 +33,7 @@
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Basic/Z80CallingConv.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/Attr.h"
 #include "clang/Sema/DeclSpec.h"
@@ -5956,17 +5957,18 @@ bool Sema::CheckCallingConvAttr(const ParsedAttr &Attrs, CallingConv &CC,
       Diag(Attrs.getLoc(), diag::err_argument_invalid_range) << ABI << 0 << 1;
       return true;
     }
-    CC = (ABI == 0) ? CC_Z80SDCCCall0 : CC_C;
+    CC = joinZ80CC({ABI == 0 ? Z80CCBase::SDCCCall0 : Z80CCBase::SDCCCall1},
+                   Context.getTargetInfo().getTriple());
     break;
   }
   case ParsedAttr::AT_Z88dkFastCall:
     CC = CC_Z80Z88dkFastCall;
     break;
   case ParsedAttr::AT_Z88dkCallee:
-    CC = CC_Z80Z88dkCallee;
+    CC = joinZ80CC({std::nullopt, true}, Context.getTargetInfo().getTriple());
     break;
   case ParsedAttr::AT_SmallC:
-    CC = CC_Z80SmallC;
+    CC = joinZ80CC({Z80CCBase::SmallC}, Context.getTargetInfo().getTriple());
     break;
   case ParsedAttr::AT_DeviceKernel: {
     // Validation was handled in handleDeviceKernelAttr.

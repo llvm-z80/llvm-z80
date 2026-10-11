@@ -30,6 +30,20 @@ public:
                     const char *LinkingOutput) const override;
 };
 
+/// z88dk assembler (z88dk-z80asm).
+/// Used in the z88dk environment.
+class LLVM_LIBRARY_VISIBILITY Z88dkAssembler final : public Tool {
+public:
+  Z88dkAssembler(const ToolChain &TC)
+      : Tool("z80::Z88dkAssembler", "z88dk-z80asm", TC) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+};
+
 /// SDCC linker (sdldz80 / sdldgb).
 /// Used when -fno-integrated-as is specified (SDCC .rel object format).
 class LLVM_LIBRARY_VISIBILITY SDCCLinker final : public Tool {
@@ -74,7 +88,8 @@ protected:
 
 public:
   bool IsIntegratedAssemblerDefault() const override {
-    return getTriple().getEnvironment() != llvm::Triple::SDCC;
+    llvm::Triple::EnvironmentType Env = getTriple().getEnvironment();
+    return Env != llvm::Triple::SDCC && Env != llvm::Triple::Z88DK;
   }
   bool isPICDefault() const override { return false; }
   bool isPIEDefault(const llvm::opt::ArgList &Args) const override {

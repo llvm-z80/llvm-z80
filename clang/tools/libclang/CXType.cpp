@@ -731,6 +731,7 @@ CXCallingConv clang_getFunctionTypeCallingConv(CXType X) {
       TCALLINGCONV(RISCVVLSCall_32768);
       TCALLINGCONV(RISCVVLSCall_65536);
     case CC_DeviceKernel:
+    case CC_Z80SDCCCall1:
     case CC_Z80SDCCCall0:
     case CC_Z80SmallC:
     case CC_Z80Z88dkFastCall:
