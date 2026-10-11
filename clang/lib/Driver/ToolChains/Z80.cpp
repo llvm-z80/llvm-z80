@@ -83,8 +83,6 @@ void z80::Z88dkAssembler::ConstructJob(Compilation &C, const JobAction &JA,
   claimNoWarnArgs(Args);
   ArgStringList CmdArgs;
 
-  if (getToolChain().getTriple().isSM83())
-    CmdArgs.push_back("-m=gbz80");
   CmdArgs.push_back(Args.MakeArgString(Twine("-o=") + Output.getFilename()));
   for (const auto &II : Inputs)
     CmdArgs.push_back(II.getFilename());
