@@ -28,6 +28,35 @@ define i8 @div8(i8 %a, i8 %b) {
   ret i8 %t
 }
 
+; A mask keeps only the low byte as well.
+; CHECK-LABEL: _div8_mask:
+; CHECK-NOT:   call
+; CHECK:       ld b,8
+; CHECK-NOT:   call
+; CHECK:       ret
+define i16 @div8_mask(i8 %a, i8 %b) {
+  %x = sext i8 %a to i16
+  %y = sext i8 %b to i16
+  %r = sdiv i16 %x, %y
+  %m = and i16 %r, 255
+  ret i16 %m
+}
+
+; -128 / -1 leaves 0x80, so the mask stays even for operands known negative.
+; CHECK-LABEL: _div8_negative:
+; CHECK:       ld b,8
+; CHECK:       res 7,
+define i8 @div8_negative(i8 %a, i8 %b) {
+  %na = or i8 %a, -128
+  %nb = or i8 %b, -128
+  %x = sext i8 %na to i16
+  %y = sext i8 %nb to i16
+  %r = sdiv i16 %x, %y
+  %t = trunc i16 %r to i8
+  %m = and i8 %t, 127
+  ret i8 %m
+}
+
 ; A remainder is smaller than the divisor in magnitude.
 ; CHECK-LABEL: _rem16:
 ; CHECK-NOT:   call

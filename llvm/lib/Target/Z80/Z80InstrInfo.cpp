@@ -27,7 +27,6 @@
 #include "llvm/CodeGen/MachineOutliner.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/Module.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -1434,30 +1433,19 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
-  case Z80::CALL_IY: {
-    // Z80: Indirect call through IY register.
-    // Expand to: CALL __call_iy (runtime trampoline that does JP (IY))
-    MachineFunction &MF = *MBB.getParent();
-    MCContext &Ctx = MF.getContext();
-    MCSymbol *Sym = Ctx.getOrCreateSymbol("__call_iy");
-    auto NewMI = BuildMI(MBB, MI, DL, get(Z80::CALL_nn)).addSym(Sym);
-    // Copy implicit operands (argument registers)
-    for (const MachineOperand &MO : MI.implicit_operands()) {
-      if (MO.isReg() && MO.isUse())
-        NewMI.addReg(MO.getReg(), RegState::Implicit);
-    }
-    MI.eraseFromParent();
-    return true;
-  }
-
+  case Z80::CALL_IY:
   case Z80::CALL_HL: {
-    // SM83: Indirect call through HL register.
-    // Expand to: CALL __call_hl
-    // The runtime trampoline is just JP (HL) — no register shift needed.
-    MachineFunction &MF = *MBB.getParent();
-    MCContext &Ctx = MF.getContext();
-    MCSymbol *Sym = Ctx.getOrCreateSymbol("__call_hl");
-    auto NewMI = BuildMI(MBB, MI, DL, get(Z80::CALL_nn)).addSym(Sym);
+    // Indirect call: CALL the runtime trampoline that jumps through IY (Z80)
+    // or HL (SM83).
+    const auto &TLI =
+        *MBB.getParent()->getSubtarget<Z80Subtarget>().getTargetLowering();
+    bool IsIY = MI.getOpcode() == Z80::CALL_IY;
+    const char *Name = TLI.getRequiredLibcallName(
+        IsIY ? RTLIB::Z80_CALL_IY : RTLIB::Z80_CALL_HL,
+        IsIY ? "the IY call trampoline" : "the HL call trampoline");
+    auto NewMI =
+        BuildMI(MBB, MI, DL, get(Z80::CALL_nn)).addExternalSymbol(Name);
+    // Copy implicit operands (argument registers)
     for (const MachineOperand &MO : MI.implicit_operands()) {
       if (MO.isReg() && MO.isUse())
         NewMI.addReg(MO.getReg(), RegState::Implicit);

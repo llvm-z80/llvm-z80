@@ -20,7 +20,9 @@
 #include "llvm/CodeGen/GlobalISel/CombinerInfo.h"
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutorImpl.h"
 #include "llvm/CodeGen/GlobalISel/GISelValueTracking.h"
+#include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -38,6 +40,71 @@ namespace {
 #define GET_GICOMBINER_TYPES
 #include "Z80GenPreLegalizeGICombiner.inc"
 #undef GET_GICOMBINER_TYPES
+
+// A byte sign-extended to 16 bits, possibly still folded into its load.
+bool isSExtByte(Register Reg, const MachineRegisterInfo &MRI) {
+  LLT S8 = LLT::scalar(8);
+  const MachineInstr *Def = MRI.getVRegDef(Reg);
+  if (Def->getOpcode() == TargetOpcode::G_SEXT)
+    return MRI.getType(Def->getOperand(1).getReg()) == S8;
+  if (const auto *Load = dyn_cast<GSExtLoad>(Def))
+    return Load->getMMO().getMemoryType() == S8;
+  return false;
+}
+
+// Match a 16-bit srem of two sign-extended bytes, or the low byte of such an
+// sdiv taken by a truncation or a 0xFF mask, and rebuild it with G_Z80_SREM8
+// or G_Z80_SDIV8.
+bool matchNarrowSDivSRemOfSExt(MachineInstr &MI, MachineRegisterInfo &MRI,
+                               BuildFnTy &MatchInfo) {
+  if (MI.getMF()->getFunction().hasMinSize())
+    return false;
+
+  LLT S8 = LLT::scalar(8);
+  LLT S16 = LLT::scalar(16);
+  unsigned Opc = MI.getOpcode();
+  Register Dst = MI.getOperand(0).getReg();
+  MachineInstr *Div = &MI;
+  if (Opc != TargetOpcode::G_SREM) {
+    // The low byte of a quotient, by truncation or by a mask.
+    if (Opc == TargetOpcode::G_TRUNC) {
+      if (MRI.getType(Dst) != S8)
+        return false;
+    } else {
+      auto Mask = getIConstantVRegVal(MI.getOperand(2).getReg(), MRI);
+      if (!Mask || *Mask != 0xFF)
+        return false;
+    }
+    Div = MRI.getVRegDef(MI.getOperand(1).getReg());
+    if (Div->getOpcode() != TargetOpcode::G_SDIV ||
+        !MRI.hasOneNonDBGUse(Div->getOperand(0).getReg()))
+      return false;
+  }
+  if (MRI.getType(Div->getOperand(0).getReg()) != S16)
+    return false;
+
+  Register LHS = Div->getOperand(1).getReg();
+  Register RHS = Div->getOperand(2).getReg();
+  if (!isSExtByte(LHS, MRI) || !isSExtByte(RHS, MRI))
+    return false;
+
+  MatchInfo = [=](MachineIRBuilder &B) {
+    auto L = B.buildTrunc(S8, LHS);
+    auto R = B.buildTrunc(S8, RHS);
+    if (Opc == TargetOpcode::G_TRUNC) {
+      B.buildInstr(Z80::G_Z80_SDIV8, {Dst}, {L, R});
+      return;
+    }
+    bool IsRem = Opc == TargetOpcode::G_SREM;
+    auto Narrow =
+        B.buildInstr(IsRem ? Z80::G_Z80_SREM8 : Z80::G_Z80_SDIV8, {S8}, {L, R});
+    if (IsRem)
+      B.buildSExt(Dst, Narrow);
+    else
+      B.buildZExt(Dst, Narrow);
+  };
+  return true;
+}
 
 class Z80PreLegalizerCombinerImpl : public Combiner {
 protected:

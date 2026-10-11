@@ -42,6 +42,11 @@ public:
   // which is extraordinarily more expensive.
   bool isIntDivCheap(EVT VT, AttributeList Attr) const override { return true; }
 
+  /// The name of the libcall \p LC, for a call the backend builds itself.
+  /// \p What names it in the error raised when the runtime lacks one.
+  const char *getRequiredLibcallName(RTLIB::Libcall LC,
+                                     const Twine &What) const;
+
   bool areJTsAllowed(const Function *Fn) const override {
     return !Fn->getFnAttribute("no-jump-tables").getValueAsBool();
   }

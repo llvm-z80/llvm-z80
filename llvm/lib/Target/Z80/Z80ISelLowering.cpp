@@ -76,6 +76,14 @@ Z80TargetLowering::Z80TargetLowering(const Z80TargetMachine &TM,
   PredictableSelectIsExpensive = true;
 }
 
+const char *Z80TargetLowering::getRequiredLibcallName(RTLIB::Libcall LC,
+                                                      const Twine &What) const {
+  RTLIB::LibcallImpl Impl = getLibcallImpl(LC);
+  if (Impl == RTLIB::Unsupported)
+    reportFatalUsageError("no available implementation of " + What);
+  return getLibcallImplName(Impl).data();
+}
+
 // Values wider than a 16-bit register pair are passed and returned as
 // individual bytes: the SDCC conventions place them in arbitrary mixes of
 // 8-bit registers and stack slots, which the default largest-legal-type

@@ -37,3 +37,15 @@ def G_Z80_ICMP64 : Z80GenericInstruction {
                            type1:$rhs_w0, type1:$rhs_w1,
                            type1:$rhs_w2, type1:$rhs_w3);
 }
+
+// 8-bit signed division. Unlike G_SDIV, -128 / -1 gives -128.
+def G_Z80_SDIV8 : Z80GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$lhs, type0:$rhs);
+}
+
+// 8-bit signed remainder. Unlike G_SREM, -128 % -1 gives 0.
+def G_Z80_SREM8 : Z80GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$lhs, type0:$rhs);
+}
