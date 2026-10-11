@@ -39,6 +39,44 @@ define float @fadd(float %a, float %b) {
   ret float %r
 }
 
+; CHECK-LABEL: _fastadd:
+; CHECK: call ___fsadd
+define float @fastadd(float %a, float %b) {
+  %r = fadd nnan ninf nsz float %a, %b
+  ret float %r
+}
+
+; SDCC's comparisons return a boolean: a > b is b < a, a >= b is !(a < b).
+; CHECK-LABEL: _flt:
+; CHECK: call ___fslt
+define i1 @flt(float %a, float %b) {
+  %r = fcmp olt float %a, %b
+  ret i1 %r
+}
+
+; CHECK-LABEL: _fge:
+; CHECK: call ___fslt
+; CHECK-NEXT: sub #1
+define i1 @fge(float %a, float %b) {
+  %r = fcmp oge float %a, %b
+  ret i1 %r
+}
+
+; CHECK-LABEL: _fne:
+; CHECK: call ___fsneq
+define i1 @fne(float %a, float %b) {
+  %r = fcmp une float %a, %b
+  ret i1 %r
+}
+
+; NaN is taken to be absent.
+; CHECK-LABEL: _funo:
+; CHECK-NOT: call
+define i1 @funo(float %a, float %b) {
+  %r = fcmp uno float %a, %b
+  ret i1 %r
+}
+
 ; CHECK-LABEL: _tofloat:
 ; CHECK: call ___slong2fs
 define float @tofloat(i32 %a) {

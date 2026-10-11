@@ -3773,12 +3773,12 @@ def isZ80SDCCEnv : RuntimeLibcallAvailability<(all_of IsZ80Family, IsSDCCEnv)>;
 defvar Z80CompilerRtImpls =
   (add Z80MemCalls,
        LibcallsWithCC<(add __udivqi3, __umodqi3), Z80_BUILTIN>,
-       __umulhi3, __divmodhi4, __udivmodhi4, __divmodsi4, __udivmodsi4,
-       __addsf3_fast, __subsf3_fast, __mulsf3_fast, __divsf3_fast,
-       __cmpsf2_fast);
+       __umulhi3, __divmodhi4, __udivmodhi4, __divmodsi4, __udivmodsi4);
 
 def Z80CompilerRt : LibcallLibrary<"compiler-rt",
   (add Z80CompilerRtImpls,
+       __addsf3_fast, __subsf3_fast, __mulsf3_fast, __divsf3_fast,
+       __cmpsf2_fast,
        LibcallImpls<(add _call_iy), isZ80>,
        LibcallImpls<(add _call_hl), isSM83>), isZ80DefaultEnv>;
 
@@ -3812,6 +3812,9 @@ def __fsadd : RuntimeLibcallImpl<ADD_F32>;
 def __fssub : RuntimeLibcallImpl<SUB_F32>;
 def __fsmul : RuntimeLibcallImpl<MUL_F32>;
 def __fsdiv : RuntimeLibcallImpl<DIV_F32>;
+def __fslt : RuntimeLibcallImpl<OLT_F32>;
+def __fseq : RuntimeLibcallImpl<OEQ_F32>;
+def __fsneq : RuntimeLibcallImpl<UNE_F32>;
 def __slong2fs : RuntimeLibcallImpl<SINTTOFP_I32_F32>;
 def __ulong2fs : RuntimeLibcallImpl<UINTTOFP_I32_F32>;
 def __slonglong2fs : RuntimeLibcallImpl<SINTTOFP_I64_F32>;
@@ -3828,7 +3831,7 @@ def Libsdcc : LibcallLibrary<"libsdcc",
        _mullong, _divslong, _divulong, _modslong, _modulong,
        _mullonglong, _divslonglong, _divulonglong, _modslonglong,
        _modulonglong,
-       __fsadd, __fssub, __fsmul, __fsdiv,
+       __fsadd, __fssub, __fsmul, __fsdiv, __fslt, __fseq, __fsneq,
        __slong2fs, __ulong2fs, __slonglong2fs, __ulonglong2fs,
        __fs2slong, __fs2ulong, __fs2slonglong, __fs2ulonglong,
        LibcallImpls<(add __sdcc_call_iy), isZ80>,
@@ -3844,6 +3847,7 @@ defvar Z80LibsdccOptOut = [
   __mulsi3, __divsi3, __udivsi3, __modsi3, __umodsi3,
   __muldi3, __divdi3, __udivdi3, __moddi3, __umoddi3,
   __addsf3, __subsf3, __mulsf3, __divsf3,
+  __eqsf2, __nesf2, __ltsf2, __lesf2, __gtsf2, __gesf2, __unordsf2,
   __floatsisf, __floatunsisf, __floatdisf, __floatundisf,
   __fixsfsi, __fixunssfsi, __fixsfdi, __fixunssfdi
 ];

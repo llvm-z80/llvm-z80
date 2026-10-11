@@ -44,6 +44,190 @@ static bool hasAllFastFlags(const MachineInstr &MI,
   return NoNans && NoInfs && Nsz;
 }
 
+static bool hasLibcall(MachineIRBuilder &B, RTLIB::Libcall LC) {
+  return B.getMF().getSubtarget().getTargetLowering()->getLibcallImpl(LC) !=
+         RTLIB::Unsupported;
+}
+
+namespace {
+// A comparison libcall and the test of its result against zero.
+struct FCmpLibcall {
+  RTLIB::Libcall LC;
+  CmpInst::Predicate Test;
+  bool Swap = false;
+  bool Boolean = false;
+};
+} // namespace
+
+// The boolean comparison for ordered predicate \p P. For ONE this is UNE_F32.
+// UNE_F32 is also true on NaN, so legalizeFCmp clears NaN with __unordsf2.
+static RTLIB::Libcall booleanFCmpLibcall(CmpInst::Predicate P) {
+  switch (P) {
+  case CmpInst::FCMP_OEQ:
+    return RTLIB::OEQ_F32;
+  case CmpInst::FCMP_ONE:
+    return RTLIB::UNE_F32;
+  case CmpInst::FCMP_OLT:
+    return RTLIB::OLT_F32;
+  case CmpInst::FCMP_OLE:
+    return RTLIB::OLE_F32;
+  case CmpInst::FCMP_OGT:
+    return RTLIB::OGT_F32;
+  case CmpInst::FCMP_OGE:
+    return RTLIB::OGE_F32;
+  default:
+    return RTLIB::UNKNOWN_LIBCALL;
+  }
+}
+
+// The three-way comparison for ordered predicate \p P,
+// and the signed test of its result.
+static FCmpLibcall threeWayFCmpLibcall(CmpInst::Predicate P) {
+  switch (P) {
+  case CmpInst::FCMP_OEQ:
+    return {RTLIB::FCMP3_PRED_OEQ_F32, CmpInst::ICMP_EQ};
+  case CmpInst::FCMP_ONE:
+    return {RTLIB::FCMP3_PRED_UNE_F32, CmpInst::ICMP_NE};
+  case CmpInst::FCMP_OLT:
+    return {RTLIB::FCMP3_PRED_OLT_F32, CmpInst::ICMP_SLT};
+  case CmpInst::FCMP_OLE:
+    return {RTLIB::FCMP3_PRED_OLE_F32, CmpInst::ICMP_SLE};
+  case CmpInst::FCMP_OGT:
+    return {RTLIB::FCMP3_PRED_OGT_F32, CmpInst::ICMP_SGT};
+  case CmpInst::FCMP_OGE:
+    return {RTLIB::FCMP3_PRED_OGE_F32, CmpInst::ICMP_SGE};
+  default:
+    return {RTLIB::UNKNOWN_LIBCALL, CmpInst::BAD_ICMP_PREDICATE};
+  }
+}
+
+// Pick the libcall for ordered predicate \p P, trying in order:
+//   1. A boolean comparison for P, then for P with the operands swapped.
+//   2. A three-way comparison, the fast-math routine first.
+//   3. With \p NoNaNs, a boolean comparison for the inverse of P, with its
+//      result negated.
+static std::optional<FCmpLibcall> selectFCmpLibcall(MachineIRBuilder &B,
+                                                    CmpInst::Predicate P,
+                                                    bool Fast, bool NoNaNs) {
+  for (bool Swap : {false, true}) {
+    RTLIB::Libcall LC =
+        booleanFCmpLibcall(Swap ? CmpInst::getSwappedPredicate(P) : P);
+    if (hasLibcall(B, LC))
+      return FCmpLibcall{LC, CmpInst::ICMP_NE, Swap, /*Boolean=*/true};
+  }
+
+  FCmpLibcall ThreeWay = threeWayFCmpLibcall(P);
+  if (Fast && hasLibcall(B, RTLIB::Z80_FCMP3_F32_FAST))
+    return FCmpLibcall{RTLIB::Z80_FCMP3_F32_FAST, ThreeWay.Test};
+  if (hasLibcall(B, ThreeWay.LC))
+    return ThreeWay;
+
+  if (NoNaNs) {
+    CmpInst::Predicate Inverse =
+        CmpInst::getOrderedPredicate(CmpInst::getInversePredicate(P));
+    for (bool Swap : {false, true}) {
+      RTLIB::Libcall LC = booleanFCmpLibcall(
+          Swap ? CmpInst::getSwappedPredicate(Inverse) : Inverse);
+      if (hasLibcall(B, LC))
+        return FCmpLibcall{LC, CmpInst::ICMP_EQ, Swap, /*Boolean=*/true};
+    }
+  }
+  return std::nullopt;
+}
+
+// Lower G_FCMP to a comparison libcall tested against zero. On NaN the
+// three-way libcalls return +1, except __gtsf2 and __gesf2, which return -1.
+//   OEQ, OLT, OLE, OGT, OGE, UNE: the test is already right on NaN.
+//   ONE, UEQ, ULT, ULE, UGT, UGE: also call __unordsf2.
+// NoNaNs, under nnan or without __unordsf2, takes NaN to be absent.
+static bool legalizeFCmp(LegalizerHelper &Helper, MachineInstr &MI,
+                         LostDebugLocObserver &LocObserver) {
+  MachineIRBuilder &B = Helper.MIRBuilder;
+  MachineRegisterInfo &MRI = *B.getMRI();
+  auto Pred = static_cast<CmpInst::Predicate>(MI.getOperand(1).getPredicate());
+  Register Dst = MI.getOperand(0).getReg();
+  Register LHS = MI.getOperand(2).getReg();
+  Register RHS = MI.getOperand(3).getReg();
+  LLVMContext &Ctx = B.getMF().getFunction().getContext();
+  Type *F32Ty = Type::getFloatTy(Ctx);
+  Type *I16Ty = Type::getInt16Ty(Ctx);
+  LLT S16 = LLT::scalar(16);
+  LLT S8 = LLT::scalar(8);
+  LLT S1 = LLT::scalar(1);
+
+  bool Fast = hasAllFastFlags(MI, B);
+  bool NoNaNs =
+      MI.getFlag(MachineInstr::FmNoNans) || !hasLibcall(B, RTLIB::UO_F32);
+
+  if (Pred == CmpInst::FCMP_ORD || Pred == CmpInst::FCMP_UNO) {
+    if (NoNaNs) {
+      B.buildConstant(Dst, Pred == CmpInst::FCMP_ORD ? 1 : 0);
+      MI.eraseFromParent();
+      return true;
+    }
+    Register UnordResult = MRI.createGenericVirtualRegister(S16);
+    if (Helper.createLibcall(RTLIB::UO_F32, {UnordResult, I16Ty, 0},
+                             {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}}, LocObserver,
+                             &MI) != LegalizerHelper::Legalized)
+      return false;
+    auto Zero = B.buildConstant(S16, 0);
+    B.buildICmp(Pred == CmpInst::FCMP_ORD ? CmpInst::ICMP_EQ : CmpInst::ICMP_NE,
+                Dst, UnordResult, Zero);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  bool IsUnordered = CmpInst::isUnordered(Pred);
+  bool IsONE = Pred == CmpInst::FCMP_ONE;
+  bool NeedsNaNCheck =
+      !NoNaNs && ((IsUnordered && Pred != CmpInst::FCMP_UNE) || IsONE);
+
+  std::optional<FCmpLibcall> Call =
+      selectFCmpLibcall(B, CmpInst::getOrderedPredicate(Pred), Fast, NoNaNs);
+  if (!Call)
+    return false;
+
+  // A boolean comparison returns a byte.
+  LLT ResultTy = Call->Boolean ? S8 : S16;
+  Register CmpResult = MRI.createGenericVirtualRegister(ResultTy);
+  Register CallLHS = Call->Swap ? RHS : LHS;
+  Register CallRHS = Call->Swap ? LHS : RHS;
+  if (Helper.createLibcall(
+          Call->LC,
+          {CmpResult, IntegerType::get(Ctx, ResultTy.getSizeInBits()), 0},
+          {{CallLHS, F32Ty, 0}, {CallRHS, F32Ty, 1}}, LocObserver,
+          &MI) != LegalizerHelper::Legalized)
+    return false;
+
+  if (!NeedsNaNCheck) {
+    auto Zero = B.buildConstant(ResultTy, 0);
+    B.buildICmp(Call->Test, Dst, CmpResult, Zero);
+  } else {
+    Register UnordResult = MRI.createGenericVirtualRegister(S16);
+    if (Helper.createLibcall(RTLIB::UO_F32, {UnordResult, I16Ty, 0},
+                             {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}}, LocObserver,
+                             &MI) != LegalizerHelper::Legalized)
+      return false;
+
+    auto Zero = B.buildConstant(S16, 0);
+    auto CmpZero = Call->Boolean ? B.buildConstant(S8, 0) : Zero;
+    Register CmpBool = MRI.createGenericVirtualRegister(S1);
+    B.buildICmp(Call->Test, CmpBool, CmpResult, CmpZero);
+
+    Register NaNBool = MRI.createGenericVirtualRegister(S1);
+    if (IsONE) {
+      B.buildICmp(CmpInst::ICMP_EQ, NaNBool, UnordResult, Zero);
+      B.buildAnd(Dst, CmpBool, NaNBool);
+    } else {
+      B.buildICmp(CmpInst::ICMP_NE, NaNBool, UnordResult, Zero);
+      B.buildOr(Dst, CmpBool, NaNBool);
+    }
+  }
+
+  MI.eraseFromParent();
+  return true;
+}
+
 /// The top byte of \p V, which holds its sign bit.
 static Register highByte(MachineIRBuilder &B, Register V, LLT Ty) {
   while (Ty.getSizeInBits() > 8) {
@@ -1146,9 +1330,6 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   case TargetOpcode::G_FSUB:
   case TargetOpcode::G_FMUL:
   case TargetOpcode::G_FDIV: {
-    // Custom float arithmetic legalization: select fast-math or IEEE libcall.
-    // With nnan+ninf+nsz flags, calls __addsf3_fast etc. (skip NaN/Inf/zero
-    // checks in the soft-float runtime).
     MachineFunction &MF = MIRBuilder.getMF();
     auto &Ctx = MF.getFunction().getContext();
     Type *F32Ty = Type::getFloatTy(Ctx);
@@ -1156,24 +1337,29 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     Register LHS = MI.getOperand(1).getReg();
     Register RHS = MI.getOperand(2).getReg();
 
-    bool Fast = hasAllFastFlags(MI, MIRBuilder);
-    RTLIB::Libcall LC;
+    RTLIB::Libcall LC, FastLC;
     switch (MI.getOpcode()) {
     case TargetOpcode::G_FADD:
-      LC = Fast ? RTLIB::Z80_ADD_F32_FAST : RTLIB::ADD_F32;
+      LC = RTLIB::ADD_F32;
+      FastLC = RTLIB::Z80_ADD_F32_FAST;
       break;
     case TargetOpcode::G_FSUB:
-      LC = Fast ? RTLIB::Z80_SUB_F32_FAST : RTLIB::SUB_F32;
+      LC = RTLIB::SUB_F32;
+      FastLC = RTLIB::Z80_SUB_F32_FAST;
       break;
     case TargetOpcode::G_FMUL:
-      LC = Fast ? RTLIB::Z80_MUL_F32_FAST : RTLIB::MUL_F32;
+      LC = RTLIB::MUL_F32;
+      FastLC = RTLIB::Z80_MUL_F32_FAST;
       break;
     case TargetOpcode::G_FDIV:
-      LC = Fast ? RTLIB::Z80_DIV_F32_FAST : RTLIB::DIV_F32;
+      LC = RTLIB::DIV_F32;
+      FastLC = RTLIB::Z80_DIV_F32_FAST;
       break;
     default:
       llvm_unreachable("unexpected opcode");
     }
+    if (hasAllFastFlags(MI, MIRBuilder) && hasLibcall(MIRBuilder, FastLC))
+      LC = FastLC;
 
     auto Status = Helper.createLibcall(LC, {Dst, F32Ty, 0},
                                        {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
@@ -1370,122 +1556,8 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     return true;
   }
 
-  case TargetOpcode::G_FCMP: {
-    // Lower to a three-way compare libcall tested against zero. On NaN the
-    // libcalls return +1, except __gtsf2 and __gesf2, which return -1.
-    //   OEQ, OLT, OLE, OGT, OGE, UNE: the test is already right on NaN.
-    //   ONE, UEQ, ULT, ULE, UGT, UGE: also call __unordsf2.
-    MachineFunction &MF = MIRBuilder.getMF();
-    auto Pred =
-        static_cast<CmpInst::Predicate>(MI.getOperand(1).getPredicate());
-    Register Dst = MI.getOperand(0).getReg();
-    Register LHS = MI.getOperand(2).getReg();
-    Register RHS = MI.getOperand(3).getReg();
-    auto &Ctx = MF.getFunction().getContext();
-    Type *F32Ty = Type::getFloatTy(Ctx);
-    Type *I16Ty = Type::getInt16Ty(Ctx);
-    LLT S16 = LLT::scalar(16);
-    LLT S1 = LLT::scalar(1);
-
-    bool Fast = hasAllFastFlags(MI, MIRBuilder);
-
-    if (Pred == CmpInst::FCMP_ORD || Pred == CmpInst::FCMP_UNO) {
-      if (Fast) {
-        // nnan+ninf+nsz: ORD is always true, UNO is always false.
-        MIRBuilder.buildConstant(Dst, Pred == CmpInst::FCMP_ORD ? 1 : 0);
-        MI.eraseFromParent();
-        return true;
-      }
-      Register UnordResult = MRI.createGenericVirtualRegister(S16);
-      auto Status = Helper.createLibcall(RTLIB::UO_F32, {UnordResult, I16Ty, 0},
-                                         {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                         LocObserver, &MI);
-      if (Status != LegalizerHelper::Legalized)
-        return false;
-      auto Zero = MIRBuilder.buildConstant(S16, 0);
-      CmpInst::Predicate ICmpP =
-          (Pred == CmpInst::FCMP_ORD) ? CmpInst::ICMP_EQ : CmpInst::ICMP_NE;
-      MIRBuilder.buildICmp(ICmpP, Dst, UnordResult, Zero);
-      MI.eraseFromParent();
-      return true;
-    }
-
-    bool IsUnordered = CmpInst::isUnordered(Pred);
-    bool IsONE = (Pred == CmpInst::FCMP_ONE);
-    bool NeedsNaNCheck =
-        !Fast && ((IsUnordered && Pred != CmpInst::FCMP_UNE) || IsONE);
-
-    CmpInst::Predicate OrderedPred =
-        IsUnordered ? CmpInst::getOrderedPredicate(Pred) : Pred;
-
-    RTLIB::Libcall LC;
-    CmpInst::Predicate ICmpPred;
-    switch (OrderedPred) {
-    case CmpInst::FCMP_OEQ:
-      LC = RTLIB::FCMP3_PRED_OEQ_F32;
-      ICmpPred = CmpInst::ICMP_EQ;
-      break;
-    case CmpInst::FCMP_OLT:
-      LC = RTLIB::FCMP3_PRED_OLT_F32;
-      ICmpPred = CmpInst::ICMP_SLT;
-      break;
-    case CmpInst::FCMP_OLE:
-      LC = RTLIB::FCMP3_PRED_OLE_F32;
-      ICmpPred = CmpInst::ICMP_SLE;
-      break;
-    case CmpInst::FCMP_OGT:
-      LC = RTLIB::FCMP3_PRED_OGT_F32;
-      ICmpPred = CmpInst::ICMP_SGT;
-      break;
-    case CmpInst::FCMP_OGE:
-      LC = RTLIB::FCMP3_PRED_OGE_F32;
-      ICmpPred = CmpInst::ICMP_SGE;
-      break;
-    case CmpInst::FCMP_ONE:
-      LC = RTLIB::FCMP3_PRED_UNE_F32;
-      ICmpPred = CmpInst::ICMP_NE;
-      break;
-    default:
-      return false;
-    }
-    if (Fast)
-      LC = RTLIB::Z80_FCMP3_F32_FAST;
-
-    Register CmpResult = MRI.createGenericVirtualRegister(S16);
-    auto Status = Helper.createLibcall(LC, {CmpResult, I16Ty, 0},
-                                       {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}},
-                                       LocObserver, &MI);
-    if (Status != LegalizerHelper::Legalized)
-      return false;
-
-    if (!NeedsNaNCheck) {
-      auto Zero = MIRBuilder.buildConstant(S16, 0);
-      MIRBuilder.buildICmp(ICmpPred, Dst, CmpResult, Zero);
-    } else {
-      Register UnordResult = MRI.createGenericVirtualRegister(S16);
-      auto UStatus = Helper.createLibcall(
-          RTLIB::UO_F32, {UnordResult, I16Ty, 0},
-          {{LHS, F32Ty, 0}, {RHS, F32Ty, 1}}, LocObserver, &MI);
-      if (UStatus != LegalizerHelper::Legalized)
-        return false;
-
-      auto Zero = MIRBuilder.buildConstant(S16, 0);
-      Register CmpBool = MRI.createGenericVirtualRegister(S1);
-      MIRBuilder.buildICmp(ICmpPred, CmpBool, CmpResult, Zero);
-
-      Register NaNBool = MRI.createGenericVirtualRegister(S1);
-      if (IsONE) {
-        MIRBuilder.buildICmp(CmpInst::ICMP_EQ, NaNBool, UnordResult, Zero);
-        MIRBuilder.buildAnd(Dst, CmpBool, NaNBool);
-      } else {
-        MIRBuilder.buildICmp(CmpInst::ICMP_NE, NaNBool, UnordResult, Zero);
-        MIRBuilder.buildOr(Dst, CmpBool, NaNBool);
-      }
-    }
-
-    MI.eraseFromParent();
-    return true;
-  }
+  case TargetOpcode::G_FCMP:
+    return legalizeFCmp(Helper, MI, LocObserver);
 
   case TargetOpcode::G_MEMCPY: {
     // Z80 copies a block with LDIR: HL = source, DE = destination, BC = count,
