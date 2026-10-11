@@ -1,6 +1,7 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___modhi3
+	.globl ___udivhi3
 
 ;===------------------------------------------------------------------------===;
 ; ___modhi3 - 16-bit signed modulo

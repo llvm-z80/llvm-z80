@@ -684,6 +684,8 @@ private:
   /// pseudo's memory operands onto whatever performs the access.
   bool expandPostRAPseudoImpl(MachineInstr &MI) const;
 
+  bool optimizeCarryCompare(MachineInstr &CmpInstr, MachineInstr &Copy) const;
+
   const Z80Subtarget *STI;
 };
 

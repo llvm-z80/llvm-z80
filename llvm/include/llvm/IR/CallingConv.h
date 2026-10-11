@@ -313,6 +313,12 @@ namespace CallingConv {
     Z80_SmallCCallee = 246,
     /// Z80 rtlib helpers
     Z80_Builtin = 247,
+    /// Z80 z88dk integer math cores, taking the low half of the result
+    Z80_Z88dkIMathLow = 248,
+    /// Z80 z88dk integer math cores, taking the high half of the result
+    Z80_Z88dkIMathHigh = 249,
+    /// Z80 sccz80 runtime routines
+    Z80_Sccz80Runtime = 250,
 
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023
