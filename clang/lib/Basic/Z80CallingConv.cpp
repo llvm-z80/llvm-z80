@@ -13,7 +13,7 @@ using namespace clang;
 
 /// The base CallingConv::C has in \p TT's environment.
 static Z80CCBase defaultZ80CCBase(const llvm::Triple &TT) {
-  return TT.getEnvironment() == llvm::Triple::Z88DK ? Z80CCBase::SDCCCall0
+  return TT.getEnvironment() == llvm::Triple::Z88DK ? Z80CCBase::SmallC
                                                      : Z80CCBase::SDCCCall1;
 }
 

@@ -5968,7 +5968,7 @@ bool Sema::CheckCallingConvAttr(const ParsedAttr &Attrs, CallingConv &CC,
     CC = joinZ80CC({std::nullopt, true}, Context.getTargetInfo().getTriple());
     break;
   case ParsedAttr::AT_SmallC:
-    CC = CC_Z80SmallC;
+    CC = joinZ80CC({Z80CCBase::SmallC}, Context.getTargetInfo().getTriple());
     break;
   case ParsedAttr::AT_DeviceKernel: {
     // Validation was handled in handleDeviceKernelAttr.

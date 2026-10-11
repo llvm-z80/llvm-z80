@@ -116,17 +116,19 @@ struct Z80CCAxes {
 class Z80CC {
   CallingConv::ID ID;
   explicit Z80CC(CallingConv::ID ID) : ID(ID) {}
-  friend Z80CC getZ80CC(CallingConv::ID CC, const Triple &TT);
+  friend Z80CC getZ80CC(CallingConv::ID CC, const Triple &TT, bool IsVarArg,
+                        bool IsMain);
 
 public:
   CallingConv::ID id() const { return ID; }
 };
 
-/// \p CC as \p TT uses it.  The z88dk environment uses __sdcccall(0) for C.
-inline Z80CC getZ80CC(CallingConv::ID CC, const Triple &TT) {
-  if (CC == CallingConv::C && TT.getEnvironment() == Triple::Z88DK)
-    return Z80CC(CallingConv::Z80_SDCCCall0);
-  return Z80CC(CC);
+inline Z80CC getZ80CC(CallingConv::ID CC, const Triple &TT, bool IsVarArg,
+                      bool IsMain) {
+  if (CC != CallingConv::C || TT.getEnvironment() != Triple::Z88DK)
+    return Z80CC(CC);
+  return Z80CC(IsVarArg || IsMain ? CallingConv::Z80_SDCCCall0
+                                  : CallingConv::Z80_SmallC);
 }
 
 /// Decode \p CC into its base and modifiers.  This is the only place that
