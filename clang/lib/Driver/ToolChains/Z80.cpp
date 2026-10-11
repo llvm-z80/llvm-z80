@@ -130,8 +130,8 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
   // Select target-specific tools and runtime paths.
   bool IsSM83 = TC.getTriple().isSM83();
   const char *SubDir = IsSM83 ? "sm83" : "z80";
-  const char *RtLibName = IsSM83 ? "sm83_rt.lib" : "z80_rt.lib";
-  const char *RtLibBase = IsSM83 ? "sm83_rt" : "z80_rt";
+  const char *RtLibName = IsSM83 ? "sm83_sdcc_rt.lib" : "z80_sdcc_rt.lib";
+  const char *RtLibBase = IsSM83 ? "sm83_sdcc_rt" : "z80_sdcc_rt";
   const char *LinkerName = IsSM83 ? "sdldgb" : "sdldz80";
 
   // SDCC toolchain: no custom crt0 — SDCC's own startup handles initialization.
@@ -142,9 +142,20 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(II.getFilename());
   }
 
-  // Auto-link runtime library archive if found.
-  // Use -k <dir> -l <name> for selective linking (only referenced modules).
+  std::string Linker = TC.GetProgramPath(LinkerName);
+
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
+    // Link SDCC's library.
+    if (std::optional<std::string> Dir =
+            findSDCCLibDir(SubDir, Linker, TC.getDriver().SysRoot)) {
+      CmdArgs.push_back("-k");
+      CmdArgs.push_back(Args.MakeArgString(*Dir));
+      CmdArgs.push_back("-l");
+      CmdArgs.push_back(SubDir);
+    }
+
+    // Then the supplementary runtime. -k <dir> -l <name> links only the
+    // modules referenced.
     SmallString<256> LibDir(TC.getDriver().Dir);
     llvm::sys::path::append(LibDir, "..", "lib", SubDir);
     SmallString<256> LibFile(LibDir);
@@ -154,19 +165,6 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(Args.MakeArgString(LibDir));
       CmdArgs.push_back("-l");
       CmdArgs.push_back(RtLibBase);
-    }
-  }
-
-  std::string Linker = TC.GetProgramPath(LinkerName);
-
-  // Link SDCC's library.
-  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
-    if (std::optional<std::string> Dir =
-            findSDCCLibDir(SubDir, Linker, TC.getDriver().SysRoot)) {
-      CmdArgs.push_back("-k");
-      CmdArgs.push_back(Args.MakeArgString(*Dir));
-      CmdArgs.push_back("-l");
-      CmdArgs.push_back(SubDir);
     }
   }
 
