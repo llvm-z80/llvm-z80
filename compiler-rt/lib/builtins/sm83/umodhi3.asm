@@ -10,7 +10,7 @@
 ;===------------------------------------------------------------------------===;
 
 ___umodhi3:
-	call	___udivhi3	; BC = quotient, HL = remainder
-	ld	c, l		; BC = remainder
-	ld	b, h
+	call	___udivhi3	; BC = quotient, DE = remainder
+	ld	c, e		; BC = remainder
+	ld	b, d
 	ret

@@ -8,7 +8,7 @@
 ; ___udivmodhi4 - the same routine, named for both of its results
 ;
 ; Input:  DE = dividend, BC = divisor
-; Output: BC = quotient, HL = remainder
+; Output: BC = quotient, DE = remainder
 ; Algorithm: restoring division with 8-bit divisor fast path
 ;
 ; ___udivhi3 promises only the quotient. A quotient and a remainder of the
@@ -52,8 +52,7 @@ ___udivhi3_8ok:
 	; HL = quotient, E = remainder, B = 0
 	ld	b, h		; BC = quotient
 	ld	c, l
-	ld	l, e		; L = remainder
-	ld	h, #0		; H = 0 (remainder fits in 8 bits)
+	ld	d, #0		; D = 0 (remainder fits in 8 bits)
 	ret
 	;; --- 16-bit divisor path ---
 ___udivhi3_16bit:
@@ -102,4 +101,6 @@ ___udivhi3_next:
 	dec	a
 	jr	nz, ___udivhi3_16loop
 	; BC = quotient, HL = remainder
+	ld	d, h		; DE = remainder
+	ld	e, l
 	ret
