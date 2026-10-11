@@ -258,8 +258,11 @@ static ArgAssignment classifyArgZ88dkRuntime(const CallingConvRegs &Regs,
     return {true, Regs.First_I32_Hi, Regs.First_I32_Lo, FIRST_I32};
   }
   static const MCPhysReg Pairs[] = {Z80::HL, Z80::DE, Z80::BC};
+  static const MCPhysReg Halves[] = {Z80::L, Z80::E, Z80::C};
   if (Index >= std::size(Pairs))
     return ArgAssignment();
+  if (BitWidth <= 8)
+    return {true, Halves[Index], Register(), FIRST_I8};
   return {true, Pairs[Index], Register(), FIRST_I16};
 }
 
@@ -1503,7 +1506,8 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
       }
 
       if (BitWidth <= 8) {
-        copyFromPhysReg(MIRBuilder, MRI, VReg, Register(Regs.Ret_I8),
+        copyFromPhysReg(MIRBuilder, MRI, VReg,
+                        Register(Axes.HighResult ? Z80::E : Regs.Ret_I8),
                         !Info.OrigRet.Flags.empty() &&
                             Info.OrigRet.Flags[0].isZExt());
       } else if (BitWidth <= 16) {
