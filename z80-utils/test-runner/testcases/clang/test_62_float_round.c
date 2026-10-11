@@ -1,3 +1,4 @@
+/* SKIP-IF: -sdcc */
 /* Test 62: truncf, floorf and ceilf across every place the fractional bits
    can fall inside the mantissa. Each row is an input and the three answers it
    should give, computed on the host; the table is walked at run time so no

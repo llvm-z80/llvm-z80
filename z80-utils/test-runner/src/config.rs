@@ -176,6 +176,12 @@ impl Paths {
         self.build_dir.join(format!("lib/{t}/{t}_rt.lib"))
     }
 
+    /// The runtime the sdcc environment links after SDCC's own library.
+    pub fn sdcc_rt_lib(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.build_dir.join(format!("lib/{t}/{t}_sdcc_rt.lib"))
+    }
+
     /// Source directory for ELF compiler-rt builtins (e.g. compiler-rt/lib/builtins/z80/).
     pub fn elf_builtins_src(&self, target: Target) -> PathBuf {
         let t = target.triple();

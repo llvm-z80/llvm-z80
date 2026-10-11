@@ -191,7 +191,7 @@ fn run_single(
                 return TestResult::fatal(tag, format!("harness crt0: {e}"));
             }
         };
-        let rt = paths.rt_lib(target);
+        let rt = paths.sdcc_rt_lib(target);
 
         let mut cmd = Command::new(linker);
         cmd.args(["-m", "-i"]);
@@ -199,17 +199,24 @@ fn run_single(
         cmd.arg(&crt0);
         cmd.arg(main_rel);
         cmd.arg(lib_rel);
-        cmd.arg("-l").arg(&rt);
         if let Some(lib) = sdcc_lib {
-            cmd.args(["-l"]);
-            cmd.arg(lib);
+            cmd.arg("-l").arg(lib);
         }
-        cmd.stdout(std::process::Stdio::null());
-        cmd.stderr(std::process::Stdio::null());
-        let link_status = cmd.status();
-        if !link_status.is_ok_and(|s| s.success()) || !ihx.exists() {
-            remove_tmp_dir(&tmp_dir);
-            return TestResult::fatal(tag, "link failed");
+        cmd.arg("-l").arg(&rt);
+        match run_cmd_timeout(&mut cmd, COMPILE_TIMEOUT) {
+            Err(e) => {
+                remove_tmp_dir(&tmp_dir);
+                return TestResult::fatal(tag, format!("link {e}"));
+            }
+            Ok((code, stdout, stderr)) => {
+                let output = format!("{stdout}{stderr}");
+                let problem = crate::runtime::sdld_problem(&output);
+                if code != 0 || !ihx.exists() || problem.is_some() {
+                    let err = problem.unwrap_or("link failed").to_string();
+                    remove_tmp_dir(&tmp_dir);
+                    return TestResult::fatal(tag, format!("link: {err}"));
+                }
+            }
         }
     }
 
