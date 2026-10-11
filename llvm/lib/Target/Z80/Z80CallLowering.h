@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/Register.h"
+#include "llvm/TargetParser/Triple.h"
 
 namespace llvm {
 
@@ -109,6 +110,15 @@ struct Z80CCAxes {
   }
 };
 
+/// Resolve CallingConv::C to the C convention of \p TT's environment.  The
+/// z88dk environment uses __sdcccall(0).  Call lowering resolves \p CC before
+/// decoding it.
+inline CallingConv::ID resolveZ80CC(CallingConv::ID CC, const Triple &TT) {
+  if (CC == CallingConv::C && TT.getEnvironment() == Triple::Z88DK)
+    return CallingConv::Z80_SDCCCall0;
+  return CC;
+}
+
 /// Decode \p CC into its base and modifiers.  This is the only place that
 /// knows which convention is built from what; everything else asks the axes.
 /// Any convention outside the set, meaning CallingConv::C (SDCC
@@ -116,6 +126,9 @@ struct Z80CCAxes {
 inline Z80CCAxes decodeZ80CC(CallingConv::ID CC) {
   Z80CCAxes Axes;
   switch (CC) {
+  case CallingConv::Z80_SDCCCall1:
+    Axes.Base = Z80CCBase::SDCCCall1;
+    break;
   case CallingConv::Z80_SDCCCall0:
     Axes.Base = Z80CCBase::SDCCCall0;
     break;
