@@ -3498,49 +3498,19 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
   case TargetOpcode::G_UDIVREM:
   case TargetOpcode::G_SDIVREM: {
-    // Fused divrem: one runtime call returns both quotient and remainder.
-    // The ...hi3 routines promise only the quotient, so this calls the
-    // ...hi4 pair, which names the remainder as a result too.
-    // Z80:  __(u)divmodhi4: HL=dividend, DE=divisor → DE=quot, HL=rem
-    // SM83: __(u)divmodhi4: DE=dividend, BC=divisor → BC=quot, HL=rem
+    // Under the inline runtime, expand a fused divrem to separate ops.  The
+    // legalizer makes every other one a call.
     Register QuotReg = MI.getOperand(0).getReg();
     Register RemReg = MI.getOperand(1).getReg();
     Register LHSReg = MI.getOperand(2).getReg();
     Register RHSReg = MI.getOperand(3).getReg();
 
-    if (MRI.getType(QuotReg).getSizeInBits() > 16)
+    if (MRI.getType(QuotReg).getSizeInBits() > 16 || !STI.inlineI16Runtime())
       return false;
 
-    // Inline runtime has no fused divrem pseudo — expand to separate ops.
-    if (STI.inlineI16Runtime()) {
-      bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
-      unsigned DivOpc = IsSigned ? Z80::SDIV16 : Z80::UDIV16;
-      unsigned ModOpc = IsSigned ? Z80::SMOD16 : Z80::UMOD16;
-
-      if (!RBI.constrainGenericRegister(QuotReg, Z80::GR16RegClass, MRI) ||
-          !RBI.constrainGenericRegister(RemReg, Z80::GR16RegClass, MRI) ||
-          !RBI.constrainGenericRegister(LHSReg, Z80::GR16RegClass, MRI) ||
-          !RBI.constrainGenericRegister(RHSReg, Z80::GR16RegClass, MRI))
-        return false;
-
-      const DebugLoc &DL = MI.getDebugLoc();
-
-      // Quotient
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHSReg);
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(RHSReg);
-      BuildMI(MBB, MI, DL, TII.get(DivOpc));
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), QuotReg)
-          .addReg(Z80::DE);
-
-      // Remainder
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHSReg);
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(RHSReg);
-      BuildMI(MBB, MI, DL, TII.get(ModOpc));
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), RemReg).addReg(Z80::DE);
-
-      MI.eraseFromParent();
-      return true;
-    }
+    bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
+    unsigned DivOpc = IsSigned ? Z80::SDIV16 : Z80::UDIV16;
+    unsigned ModOpc = IsSigned ? Z80::SMOD16 : Z80::UMOD16;
 
     if (!RBI.constrainGenericRegister(QuotReg, Z80::GR16RegClass, MRI) ||
         !RBI.constrainGenericRegister(RemReg, Z80::GR16RegClass, MRI) ||
@@ -3548,40 +3518,20 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         !RBI.constrainGenericRegister(RHSReg, Z80::GR16RegClass, MRI))
       return false;
 
-    bool IsSigned = MI.getOpcode() == TargetOpcode::G_SDIVREM;
-    const char *FuncName = STI.getTargetLowering()->getRequiredLibcallName(
-        IsSigned ? RTLIB::SDIVREM_I16 : RTLIB::UDIVREM_I16,
-        IsSigned ? "16-bit signed divmod" : "16-bit unsigned divmod");
+    const DebugLoc &DL = MI.getDebugLoc();
 
-    if (STI.hasSM83()) {
-      // SM83: DE=dividend, BC=divisor → BC=quot, HL=rem
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
-          .addReg(LHSReg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::BC)
-          .addReg(RHSReg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
-          .addExternalSymbol(FuncName)
-          .addUse(Z80::DE, RegState::Implicit)
-          .addUse(Z80::BC, RegState::Implicit);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
-          .addReg(Z80::BC);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), RemReg)
-          .addReg(Z80::HL);
-    } else {
-      // Z80: HL=dividend, DE=divisor → DE=quot, HL=rem
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
-          .addReg(LHSReg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
-          .addReg(RHSReg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
-          .addExternalSymbol(FuncName)
-          .addUse(Z80::HL, RegState::Implicit)
-          .addUse(Z80::DE, RegState::Implicit);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
-          .addReg(Z80::DE);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), RemReg)
-          .addReg(Z80::HL);
-    }
+    // Quotient
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHSReg);
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(RHSReg);
+    BuildMI(MBB, MI, DL, TII.get(DivOpc));
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), QuotReg).addReg(Z80::DE);
+
+    // Remainder
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(LHSReg);
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(RHSReg);
+    BuildMI(MBB, MI, DL, TII.get(ModOpc));
+    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), RemReg).addReg(Z80::DE);
+
     MI.eraseFromParent();
     return true;
   }

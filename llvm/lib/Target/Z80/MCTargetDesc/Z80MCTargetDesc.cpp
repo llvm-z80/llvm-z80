@@ -68,15 +68,23 @@ static MCSubtargetInfo *createZ80MCSubtargetInfo(const Triple &TT,
 static MCAsmInfo *createZ80MCAsmInfo(const MCRegisterInfo &MRI,
                                      const Triple &TT,
                                      const MCTargetOptions &Options) {
-  if (Z80AsmFormat.getNumOccurrences() && Z80AsmFormat == Z80AsmFormat_Z88DK)
-    return new Z80MCAsmInfoZ88DK(TT, Options);
-
-  bool UseSDASZ80 = TT.getEnvironment() == Triple::SDCC;
+  // The sdcc and z88dk environments use their assemblers' formats.
+  Z80AsmFormatTy Format = Z80AsmFormat_ELF;
   if (Z80AsmFormat.getNumOccurrences())
-    UseSDASZ80 = Z80AsmFormat == Z80AsmFormat_SDASZ80;
+    Format = Z80AsmFormat;
+  else if (TT.getEnvironment() == Triple::SDCC)
+    Format = Z80AsmFormat_SDASZ80;
+  else if (TT.getEnvironment() == Triple::Z88DK)
+    Format = Z80AsmFormat_Z88DK;
 
-  if (UseSDASZ80)
+  switch (Format) {
+  case Z80AsmFormat_SDASZ80:
     return new Z80MCAsmInfoSDCC(TT, Options);
+  case Z80AsmFormat_Z88DK:
+    return new Z80MCAsmInfoZ88DK(TT, Options);
+  case Z80AsmFormat_ELF:
+    break;
+  }
   return new Z80MCAsmInfo(TT, Options);
 }
 

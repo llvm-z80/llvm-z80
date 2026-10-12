@@ -4,6 +4,7 @@
 	.globl ___floatundisf
 	.globl ___floattisf
 	.globl ___floatuntisf
+	.globl ___floatunsisf
 
 ;===------------------------------------------------------------------------===;
 ; ___floatdisf / ___floatundisf / ___floattisf / ___floatuntisf

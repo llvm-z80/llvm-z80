@@ -1,6 +1,7 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___divmodhi4
+	.globl ___udivmodhi4
 
 ;===------------------------------------------------------------------------===;
 ; ___divmodhi4 - 16-bit signed division with remainder

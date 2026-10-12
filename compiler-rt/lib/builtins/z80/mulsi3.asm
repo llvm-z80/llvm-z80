@@ -1,6 +1,8 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
 	.area _CODE
 	.globl ___mulsi3
+	.globl ___mulhi3
+	.globl ___umulhi3
 
 ;===------------------------------------------------------------------------===;
 ; ___mulsi3 - 32-bit multiply (low 32 bits of result)

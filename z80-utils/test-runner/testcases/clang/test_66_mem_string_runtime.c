@@ -10,6 +10,7 @@
  * whenever they differ by 128 or more, so memcmp("\x00", "\xFF") must be
  * negative.  bcmp answers only whether they are equal, so it must agree with
  * memcmp on zero and non-zero without the sign work. */
+/* SKIP-IF: -z88dk */
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 

@@ -23,6 +23,14 @@ impl Target {
         }
     }
 
+    /// The z88dk environment has no SM83 target.
+    pub fn z88dk_triple(&self) -> Option<&'static str> {
+        match self {
+            Target::Z80 => Some("z80-unknown-none-z88dk"),
+            Target::SM83 => None,
+        }
+    }
+
     pub fn reg_name(&self) -> &'static str {
         match self {
             Target::Z80 => "DE",
@@ -176,6 +184,12 @@ impl Paths {
         self.build_dir.join(format!("lib/{t}/{t}_rt.lib"))
     }
 
+    /// The runtime the z88dk environment links after z88dk's own libraries.
+    pub fn z88dk_rt_lib(&self, target: Target) -> PathBuf {
+        let t = target.triple();
+        self.build_dir.join(format!("lib/{t}/{t}_z88dk_rt.lib"))
+    }
+
     /// The runtime the sdcc environment links after SDCC's own library.
     pub fn sdcc_rt_lib(&self, target: Target) -> PathBuf {
         let t = target.triple();
@@ -207,6 +221,11 @@ impl Paths {
     /// Harness startup for the SDCC toolchain path.
     pub fn harness_crt0_sdcc(&self, target: Target) -> PathBuf {
         self.project_dir.join("harness").join(target.triple()).join("crt0_sdcc.asm")
+    }
+
+    /// Harness startup for the z88dk toolchain path.
+    pub fn harness_crt0_z88dk(&self, target: Target) -> PathBuf {
+        self.project_dir.join("harness").join(target.triple()).join("crt0_z88dk.asm")
     }
 
     /// Assets for the torture suite (shim, headers, manifest).
@@ -276,6 +295,21 @@ fn find_project_dir() -> Option<PathBuf> {
         return Some(cwd);
     }
     None
+}
+
+/// Discover z88dk's `lib` directory. `ZCCCFG` names its `config` subdirectory,
+/// as for zcc; otherwise it is `share/z88dk/lib` beside the assembler's `bin`.
+pub fn find_z88dk_lib() -> Option<PathBuf> {
+    if let Some(cfg) = std::env::var_os("ZCCCFG") {
+        let lib = PathBuf::from(cfg).join("..");
+        return lib.join("clibs").is_dir().then_some(lib);
+    }
+    let path = std::env::var_os("PATH")?;
+    let asm = std::env::split_paths(&path)
+        .map(|dir| dir.join("z88dk-z80asm"))
+        .find(|p| p.is_file())?;
+    let lib = asm.parent()?.join("../share/z88dk/lib");
+    lib.join("clibs").is_dir().then_some(lib)
 }
 
 /// Discover SDCC runtime library path.

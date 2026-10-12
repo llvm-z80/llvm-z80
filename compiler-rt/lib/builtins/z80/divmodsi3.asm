@@ -7,6 +7,7 @@
 	.globl __udivmodsi
 	.globl __divmodsi_abs
 	.globl __divmodsi_neg
+	.globl ___udivmodhi4
 
 ;===------------------------------------------------------------------------===;
 ; ___udivsi3 - 32-bit unsigned division
