@@ -53,7 +53,6 @@ public:
 private:
   bool selectInline16(MachineInstr &MI, unsigned PseudoOpc);
   bool selectMul8(MachineInstr &MI);
-  bool selectMulByConst(MachineInstr &MI);
   bool selectUDivMod8(MachineInstr &MI, bool IsDiv);
   bool selectSDivMod8(MachineInstr &MI, bool IsDiv);
   bool emitFusedCompareAndBranch(MachineBasicBlock &MBB, MachineInstr &MI,
@@ -411,99 +410,6 @@ bool Z80InstructionSelector::selectSDivMod8(MachineInstr &MI, bool IsDiv) {
   BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::E).addReg(Src2Reg);
   buildAccOp(MBB, MI, DL, IsDiv ? Z80::SDIV8 : Z80::SMOD8, DstReg, Src1Reg,
              MRI);
-
-  MI.eraseFromParent();
-  return true;
-}
-
-// Try to select G_MUL with a constant operand as inline shift-add sequence.
-// The legalizer keeps such a multiply instead of calling __mulhi3.
-// Decomposition: x * C is expressed as a chain of ADD HL,HL (shift by 1)
-// and ADD HL,rr (add original value), built by factoring out 2s and 1s.
-// Example: x * 10 = ((x << 2) + x) << 1 → SHIFT,SHIFT,ADD,SHIFT
-bool Z80InstructionSelector::selectMulByConst(MachineInstr &MI) {
-  MachineBasicBlock &MBB = *MI.getParent();
-  MachineFunction &MF = *MBB.getParent();
-  MachineRegisterInfo &MRI = MF.getRegInfo();
-
-  Register DstReg = MI.getOperand(0).getReg();
-
-  if (MRI.getType(DstReg).getSizeInBits() != 16)
-    return false;
-
-  auto Match = Z80::matchShiftAddMul(MI, MRI);
-  if (!Match)
-    return false;
-  Register SrcReg = Match->first;
-  uint64_t C = Match->second;
-
-  const DebugLoc &DL = MI.getDebugLoc();
-
-  // x * 0: result is always 0.
-  if (C == 0) {
-    if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
-      return false;
-    Z80::buildLD16n(MBB, MI, DL, TII, Z80::HL).addImm(0);
-    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::HL);
-    MI.eraseFromParent();
-    return true;
-  }
-
-  // x * 1: result is x (identity).
-  if (C == 1) {
-    if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
-      return false;
-    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(SrcReg);
-    MI.eraseFromParent();
-    return true;
-  }
-
-  // Decompose C into a sequence of SHIFT (×2) and ADD_ORIG (+x) steps.
-  // Algorithm: work from C down to 1:
-  //   even → SHIFT, C/=2
-  //   odd  → ADD_ORIG, C-=1
-  // Then reverse to get execution order.
-  enum StepKind { SHIFT, ADD_ORIG };
-  SmallVector<StepKind, 16> Steps;
-  uint64_t Remaining = C;
-  while (Remaining != 1) {
-    if (Remaining % 2 == 0) {
-      Steps.push_back(SHIFT);
-      Remaining /= 2;
-    } else {
-      Steps.push_back(ADD_ORIG);
-      Remaining -= 1;
-    }
-  }
-  std::reverse(Steps.begin(), Steps.end());
-
-  if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
-      !RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
-    return false;
-
-  bool NeedOrig = llvm::any_of(Steps, [](StepKind S) { return S == ADD_ORIG; });
-
-  // Copy source to HL
-  BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL).addReg(SrcReg);
-
-  // If we need original value for additions, save it in DE.
-  // Don't constrain SrcReg to GR16_BCDE — it may conflict with other uses.
-  if (NeedOrig) {
-    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE).addReg(SrcReg);
-  }
-
-  // Execute the steps
-  for (auto Step : Steps) {
-    if (Step == SHIFT) {
-      BuildMI(MBB, MI, DL, TII.get(Z80::ADD_HL_HL));
-    } else {
-      Z80::buildAddHL(MBB, MI, DL, TII, Z80::DE);
-    }
-  }
-
-  // Copy result from HL to dst
-  BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::HL);
 
   MI.eraseFromParent();
   return true;
@@ -3550,8 +3456,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
   }
 
   case TargetOpcode::G_MUL:
-    if (selectMulByConst(MI))
-      return true;
     if (selectMul8(MI))
       return true;
     if (STI.inlineI16Runtime())

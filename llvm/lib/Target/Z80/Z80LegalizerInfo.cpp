@@ -719,30 +719,51 @@ bool Z80LegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
   }
 }
 
-std::optional<std::pair<Register, uint64_t>>
-Z80::matchShiftAddMul(const MachineInstr &MI, const MachineRegisterInfo &MRI) {
-  auto ConstantOf = [&](Register Reg) -> std::optional<uint64_t> {
-    const MachineInstr *Def = MRI.getVRegDef(Reg);
-    if (Def && Def->getOpcode() == TargetOpcode::G_CONSTANT)
-      return Def->getOperand(1).getCImm()->getZExtValue() & 0xFFFF;
-    return std::nullopt;
-  };
-  Register LHS = MI.getOperand(1).getReg();
-  Register RHS = MI.getOperand(2).getReg();
-  std::pair<Register, uint64_t> Match;
-  if (auto C = ConstantOf(RHS))
-    Match = {LHS, *C};
-  else if (auto C = ConstantOf(LHS))
-    Match = {RHS, *C};
-  else
-    return std::nullopt;
+// Expand a 16-bit multiply by a constant into shifts and adds, unless that
+// takes too many steps.
+static bool legalizeMulByConstant(MachineIRBuilder &B, MachineInstr &MI) {
+  MachineRegisterInfo &MRI = *B.getMRI();
+  Register Dst = MI.getOperand(0).getReg();
+  Register X = MI.getOperand(1).getReg();
+  auto C = getIConstantVRegValWithLookThrough(MI.getOperand(2).getReg(), MRI);
+  if (!C) {
+    X = MI.getOperand(2).getReg();
+    C = getIConstantVRegValWithLookThrough(MI.getOperand(1).getReg(), MRI);
+  }
+  if (!C)
+    return false;
+  uint64_t K = C->Value.getZExtValue() & 0xFFFF;
+  // A shift per bit below the top set bit and an add per further set bit.
+  if (K > 1 && Log2_64(K) + llvm::popcount(K) - 1 > 12)
+    return false;
 
-  // A shift per bit below the top one and an add per further set bit, up to
-  // twelve in all.
-  uint64_t C = Match.second;
-  if (C > 1 && Log2_64(C) + llvm::popcount(C) - 1 > 12)
-    return std::nullopt;
-  return Match;
+  LLT S8 = LLT::scalar(8);
+  LLT S16 = LLT::scalar(16);
+  if (K <= 1) {
+    if (K == 0)
+      B.buildConstant(Dst, 0);
+    else
+      B.buildCopy(Dst, X);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  // From the top bit down, shift once per run of bits and add X at each set
+  // bit.
+  Register Acc = X;
+  unsigned Shift = 0;
+  for (unsigned Bit = Log2_64(K); Bit-- > 0;) {
+    ++Shift;
+    if (!((K >> Bit) & 1))
+      continue;
+    auto Shl = B.buildShl(S16, Acc, B.buildConstant(S8, Shift));
+    Acc = B.buildAdd(Bit ? DstOp(S16) : DstOp(Dst), Shl, X).getReg(0);
+    Shift = 0;
+  }
+  if (Shift)
+    B.buildShl(Dst, Acc, B.buildConstant(S8, Shift));
+  MI.eraseFromParent();
+  return true;
 }
 
 // Byte and 16-bit division and remainder: the inline forms instruction
@@ -983,9 +1004,9 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   }
 
   case TargetOpcode::G_MUL:
-    // i16: instruction selection expands a multiply by a constant, and every
-    // multiply under +inline-i16-runtime.
-    if (Z80::matchShiftAddMul(MI, MRI) ||
+    // i16: shifts and adds for a constant, then the inline expansion of
+    // +inline-i16-runtime, then a call to __mulhi3.
+    if (legalizeMulByConstant(MIRBuilder, MI) ||
         MIRBuilder.getMF().getSubtarget<Z80Subtarget>().inlineI16Runtime())
       return true;
     return Helper.libcall(MI, LocObserver) == LegalizerHelper::Legalized;
