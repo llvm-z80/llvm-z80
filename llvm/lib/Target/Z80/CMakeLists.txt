@@ -181,7 +181,23 @@ function(z80_build_builtins TRIPLE SUBDIR CRT0_ASM RT_DIR SDAS)
     )
     list(APPEND ALL_RUNTIME_OUTPUTS ${OUT}/${SUBDIR}_rt.lib)
 
+    # The runtime the sdcc environment links after SDCC's own library, without
+    # the functions that library also defines.
+    set(SDCC_RT_RELS ${RT_RELS})
+    foreach(name ceilf floorf memchr memcmp memcpy memmove memset modff strcat
+                 strchr strcmp strcpy strlen strncmp strncpy strnlen)
+      list(REMOVE_ITEM SDCC_RT_RELS ${OUT}/${name}.rel)
+    endforeach()
+    add_custom_command(
+      OUTPUT ${OUT}/${SUBDIR}_sdcc_rt.lib
+      COMMAND ${SDAR} rs ${OUT}/${SUBDIR}_sdcc_rt.lib ${SDCC_RT_RELS}
+      DEPENDS ${SDCC_RT_RELS}
+      COMMENT "Creating ${SUBDIR} runtime archive (SDCC environment)"
+    )
+    list(APPEND ALL_RUNTIME_OUTPUTS ${OUT}/${SUBDIR}_sdcc_rt.lib)
+
     install(FILES ${OUT}/${SUBDIR}_crt0.rel ${OUT}/${SUBDIR}_rt.lib
+                  ${OUT}/${SUBDIR}_sdcc_rt.lib
             DESTINATION lib/${SUBDIR} COMPONENT Z80Runtime)
   endif()
 

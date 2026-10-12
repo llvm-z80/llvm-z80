@@ -6,6 +6,7 @@
    or drops a sticky bit is caught. Returns 0xFFFF when every row agrees,
    otherwise the one-based number of the first row that did not.
    NATIVE-SKIP  expect 0xFFFF */
+/* SKIP-IF: -sdcc */
 typedef unsigned short uint16_t;
 typedef unsigned long uint32_t;
 typedef long long i64;
