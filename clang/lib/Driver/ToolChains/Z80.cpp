@@ -72,6 +72,28 @@ void z80::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 }
 
 //===----------------------------------------------------------------------===//
+// z88dk Assembler (z88dk-z80asm)
+//===----------------------------------------------------------------------===//
+
+void z80::Z88dkAssembler::ConstructJob(Compilation &C, const JobAction &JA,
+                                       const InputInfo &Output,
+                                       const InputInfoList &Inputs,
+                                       const ArgList &Args,
+                                       const char *LinkingOutput) const {
+  claimNoWarnArgs(Args);
+  ArgStringList CmdArgs;
+
+  CmdArgs.push_back(Args.MakeArgString(Twine("-o=") + Output.getFilename()));
+  for (const auto &II : Inputs)
+    CmdArgs.push_back(II.getFilename());
+
+  const char *Exec =
+      Args.MakeArgString(getToolChain().GetProgramPath("z88dk-z80asm"));
+  C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
+                                         Exec, CmdArgs, Inputs, Output));
+}
+
+//===----------------------------------------------------------------------===//
 // SDCC Linker (sdldz80 / sdldgb) — used with -fno-integrated-as
 //===----------------------------------------------------------------------===//
 
@@ -275,6 +297,8 @@ Z80ToolChain::Z80ToolChain(const Driver &D, const llvm::Triple &Triple,
 }
 
 Tool *Z80ToolChain::buildAssembler() const {
+  if (getTriple().getEnvironment() == llvm::Triple::Z88DK)
+    return new tools::z80::Z88dkAssembler(*this);
   return new tools::z80::Assembler(*this);
 }
 
@@ -290,18 +314,25 @@ Tool *Z80ToolChain::buildLinker() const {
 void Z80ToolChain::addClangTargetOptions(const ArgList &DriverArgs,
                                          ArgStringList &CC1Args, BoundArch,
                                          Action::OffloadKind) const {
-  // When using the external SDCC assembler, emit sdasz80 assembly format.
-  // With the integrated assembler, assembly goes directly through MC.
+  // With an external assembler, emit the assembly format it reads. With the
+  // integrated assembler, assembly goes directly through MC.
   if (!useIntegratedAs()) {
-    // ELF triples require the integrated assembler — sdasz80 produces .rel
-    // files incompatible with ld.lld. Use -target z80-*-*-sdcc for the
-    // external assembler toolchain.
-    if (getTriple().getEnvironment() != llvm::Triple::SDCC) {
+    switch (getTriple().getEnvironment()) {
+    case llvm::Triple::SDCC:
+      CC1Args.push_back("-mllvm");
+      CC1Args.push_back("-z80-asm-format=sdasz80");
+      break;
+    case llvm::Triple::Z88DK:
+      CC1Args.push_back("-mllvm");
+      CC1Args.push_back("-z80-asm-format=z88dk");
+      break;
+    default:
+      // ELF triples require the integrated assembler, since the external
+      // assemblers produce objects ld.lld cannot read.
       getDriver().Diag(diag::err_drv_unsupported_opt_for_target)
           << "-fno-integrated-as" << getTriple().str();
+      break;
     }
-    CC1Args.push_back("-mllvm");
-    CC1Args.push_back("-z80-asm-format=sdasz80");
   }
 
   // Disable features not applicable to Z80 bare metal.

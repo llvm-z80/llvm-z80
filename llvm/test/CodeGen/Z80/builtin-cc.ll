@@ -1,7 +1,7 @@
 ; RUN: llc -mtriple=z80 -O1 -verify-machineinstrs < %s | FileCheck %s --check-prefix=Z80
 ; RUN: llc -mtriple=sm83 -O1 -verify-machineinstrs < %s | FileCheck %s --check-prefix=SM83
 
-; CallingConv::Z80_Builtin (cc134) is what the block-move and block-fill
+; CallingConv::Z80_Builtin (cc247) is what the block-move and block-fill
 ; libcalls are called with: every argument in a register, none on the stack.
 ; The register order follows __sdcccall(1)'s for the subtarget and then
 ; continues into the pair that convention does not reach, so it differs

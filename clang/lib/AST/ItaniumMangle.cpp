@@ -3684,6 +3684,7 @@ StringRef CXXNameMangler::getCallingConvQualifierName(CallingConv CC) {
     CC_VLS_CASE(32768)
     CC_VLS_CASE(65536)
 #undef CC_VLS_CASE
+  case CC_Z80SDCCCall1:
   case CC_Z80SDCCCall0:
   case CC_Z80Z88dkFastCall:
   case CC_Z80Z88dkCallee:

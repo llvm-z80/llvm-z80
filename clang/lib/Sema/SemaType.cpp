@@ -29,6 +29,7 @@
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Basic/Z80CallingConv.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/DelayedDiagnostic.h"
@@ -8116,106 +8117,6 @@ static bool handleArmStateAttribute(Sema &S,
   return false;
 }
 
-/// The argument-passing base a Z80 calling convention is built on.  SDCC
-/// spells these as mutually exclusive keywords, and resolves a clash rather
-/// than rejecting it: __smallc overrides whichever __sdcccall level is in
-/// effect, and __z88dk_fastcall overrides everything.
-enum class Z80CCBase { SDCCCall1, SDCCCall0, SmallC, Z88dkFastCall };
-
-/// Split \p CC into its base and whether __z88dk_callee is applied.  The base
-/// is nullopt for a convention that only carries the modifier, since
-/// __z88dk_callee on its own inherits whatever base is in effect.  Returns
-/// false for a convention that is not one of the Z80 family.
-static bool splitZ80CC(CallingConv CC, std::optional<Z80CCBase> &Base,
-                       bool &Callee) {
-  Base = std::nullopt;
-  Callee = false;
-  switch (CC) {
-  case CC_C: // SDCC __sdcccall(1), the default.
-    Base = Z80CCBase::SDCCCall1;
-    return true;
-  case CC_Z80SDCCCall0:
-    Base = Z80CCBase::SDCCCall0;
-    return true;
-  case CC_Z80SmallC:
-    Base = Z80CCBase::SmallC;
-    return true;
-  case CC_Z80Z88dkFastCall:
-    Base = Z80CCBase::Z88dkFastCall;
-    return true;
-  case CC_Z80Z88dkCallee:
-    Callee = true;
-    return true;
-  case CC_Z80SDCCCall0Callee:
-    Base = Z80CCBase::SDCCCall0;
-    Callee = true;
-    return true;
-  case CC_Z80SmallCCallee:
-    Base = Z80CCBase::SmallC;
-    Callee = true;
-    return true;
-  default:
-    return false;
-  }
-}
-
-/// The convention built from \p Base (defaulting to __sdcccall(1)) and the
-/// __z88dk_callee modifier.  __z88dk_fastcall passes nothing on the stack, so
-/// it absorbs the modifier.
-static CallingConv joinZ80CC(std::optional<Z80CCBase> Base, bool Callee) {
-  switch (Base.value_or(Z80CCBase::SDCCCall1)) {
-  case Z80CCBase::SDCCCall1:
-    return Callee ? CC_Z80Z88dkCallee : CC_C;
-  case Z80CCBase::SDCCCall0:
-    return Callee ? CC_Z80SDCCCall0Callee : CC_Z80SDCCCall0;
-  case Z80CCBase::SmallC:
-    return Callee ? CC_Z80SmallCCallee : CC_Z80SmallC;
-  case Z80CCBase::Z88dkFastCall:
-    return CC_Z80Z88dkFastCall;
-  }
-  llvm_unreachable("bad Z80 calling-convention base");
-}
-
-/// Merge two argument-passing bases the way SDCC does.  A convention carrying
-/// only the __z88dk_callee modifier has no base of its own and takes the
-/// other's.  Two different __sdcccall levels genuinely contradict each other
-/// and fail; SDCC rejects that pair too.
-static bool mergeZ80CCBases(std::optional<Z80CCBase> A,
-                            std::optional<Z80CCBase> B,
-                            std::optional<Z80CCBase> &Merged) {
-  if (!A || !B || *A == *B) {
-    Merged = A ? A : B;
-    return true;
-  }
-  // __z88dk_fastcall wins over any other base, then __smallc.
-  if (*A == Z80CCBase::Z88dkFastCall || *B == Z80CCBase::Z88dkFastCall)
-    Merged = Z80CCBase::Z88dkFastCall;
-  else if (*A == Z80CCBase::SmallC || *B == Z80CCBase::SmallC)
-    Merged = Z80CCBase::SmallC;
-  else
-    return false; // __sdcccall(0) against __sdcccall(1).
-  return true;
-}
-
-/// Compose two Z80 calling-convention attributes written on one function,
-/// resolving a clash between bases the way SDCC does instead of rejecting it.
-/// Returns true and sets \p Composed on success.
-///
-/// Acceptance is order-independent; rejection is not, since attributes fold
-/// pairwise: a contradiction with an overriding base written between its two
-/// halves goes undiagnosed.  The composed ABI is the same either way.
-static bool composeZ80CallingConvs(CallingConv A, CallingConv B,
-                                   CallingConv &Composed) {
-  std::optional<Z80CCBase> BaseA, BaseB, Merged;
-  bool CalleeA, CalleeB;
-  if (!splitZ80CC(A, BaseA, CalleeA) || !splitZ80CC(B, BaseB, CalleeB))
-    return false;
-  if (!mergeZ80CCBases(BaseA, BaseB, Merged))
-    return false;
-  Composed = joinZ80CC(Merged, CalleeA || CalleeB);
-  return true;
-}
-
 /// Process an individual function attribute.  Returns true to
 /// indicate that the attribute was handled, false if it wasn't.
 static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
@@ -8543,7 +8444,9 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state, ParsedAttr &attr,
     // don't match.  A Z80 base and modifier compose; anything else conflicts.
     if (S.getCallingConvAttributedType(type)) {
       CallingConv Composed;
-      if (composeZ80CallingConvs(CCOld, CC, Composed)) {
+      if (composeZ80CallingConvs(CCOld, CC,
+                                 S.Context.getTargetInfo().getTriple(),
+                                 Composed)) {
         CC = Composed;
       } else {
         S.Diag(attr.getLoc(), diag::err_attributes_are_not_compatible)

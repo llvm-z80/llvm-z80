@@ -1,15 +1,15 @@
 ; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O0 < %s | FileCheck %s
 ;
-; cc133 = CallingConv::Z80_SmallCCallee = the z88dk `__smallc __z88dk_callee`
+; cc246 = CallingConv::Z80_SmallCCallee = the z88dk `__smallc __z88dk_callee`
 ; convention: the COMPOSITION of two orthogonal axes.
-;   * arg passing from __smallc (cc129): all args pushed left-to-right
+;   * arg passing from __smallc (cc242): all args pushed left-to-right
 ;     (first arg deepest, last arg shallowest at SP+2 after ret-addr)
 ;   * stack cleanup from __z88dk_callee: the CALLEE pops the stack args
 ; The z88dk classic clib (<graphics.h> plot_callee/draw_callee/...) uses it.
 ; Constants: 0x1111=4369, 0x2222=8738, 0x3333=13107.
 
-declare cc133 i16 @fsc(i16, i16, i16)
-declare cc133 void @sink2(i16, i16)
+declare cc246 i16 @fsc(i16, i16, i16)
+declare cc246 void @sink2(i16, i16)
 
 %ByValPair = type { i16, i16 }
 
@@ -28,7 +28,7 @@ declare cc133 void @sink2(i16, i16)
 ; CHECK-NOT:   inc sp
 ; CHECK:       ret
 define void @call_smallc_callee() {
-  call cc133 i16 @fsc(i16 4369, i16 8738, i16 13107)
+  call cc246 i16 @fsc(i16 4369, i16 8738, i16 13107)
   ret void
 }
 
@@ -59,7 +59,7 @@ define void @call_smallc_callee() {
 ; CHECK-NEXT:  inc sp
 ; CHECK-NEXT:  push bc
 ; CHECK-NEXT:  ret
-define cc133 void @callee_void(i16 %a, i16 %b) {
+define cc246 void @callee_void(i16 %a, i16 %b) {
   %b2 = shl i16 %b, 1
   %s = sub i16 %a, %b2
   store i16 %s, ptr inttoptr(i16 16384 to ptr)
@@ -94,7 +94,7 @@ define cc133 void @callee_void(i16 %a, i16 %b) {
 ; CHECK-NEXT:  inc sp
 ; CHECK-NEXT:  push bc
 ; CHECK-NEXT:  ret
-define cc133 void @callee_byval(ptr byval(%ByValPair) %p, i16 %x) {
+define cc246 void @callee_byval(ptr byval(%ByValPair) %p, i16 %x) {
   %v = load i16, ptr %p
   %x2 = shl i16 %x, 1
   %r = sub i16 %v, %x2

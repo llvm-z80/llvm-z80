@@ -833,6 +833,8 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
 
   case llvm::Triple::z80:
   case llvm::Triple::sm83:
+    if (Triple.isSM83() && Triple.getEnvironment() == llvm::Triple::Z88DK)
+      return nullptr;
     return std::make_unique<Z80TargetInfo>(Triple, Opts);
   }
 }
