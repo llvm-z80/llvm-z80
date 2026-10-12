@@ -6,17 +6,42 @@
 //
 //===---------------------------------------------------------------------===//
 
-// srem (sext a), (sext b) -> sext (G_Z80_SREM8 a, b)
-// low byte of sdiv (sext a), (sext b) -> G_Z80_SDIV8 a, b
-def narrow_sdiv_srem_of_sext : GICombineRule<
-  (defs root:$root, build_fn_matchinfo:$matchinfo),
-  (match (wip_match_opcode G_SREM, G_TRUNC, G_AND):$root,
-         [{ return matchNarrowSDivSRemOfSExt(*${root}, MRI, ${matchinfo}); }]),
-  (apply [{ Helper.applyBuildFn(*${root}, ${matchinfo}); }])>;
+// srem a, b -> sext (G_Z80_SREM8 a, b)
+def narrow_srem : GICombineRule<
+  (defs root:$dst),
+  (match (G_SREM i16:$dst, $a, $b):$rem,
+         [{ return canDivideInByte(*${rem}, Helper); }]),
+  (apply (G_TRUNC i8:$na, $a), (G_TRUNC i8:$nb, $b),
+         (G_Z80_SREM8 i8:$r, $na, $nb),
+         (G_SEXT $dst, $r))>;
 
-// Pre-legalization: all standard combines.
+// trunc (sdiv a, b) -> G_Z80_SDIV8 a, b
+def narrow_sdiv_trunc : GICombineRule<
+  (defs root:$dst),
+  (match (G_SDIV i16:$q, $a, $b):$div,
+         (GIHasOneUse $q),
+         (G_TRUNC i8:$dst, $q),
+         [{ return canDivideInByte(*${div}, Helper); }]),
+  (apply (G_TRUNC i8:$na, $a), (G_TRUNC i8:$nb, $b),
+         (G_Z80_SDIV8 $dst, $na, $nb))>;
+
+// and (sdiv a, b), 0xFF -> zext (G_Z80_SDIV8 a, b)
+def narrow_sdiv_mask : GICombineRule<
+  (defs root:$dst),
+  (match (G_SDIV i16:$q, $a, $b):$div,
+         (GIHasOneUse $q),
+         (G_AND $dst, $q, 255),
+         [{ return canDivideInByte(*${div}, Helper); }]),
+  (apply (G_TRUNC i8:$na, $a), (G_TRUNC i8:$nb, $b),
+         (G_Z80_SDIV8 i8:$r, $na, $nb),
+         (G_ZEXT $dst, $r))>;
+
+def narrow_byte_division : GICombineGroup<
+  [narrow_srem, narrow_sdiv_trunc, narrow_sdiv_mask]>;
+
+// Pre-legalization: the byte division rules and all standard combines.
 def Z80PreLegalizerCombiner : GICombiner<
-  "Z80PreLegalizerCombinerImpl", [narrow_sdiv_srem_of_sext, all_combines]>;
+  "Z80PreLegalizerCombinerImpl", [narrow_byte_division, all_combines]>;
 
 // ptr_add (global_value @g + o), c -> global_value @g + (o + c)
 def fold_global_offset_matchdata :

@@ -38,13 +38,16 @@ def G_Z80_ICMP64 : Z80GenericInstruction {
                            type1:$rhs_w2, type1:$rhs_w3);
 }
 
-// 8-bit signed division. Unlike G_SDIV, -128 / -1 gives -128.
+// 8-bit signed division for narrowing a 16-bit division, with -128 / -1
+// giving -128, the low byte of the 16-bit quotient. G_SDIV leaves that case
+// undefined.
 def G_Z80_SDIV8 : Z80GenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type0:$lhs, type0:$rhs);
 }
 
-// 8-bit signed remainder. Unlike G_SREM, -128 % -1 gives 0.
+// 8-bit signed remainder for narrowing a 16-bit remainder, with -128 % -1
+// giving 0. G_SREM leaves that case undefined.
 def G_Z80_SREM8 : Z80GenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type0:$lhs, type0:$rhs);
