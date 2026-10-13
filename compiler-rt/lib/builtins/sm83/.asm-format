@@ -1,0 +1,5 @@
+Dialect: sdas
+IndentWidth: 4
+OperandColumn: 12
+CommentColumn: 28
+AlignArrayOfOperands: None

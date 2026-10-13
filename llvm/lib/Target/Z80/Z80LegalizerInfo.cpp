@@ -253,12 +253,12 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Multiply - Z80 has no hardware multiply
   // i8:  legal (inline loop in instruction selector)
   // i16: custom (shifts and adds for a constant, else __mulhi3)
-  // i32: libcall (__mulsi3) — avoids narrowing to 4 separate i16 multiplies
+  // i32: custom (__umulhisi3 or __mulhisi3 for 16-bit operands, else __mulsi3)
   getActionDefinitionsBuilder(G_MUL)
       .legalFor({S8})
-      .customFor({S16})
+      .customFor({S16, S32})
       .scalarize(0)
-      .libcallFor({S32, S64})
+      .libcallFor({S64})
       .narrowScalarIf(LegalityPredicates::typeIs(0, S128),
                       LegalizeMutations::changeTo(0, S64))
       .widenScalarToNextPow2(0)
@@ -766,6 +766,37 @@ static bool legalizeMulByConstant(MachineIRBuilder &B, MachineInstr &MI) {
   return true;
 }
 
+// A 32-bit multiply of operands that fit in 16 bits, unsigned or signed, as a
+// call to __umulhisi3 or __mulhisi3, else a call to __mulsi3.
+static bool legalizeMul32(LegalizerHelper &Helper, MachineInstr &MI,
+                          LostDebugLocObserver &LocObserver) {
+  MachineIRBuilder &B = Helper.MIRBuilder;
+  GISelValueTracking &VT = *Helper.getValueTracking();
+  Register LHS = MI.getOperand(1).getReg();
+  Register RHS = MI.getOperand(2).getReg();
+  RTLIB::Libcall LC;
+  if (VT.getKnownBits(LHS).countMinLeadingZeros() >= 16 &&
+      VT.getKnownBits(RHS).countMinLeadingZeros() >= 16)
+    LC = RTLIB::Z80_UMUL_LOHI_I16;
+  else if (VT.computeNumSignBits(LHS) > 16 && VT.computeNumSignBits(RHS) > 16)
+    LC = RTLIB::Z80_SMUL_LOHI_I16;
+  else
+    return Helper.libcall(MI, LocObserver) == LegalizerHelper::Legalized;
+
+  LLT S16 = LLT::scalar(16);
+  LLVMContext &Ctx = B.getMF().getFunction().getContext();
+  Type *I16Ty = Type::getInt16Ty(Ctx);
+  auto L = B.buildTrunc(S16, LHS);
+  auto R = B.buildTrunc(S16, RHS);
+  if (Helper.createLibcall(
+          LC, {MI.getOperand(0).getReg(), Type::getInt32Ty(Ctx), 0},
+          {{L.getReg(0), I16Ty, 0}, {R.getReg(0), I16Ty, 1}}, LocObserver,
+          &MI) != LegalizerHelper::Legalized)
+    return false;
+  MI.eraseFromParent();
+  return true;
+}
+
 // Byte and 16-bit division and remainder: the inline forms instruction
 // selection has, or a runtime call.
 static bool legalizeDivRem(LegalizerHelper &Helper, MachineInstr &MI,
@@ -1004,6 +1035,8 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   }
 
   case TargetOpcode::G_MUL:
+    if (MRI.getType(MI.getOperand(0).getReg()) == LLT::scalar(32))
+      return legalizeMul32(Helper, MI, LocObserver);
     // i16: shifts and adds for a constant, then the inline expansion of
     // +inline-i16-runtime, then a call to __mulhi3.
     if (legalizeMulByConstant(MIRBuilder, MI) ||
