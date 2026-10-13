@@ -39,9 +39,40 @@ def narrow_sdiv_mask : GICombineRule<
 def narrow_byte_division : GICombineGroup<
   [narrow_srem, narrow_sdiv_trunc, narrow_sdiv_mask]>;
 
-// Pre-legalization: the byte division rules and all standard combines.
+// trunc (op x, y) -> op (trunc x), (trunc y), to a single register or a
+// register pair, for any x and y. This does not apply to logic ops, as
+// hoist_logic_op_with_same_opcode_hands rewrites logic (trunc x), (trunc y)
+// back to trunc (logic x, y) and the two would loop.
+class narrow_binop_of_regs<Instruction op> : GICombineRule<
+  (defs root:$dst, build_fn_matchinfo:$matchinfo),
+  (match (op $wide, $x, $y):$bin,
+         (G_TRUNC $dst, $wide):$trunc,
+         [{ return isRegisterWidth(${dst}.getReg(), MRI) &&
+                   Helper.matchNarrowBinop(*${trunc}, *${bin}, ${matchinfo}); }]),
+  (apply [{ Helper.applyBuildFn(*${trunc}, ${matchinfo}); }])>;
+
+def narrow_add_of_regs : narrow_binop_of_regs<G_ADD>;
+def narrow_sub_of_regs : narrow_binop_of_regs<G_SUB>;
+def narrow_mul_of_regs : narrow_binop_of_regs<G_MUL>;
+
+// mul x, y -> zext (mul (trunc x), (trunc y)), for a product that fits in a
+// register pair
+def narrow_small_mul : GICombineRule<
+  (defs root:$dst),
+  (match (G_MUL $dst, $x, $y):$mul,
+         [{ return productFitsInPair(*${mul}, Helper); }]),
+  (apply (G_TRUNC i16:$nx, $x), (G_TRUNC i16:$ny, $y),
+         (G_MUL i16:$p, $nx, $ny),
+         (G_ZEXT $dst, $p))>;
+
+def narrow_wide_arith : GICombineGroup<
+  [narrow_add_of_regs, narrow_sub_of_regs, narrow_mul_of_regs,
+   narrow_small_mul]>;
+
+// Pre-legalization: the narrowing rules and all standard combines.
 def Z80PreLegalizerCombiner : GICombiner<
-  "Z80PreLegalizerCombinerImpl", [narrow_byte_division, all_combines]>;
+  "Z80PreLegalizerCombinerImpl",
+  [narrow_byte_division, narrow_wide_arith, all_combines]>;
 
 // ptr_add (global_value @g + o), c -> global_value @g + (o + c)
 def fold_global_offset_matchdata :

@@ -54,6 +54,25 @@ bool canDivideInByte(MachineInstr &MI, const CombinerHelper &Helper) {
          VT.computeNumSignBits(MI.getOperand(2).getReg()) > 8;
 }
 
+// Whether \p Reg is as wide as a single register or a register pair.
+bool isRegisterWidth(Register Reg, const MachineRegisterInfo &MRI) {
+  LLT Ty = MRI.getType(Reg);
+  return Ty == LLT::scalar(8) || Ty == LLT::scalar(16);
+}
+
+// Whether the G_MUL \p MI is wider than a register pair (16 bits) while the
+// product of its operands fits in a register pair.
+bool productFitsInPair(MachineInstr &MI, const CombinerHelper &Helper) {
+  const MachineRegisterInfo &MRI = MI.getMF()->getRegInfo();
+  LLT Ty = MRI.getType(MI.getOperand(0).getReg());
+  if (!Ty.isScalar() || Ty.getSizeInBits() <= 16)
+    return false;
+  GISelValueTracking &VT = *Helper.getValueTracking();
+  return VT.getKnownBits(MI.getOperand(1).getReg()).countMaxActiveBits() +
+             VT.getKnownBits(MI.getOperand(2).getReg()).countMaxActiveBits() <=
+         16;
+}
+
 class Z80PreLegalizerCombinerImpl : public Combiner {
 protected:
   const CombinerHelper Helper;
