@@ -26,10 +26,12 @@
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/BinaryFormat/Z80Flags.h"
 #include "llvm/CodeGen/AsmPrinter.h"
+#include "llvm/CodeGen/AsmPrinterHandler.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -46,6 +48,59 @@ using namespace llvm;
 #define DEBUG_TYPE "asm-printer"
 
 namespace {
+
+// Emits C_LINE directives for z80asm debug support. Registered as an
+// AsmPrinterHandler so emission happens in beginInstruction — before
+// AsmPrinter queues verbose-asm comments — keeping those comments on the
+// instruction line rather than on the C_LINE line.
+class Z80CLineHandler : public AsmPrinterHandler {
+  AsmPrinter &AP;
+  unsigned LastLine = 0;
+  StringRef LastFile;
+  const DIScope *LastScope = nullptr;
+
+public:
+  explicit Z80CLineHandler(AsmPrinter &AP) : AP(AP) {}
+
+  void beginInstruction(const MachineInstr *MI) override {
+    const DILocation *Loc = MI->getDebugLoc();
+    if (!Loc)
+      return;
+    unsigned Line = Loc->getLine();
+    if (!Line)
+      return;
+    StringRef File = Loc->getFilename();
+    const DIScope *Scope = Loc->getScope();
+    if (Line == LastLine && File == LastFile && Scope == LastScope)
+      return;
+
+    // Bad filename: skip this directive with a warning rather than failing.
+    if (File.find_first_of("\"\r\n") != StringRef::npos) {
+      AP.OutContext.reportWarning(
+          SMLoc(), "C_LINE skipped: filename contains quotes or line breaks");
+      return;
+    }
+
+    // Emit "file::func" form. Bad function name degrades to "file" only.
+    std::string Scope2 = File.str();
+    if (const auto *LS = dyn_cast<DILocalScope>(Scope))
+    if (const DISubprogram *SP = LS->getSubprogram()) {
+      StringRef Func = SP->getName();
+      if (!Func.empty() && Func.find_first_of("\"\r\n") == StringRef::npos)
+        Scope2 += "::" + Func.str();
+    }
+
+    AP.OutStreamer->emitRawText("\tC_LINE " + Twine(Line) +
+                               ", \"" + Scope2 + "\"");
+    LastLine = Line;
+    LastFile = File;
+    LastScope = Scope;
+  }
+
+  void endModule() override {}
+  void beginFunction(const MachineFunction *) override {}
+  void endFunction(const MachineFunction *) override {}
+};
 
 class Z80AsmPrinter : public AsmPrinter {
   Z80MCInstLower InstLowering;
@@ -157,7 +212,8 @@ bool Z80AsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
 }
 
 void Z80AsmPrinter::emitStartOfAsmFile(Module &M) {
-  // TODO: Emit Z80-specific directives if needed
+  if (MAI.isZ88DK())
+    addAsmPrinterHandler(std::make_unique<Z80CLineHandler>(*this));
 }
 
 void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
