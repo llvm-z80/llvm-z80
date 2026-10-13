@@ -54,5 +54,5 @@ define i8 @bank_and_load() {
   ret i8 %r
 }
 
-; RELOC-DAG: R_Z80_BYTE0 {{.*}} ___bank_music
-; RELOC-DAG: R_Z80_BYTE1 {{.*}} ___bank_music
+; RELOC-DAG: R_Z80_ADDR16_LO {{.*}} ___bank_music
+; RELOC-DAG: R_Z80_ADDR24_BANK {{.*}} ___bank_music
