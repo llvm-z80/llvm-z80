@@ -6,7 +6,8 @@
 ; ___umulhi3 - High half of the unsigned 16x16 product
 ;
 ; Input:  HL = a, DE = b
-; Output: DE = (a * b) >> 16, HL = (a * b) & 0xFFFF (__mulsi3 uses both)
+; Output: DE = (a * b) >> 16, HL = (a * b) & 0xFFFF, BC = a
+;         (__mulhisi3 uses all three)
 ;
 ; MSB-first shift-and-add over DE:HL: the multiplier in DE shifts out as the
 ; product shifts in. A multiplier below 256 takes 8 steps.

@@ -13,6 +13,17 @@ define i16 @mul_low_half(i32 %a, i32 %b) {
   ret i16 %t
 }
 
+; The truncation passes through the add to reach the multiply.
+; CHECK-LABEL: _mul_add_low_half:
+; CHECK-NOT:   ___mulsi3
+; CHECK:       call ___mulhi3
+define i16 @mul_add_low_half(i32 %a, i32 %b, i32 %c) {
+  %m = mul i32 %a, %b
+  %s = add i32 %m, %c
+  %t = trunc i32 %s to i16
+  ret i16 %t
+}
+
 ; CHECK-LABEL: _mul_low_byte:
 ; CHECK-NOT:   call
 ; CHECK:       ret

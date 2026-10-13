@@ -31,6 +31,8 @@ int main() {
         status |= 64;
     if (smul(-1, -1) == 1L)
         status |= 128;
+    if (smul(300, 200) == 60000L)
+        status |= 256;
 
-    return status; /* expect 0x00FF */
+    return status; /* expect 0x01FF */
 }
