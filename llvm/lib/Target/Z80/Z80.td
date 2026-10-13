@@ -60,7 +60,7 @@ def Z80AsmParserVariantZilog : AsmParserVariant {
 // Target Declaration
 //===---------------------------------------------------------------------===//
 
-defm : RemapAllTargetPseudoPointerOperands<Ptr16>;
+defm : RemapAllTargetPseudoPointerOperands<GR16>;
 
 def Z80 : Target {
   let InstructionSet         = Z80InstrInfoDef;
