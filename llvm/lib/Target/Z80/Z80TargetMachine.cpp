@@ -47,6 +47,7 @@
 #include "Z80FixupImplicitDefs.h"
 #include "Z80IndexIV.h"
 #include "Z80LowerSelect.h"
+#include "Z80LowerThreadLocal.h"
 #include "Z80MachineFunctionInfo.h"
 #include "Z80NarrowMemAccess.h"
 #include "Z80NonReentrant.h"
@@ -74,6 +75,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80FixupImplicitDefsPass(PR);
   initializeZ80PreEmitPeepholePass(PR);
   initializeZ80LowerSelectPass(PR);
+  initializeZ80LowerThreadLocalPass(PR);
   initializeZ80NarrowMemAccessPass(PR);
   initializeZ80ShiftRotateChainPass(PR);
   initializeZ80NonReentrantPass(PR);
@@ -232,6 +234,7 @@ TargetPassConfig *Z80TargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 void Z80PassConfig::addIRPasses() {
+  addPass(createZ80LowerThreadLocalPass(getZ80TargetMachine()));
   addPass(createZ80CheckUnsupportedPass());
   addPass(createAtomicExpandLegacyPass());
 
