@@ -459,6 +459,10 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
     Register Loaded =
         FromSlot ? getLoadIXdDstReg(*MII) : getLoadHLindDstReg(*MII);
     if (Loaded.isValid()) {
+      bool Ordered =
+          llvm::any_of(MII->memoperands(), [](const MachineMemOperand *MMO) {
+            return !MMO->isUnordered();
+          });
       int64_t Slot = FromSlot ? Z80::idxSlotOperand(*MII).getImm() : 0;
       // The consumer to fold into. It need not come next, as long as
       // nothing in between disturbs the register or what the load reads.
@@ -477,6 +481,8 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
           break;
         }
         if (Scan->isCall() || Scan->isInlineAsm() ||
+            Scan->hasUnmodeledSideEffects() ||
+            (Ordered && Scan->mayLoad() && Scan->hasOrderedMemoryRef()) ||
             Scan->readsRegister(Loaded, TRI) ||
             Scan->modifiesRegister(Loaded, TRI))
           break;
