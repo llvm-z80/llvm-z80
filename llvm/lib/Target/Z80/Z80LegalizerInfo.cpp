@@ -270,7 +270,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Multiply with overflow detection
   // G_UMULO: lower to G_MUL + G_UMULH, overflow = (umulh != 0)
   // G_SMULO: lower to G_MUL + G_SMULH, overflow = (smulh != sign_ext(result))
-  getActionDefinitionsBuilder({G_UMULO, G_SMULO}).lower();
+  getActionDefinitionsBuilder(G_UMULO).widenScalarToNextPow2(0).lower();
+  getActionDefinitionsBuilder(G_SMULO).lower();
 
   // Division - Z80 has no hardware divide
   // i8: custom (inline DJNZ loop in instruction selector, or a call)
@@ -436,9 +437,12 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // G_BSWAP: custom lowering using UNMERGE+MERGE to avoid CSE conflict
   // when generic lowerBswap constant-folds and creates duplicate constants
   getActionDefinitionsBuilder(G_BSWAP).customFor({S16}).lower();
-  getActionDefinitionsBuilder({G_BITREVERSE, G_CTPOP}).lower();
-  getActionDefinitionsBuilder(
-      {G_CTLZ, G_CTLZ_ZERO_POISON, G_CTTZ, G_CTTZ_ZERO_POISON})
+  getActionDefinitionsBuilder(G_BITREVERSE)
+      .widenScalarToNextMultipleOf(0, 8)
+      .lower();
+  getActionDefinitionsBuilder({G_CTPOP, G_CTLZ, G_CTLZ_ZERO_POISON, G_CTTZ,
+                               G_CTTZ_ZERO_POISON})
+      .widenScalarToNextMultipleOf(1, 8)
       .lower();
 
   // Extending loads - custom lower to load + extend.
