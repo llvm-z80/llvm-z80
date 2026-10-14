@@ -1068,9 +1068,15 @@ static bool hoistLDHLOutOfFlagSave(MachineBasicBlock &MBB,
     BuildMI(MBB, At, LDHL->getDebugLoc(), TII->get(Z80::LDHL_SP_e))
         .addImm(Disp);
     auto After = std::next(Pop);
+    SmallVector<MCRegister, 1> EmptyA;
+    if (Z80::readsUndef(*MII, Z80::A))
+      EmptyA.push_back(Z80::A);
     MBB.erase(Pop);
     MBB.erase(LDHL);
     MBB.erase(MII);
+    // Without the POP AF, an A that the save held empty has no definition, so
+    // the later reads of A are marked undef.
+    Z80::markEmptyReads(After, MBB.end(), TRI, EmptyA);
     MII = After;
     ++NumFlagSavesHoisted;
     Changed = true;

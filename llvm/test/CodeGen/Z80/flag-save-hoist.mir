@@ -10,6 +10,7 @@
   define void @stop_at_add_sp() { ret void }
   define void @empty_save() { ret void }
   define void @save_around_inc_hl() { ret void }
+  define void @empty_a_after_hoist() { ret void }
 ...
 ---
 name:            hoist
@@ -166,4 +167,35 @@ body:             |
 # CHECK:      CP_n 5
 # CHECK-NEXT: $hl = INC_rr
 # CHECK-NEXT: $c = LD_r_HLind
+...
+---
+name:            empty_a_after_hoist
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    liveins: $b, $sp
+    $b = DEC_r $b, implicit-def $flags
+    PUSH_AF implicit undef $a, implicit $flags
+    LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
+    POP_AF implicit-def $a, implicit-def $flags
+    $c = LD_r_HLind implicit $hl
+    PUSH_AF implicit $a, implicit $flags
+    LDHL_SP_e 8, implicit-def $hl, implicit-def $flags, implicit $sp
+    POP_AF implicit-def $a, implicit-def $flags
+    $d = LD_r_HLind implicit $hl
+    JR_NZ_e %bb.0, implicit $flags
+
+  bb.1:
+    liveins: $c, $d
+    RET implicit $c, implicit $d
+
+# The first save goes, and with it the POP AF that gave A a value. A held
+# nothing at that save, so the second save reads nothing from A.
+
+# CHECK-LABEL: name: empty_a_after_hoist
+# CHECK:      LDHL_SP_e 4
+# CHECK-NEXT: $b = DEC_r
+# CHECK:      PUSH_AF implicit undef $a
+
 ...
