@@ -2920,16 +2920,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
     const LLT SrcTy = MRI.getType(SrcReg);
 
-    if (SrcTy.getSizeInBits() <= 8 && DstTy.getSizeInBits() <= 8) {
-      // s1->s8: just a COPY (s1 already lives in an 8-bit register)
-      if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
-          !RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
-        return false;
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-          .addReg(SrcReg);
-      MI.eraseFromParent();
-      return true;
-    }
     if (SrcTy.getSizeInBits() <= 8 && DstTy.getSizeInBits() <= 16) {
       // s8->s16: the high byte is undefined.
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
@@ -2956,16 +2946,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
     const LLT SrcTy = MRI.getType(SrcReg);
 
-    if (SrcTy.getSizeInBits() <= 8 && DstTy.getSizeInBits() <= 8) {
-      // s1->s8: COPY (value is already 0 or 1 in an 8-bit register)
-      if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
-          !RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
-        return false;
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-          .addReg(SrcReg);
-      MI.eraseFromParent();
-      return true;
-    }
     if (SrcTy.getSizeInBits() <= 8 && DstTy.getSizeInBits() <= 16) {
       // Zero extend 8-bit to 16-bit via pseudo (expanded post-RA)
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
@@ -2985,16 +2965,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
     const LLT SrcTy = MRI.getType(SrcReg);
 
-    if (SrcTy.getSizeInBits() <= 8 && DstTy.getSizeInBits() <= 8) {
-      // s1->s8: COPY
-      if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
-          !RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
-        return false;
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-          .addReg(SrcReg);
-      MI.eraseFromParent();
-      return true;
-    }
     if (SrcTy.getSizeInBits() <= 8 && DstTy.getSizeInBits() <= 16) {
       // Sign extend 8-bit to 16-bit via pseudo (expanded post-RA)
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
@@ -3057,51 +3027,16 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       }
     }
 
-    // Dst is s1 or s8 → lives in GR8.
-    // Src is s8 → GR8 (same class, just COPY).
-    // Src is s16 → GR16 (extract low byte via sub_lo).
-    unsigned DstBits = MRI.getType(DstReg).getSizeInBits();
-    unsigned SrcBits = MRI.getType(SrcReg).getSizeInBits();
-
-    if (DstBits > 8 || SrcBits > 16)
+    if (MRI.getType(DstReg).getSizeInBits() != 8 ||
+        MRI.getType(SrcReg).getSizeInBits() != 16)
       return false;
 
-    if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
+    if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
+        !RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
       return false;
 
-    const DebugLoc &DL = MI.getDebugLoc();
-    // The low byte is the source itself where that is already a byte, and
-    // otherwise the low half of the pair the source occupies. Naming the half
-    // in place leaves the value wherever it is: moving it into a fixed pair
-    // first would tie the allocator's hands and leave a definition of that
-    // pair which the value outlives.
-    Register LowByte = SrcReg;
-    unsigned LowSubReg = 0;
-
-    if (SrcBits <= 8) {
-      if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
-        return false;
-    } else {
-      if (!RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI))
-        return false;
-      LowSubReg = Z80::sub_lo;
-    }
-
-    if (DstBits == 1) {
-      // The rest of the backend reads an s1 in a GR8 as exactly 0 or 1.
-      // Truncation is the one producer that can leave other bits set.
-      Register Byte = LowByte;
-      if (LowSubReg) {
-        Byte = MRI.createVirtualRegister(&Z80::GR8RegClass);
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Byte)
-            .addReg(LowByte, RegState{}, LowSubReg);
-      }
-      LowByte = emitAccImm(MBB, MI, DL, Z80::AND_Ac_n, Byte, 1, MRI);
-      LowSubReg = 0;
-    }
-
-    BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
-        .addReg(LowByte, RegState{}, LowSubReg);
+    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
+        .addReg(SrcReg, RegState{}, Z80::sub_lo);
     MI.eraseFromParent();
     return true;
   }
