@@ -1,0 +1,31 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=post-ra-pseudos %s -o - | FileCheck %s
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=post-ra-pseudos %s -o - | FileCheck %s
+#
+# A pair the allocator filled in one half only is still copied whole. The copy
+# becomes byte moves, and the move of the empty half reads nothing.
+
+---
+name:            copy_high_half_empty
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $c
+    $hl = COPY $bc
+    RET implicit $hl
+...
+---
+name:            copy_low_half_empty
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $d
+    $bc = COPY $de
+    RET implicit $bc
+...
+# CHECK-LABEL: name: copy_high_half_empty
+# CHECK:      $l = LD_r_r $c
+# CHECK-NEXT: $h = LD_r_r undef $b
+
+# CHECK-LABEL: name: copy_low_half_empty
+# CHECK:      $c = LD_r_r undef $e
+# CHECK-NEXT: $b = LD_r_r $d

@@ -824,6 +824,12 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   }
 
   switch (MI.getOpcode()) {
+  case TargetOpcode::COPY:
+    // We lower the copy here so that reads of an empty half of the pair get
+    // marked undef.
+    lowerCopy(&MI);
+    return true;
+
   case Z80::LOAD8_IND: {
     // Expand to LD A,(BC), LD A,(DE), or LD A,(HL) based on allocated register.
     Register Addr = MI.getOperand(1).getReg();
