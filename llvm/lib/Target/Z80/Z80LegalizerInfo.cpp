@@ -168,15 +168,11 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .widenScalarToNextPow2(1)
       .clampScalar(1, S8, S16);
 
-  // Basic ALU operations
-  // For 32-bit and larger, narrow to 16-bit which generates carry chains
-  // widenScalarToNextPow2 ensures non-pow2 types (e.g. s63 from f64 bit
-  // manipulation in Rust core) are widened before narrowScalar operates.
+  // Widen an odd width so that it splits into whole pairs.
   getActionDefinitionsBuilder({G_ADD, G_SUB})
       .legalFor({S8, S16})
       .scalarize(0)
       .widenScalarToNextPow2(0)
-      .narrowScalar(0, LegalizeMutations::changeTo(0, S16))
       .clampScalar(0, S8, S16);
 
   // Widen an odd width so that it splits into whole pairs.
