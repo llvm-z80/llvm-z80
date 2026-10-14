@@ -1468,40 +1468,18 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           return true;
         }
         if (DstTy.getSizeInBits() <= 16 && Disp >= -128 && Disp + 1 <= 127) {
-          // 16-bit IX-indexed load.
-          // Choose target register pair based on downstream usage:
-          // if the only use is a COPY to a physical register pair (DE, BC),
-          // load directly into that pair to help the RA coalesce the COPY.
+          // 16-bit IX-indexed load, a byte at a time.
           if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
             return false;
-
-          Register TargetPair = Z80::HL;
-          Register LdLoReg = Z80::L;
-          Register LdHiReg = Z80::H;
-
-          if (MRI.hasOneNonDBGUse(DstReg)) {
-            MachineInstr &Use = *MRI.use_nodbg_begin(DstReg)->getParent();
-            if (Use.getOpcode() == TargetOpcode::COPY &&
-                Use.getOperand(0).getReg().isPhysical()) {
-              Register PhysDst = Use.getOperand(0).getReg();
-              if (PhysDst == Z80::DE) {
-                TargetPair = Z80::DE;
-                LdLoReg = Z80::E;
-                LdHiReg = Z80::D;
-              } else if (PhysDst == Z80::BC) {
-                TargetPair = Z80::BC;
-                LdLoReg = Z80::C;
-                LdHiReg = Z80::B;
-              }
-            }
-          }
-
-          Z80::buildLoadIdx(MBB, MI, DL, TII, Z80::LD_r_IXd, LdLoReg, Disp)
-              .addReg(TargetPair, RegState::ImplicitDefine);
-          Z80::buildLoadIdx(MBB, MI, DL, TII, Z80::LD_r_IXd, LdHiReg, Disp + 1)
-              .addReg(TargetPair, RegState::ImplicitDefine);
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
-              .addReg(TargetPair);
+          Register Lo = MRI.createVirtualRegister(&Z80::GR8RegClass);
+          Register Hi = MRI.createVirtualRegister(&Z80::GR8RegClass);
+          BuildMI(MBB, MI, DL, TII.get(Z80::LD_r_IXd), Lo).addImm(Disp);
+          BuildMI(MBB, MI, DL, TII.get(Z80::LD_r_IXd), Hi).addImm(Disp + 1);
+          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::REG_SEQUENCE), DstReg)
+              .addReg(Lo)
+              .addImm(Z80::sub_lo)
+              .addReg(Hi)
+              .addImm(Z80::sub_hi);
           MI.eraseFromParent();
           return true;
         }
@@ -2953,16 +2931,19 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return true;
     }
     if (SrcTy.getSizeInBits() <= 8 && DstTy.getSizeInBits() <= 16) {
-      // s8->s16 or s1->s16: copy low byte to L, H is don't-care.
-      // Use implicit-def on H so register allocator knows it's defined.
+      // s8->s16: the high byte is undefined.
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
           !RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
         return false;
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::L)
+      Register Hi = MRI.createVirtualRegister(&Z80::GR8RegClass);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::IMPLICIT_DEF),
+              Hi);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::REG_SEQUENCE),
+              DstReg)
           .addReg(SrcReg)
-          .addReg(Z80::H, RegState::ImplicitDefine);
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-          .addReg(Z80::HL);
+          .addImm(Z80::sub_lo)
+          .addReg(Hi)
+          .addImm(Z80::sub_hi);
       MI.eraseFromParent();
       return true;
     }
