@@ -28,6 +28,7 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/IntrinsicsZ80.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -941,12 +942,19 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   }
 
   case TargetOpcode::G_DYN_STACKALLOC: {
-    // SM83 has no frame pointer register (no IX/IY), so dynamic stack
-    // allocation is not supported — SP-relative offsets break when SP moves.
-    if (MIRBuilder.getMF().getSubtarget<Z80Subtarget>().hasSM83())
-      report_fatal_error(
-          "SM83 does not support dynamic stack allocation "
-          "(alloca/VLA) because it has no frame pointer register");
+    // SM83 has no frame pointer register, so the frame is reached relative to
+    // SP and cannot survive SP moving by an amount known only at run time.
+    if (MIRBuilder.getMF().getSubtarget<Z80Subtarget>().hasSM83()) {
+      const Function &F = MIRBuilder.getMF().getFunction();
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F,
+          "dynamic stack allocation (alloca/VLA) is not supported on SM83, "
+          "which has no frame pointer register",
+          MI.getDebugLoc()));
+      MIRBuilder.buildUndef(MI.getOperand(0).getReg());
+      MI.eraseFromParent();
+      return true;
+    }
 
     // Custom lowering for dynamic stack allocation (alloca/VLA).
     // The generic lowering creates a COPY chain:
