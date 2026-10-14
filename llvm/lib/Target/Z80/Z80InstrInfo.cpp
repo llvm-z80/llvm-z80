@@ -1251,29 +1251,6 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
-  case Z80::SADD_HL_rr: {
-    // Signed 16-bit addition (sets P/V for overflow on Z80).
-    Register RHS = MI.getOperand(0).getReg();
-    if (STI->hasSM83()) {
-      // SM83: byte-by-byte ADD/ADC (no ADC HL,rr; no P/V flag).
-      // LD A,L; ADD A,lo; LD L,A; LD A,H; ADC A,hi; LD H,A
-      auto [Lo, Hi] = getSubRegs16(RHS);
-      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
-      Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADD_A_r, Lo);
-      Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
-      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
-      Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADC_A_r, Hi);
-      Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
-    } else {
-      // Z80: AND A; ADC HL,rr — sets P/V for overflow detection.
-      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Z80::A),
-                        Z80::A);
-      Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::ADC_HL_rr, RHS);
-    }
-    MI.eraseFromParent();
-    return true;
-  }
-
   case Z80::ADC_HL_rr_CI: {
     // 16-bit add with carry in: HL = HL + rr + carry_in, carry out in the
     // flags.
@@ -1334,85 +1311,43 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
-  case Z80::CAPTURE_PV: {
-    // Read P/V flag (bit 2 of F register) into A as 0 or 1.
-    // PUSH AF; POP HL; LD A,L; RRCA; RRCA; AND 1
-    // PUSH/POP/LD don't affect flags, so P/V is preserved until RRCA.
-    BuildMI(MBB, MI, DL, get(Z80::PUSH_AF));
-    BuildMI(MBB, MI, DL, get(Z80::POP_HL));
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
-    BuildMI(MBB, MI, DL, get(Z80::RRCA));
-    BuildMI(MBB, MI, DL, get(Z80::RRCA));
-    BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
-    MI.eraseFromParent();
-    return true;
-  }
-
-  case Z80::SM83_SADDO_HL_rr: {
-    // SM83 signed 16-bit add with overflow detection.
-    // HL = HL + rr, A = overflow (0 or 1).
-    // overflow = (result_hi ^ lhs_hi) & (result_hi ^ rhs_hi), bit 7
-    Register RHS = MI.getOperand(1).getReg();
+  case Z80::SADDO16:
+  case Z80::SSUBO16: {
+    bool IsSub = MI.getOpcode() == Z80::SSUBO16;
+    Register Tmp = MI.getOperand(1).getReg();
+    Register RHS = MI.getOperand(2).getReg();
+    auto [TmpLo, TmpHi] = getSubRegs16(Tmp);
+    if (!STI->hasSM83()) {
+      // The overflow is P/V, bit 2 of F.
+      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Z80::A),
+                        Z80::A);
+      Z80::buildAdcSbcHL(MBB, MI, DL, *this,
+                         IsSub ? Z80::SBC_HL_rr : Z80::ADC_HL_rr, RHS);
+      BuildMI(MBB, MI, DL, get(Z80::PUSH_AF));
+      BuildMI(MBB, MI, DL, get(getPOPOpcode(Tmp)));
+      Z80::buildLD8(MBB, MI, DL, *this, Z80::A, TmpLo);
+      BuildMI(MBB, MI, DL, get(Z80::RRCA));
+      BuildMI(MBB, MI, DL, get(Z80::RRCA));
+      BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
+      MI.eraseFromParent();
+      return true;
+    }
+    // SM83 has no P/V flag. The overflow is bit 7 of
+    //   add: (result_hi ^ lhs_hi) & (result_hi ^ rhs_hi)
+    //   sub: (result_hi ^ lhs_hi) & (lhs_hi ^ rhs_hi)
     auto [Lo, Hi] = getSubRegs16(RHS);
-    // Use a temp from the "other" register pair.
-    Register Temp = (RHS == Z80::DE) ? Z80::B : Z80::D;
-    // Save lhs_hi before the addition overwrites H.
-    Z80::buildLD8(MBB, MI, DL, *this, Temp, Z80::H);
-    // HL = HL + rr (byte-by-byte)
+    Z80::buildLD8(MBB, MI, DL, *this, TmpHi, Z80::H);
     Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADD_A_r, Lo);
+    Z80::buildAlu8(MBB, MI, DL, *this, IsSub ? Z80::SUB_r : Z80::ADD_A_r, Lo);
     Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
     Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::ADC_A_r, Hi);
+    Z80::buildAlu8(MBB, MI, DL, *this, IsSub ? Z80::SBC_A_r : Z80::ADC_A_r, Hi);
     Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
-    // A = result_hi. Compute overflow:
-    // T1 = result_hi ^ lhs_hi (Temp has lhs_hi)
-    // A = result_hi ^ lhs_hi
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, Temp);
-    Z80::buildLD8(MBB, MI, DL, *this, Temp, Z80::A);   // Temp = T1
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H); // A = result_hi
-    // T2 = result_hi ^ rhs_hi
-    // A = result_hi ^ rhs_hi
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, TmpHi);
+    Z80::buildLD8(MBB, MI, DL, *this, TmpLo, Z80::A);
+    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, IsSub ? TmpHi : Z80::H);
     Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, Hi);
-    // A = T1 & T2
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Temp);
-    // Bit 7 → bit 0
-    BuildMI(MBB, MI, DL, get(Z80::RLCA));
-    BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
-    MI.eraseFromParent();
-    return true;
-  }
-
-  case Z80::SM83_SSUBO_HL_rr: {
-    // SM83 signed 16-bit sub with overflow detection.
-    // HL = HL - rr, A = overflow (0 or 1).
-    // overflow = (result_hi ^ lhs_hi) & (lhs_hi ^ rhs_hi), bit 7
-    Register RHS = MI.getOperand(1).getReg();
-    auto [Lo, Hi] = getSubRegs16(RHS);
-    // Use temps from the "other" register pair.
-    Register Temp1 = (RHS == Z80::DE) ? Z80::B : Z80::D; // lhs_hi
-    Register Temp2 = (RHS == Z80::DE) ? Z80::C : Z80::E; // XOR intermediate
-    // Save lhs_hi before the subtraction overwrites H.
-    Z80::buildLD8(MBB, MI, DL, *this, Temp1, Z80::H);
-    // HL = HL - rr (byte-by-byte)
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::L);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::SUB_r, Lo);
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::L, Z80::A);
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Z80::H);
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, Hi);
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
-    // A = result_hi. Compute overflow:
-    // T1 = result_hi ^ lhs_hi (Temp1 has lhs_hi)
-    // A = result_hi ^ lhs_hi
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, Temp1);
-    Z80::buildLD8(MBB, MI, DL, *this, Temp2, Z80::A); // Temp2 = T1
-    // T2 = lhs_hi ^ rhs_hi (need lhs_hi again, still in Temp1)
-    Z80::buildLD8(MBB, MI, DL, *this, Z80::A, Temp1); // A = lhs_hi
-    // A = lhs_hi ^ rhs_hi
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::XOR_r, Hi);
-    // A = T1 & T2
-    Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Temp2);
-    // Bit 7 → bit 0
+    Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, TmpLo);
     BuildMI(MBB, MI, DL, get(Z80::RLCA));
     BuildMI(MBB, MI, DL, get(Z80::AND_n)).addImm(1);
     MI.eraseFromParent();
@@ -1908,8 +1843,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::CALL_nn:
   case Z80::LD_rr_nn:
   case Z80::LD_SP_nn:
-  case Z80::SUB_HL_rr:  // AND A(1) + SBC HL,rr(2) = 3
-  case Z80::SADD_HL_rr: // AND A(1) + ADC HL,rr(2) = 3
+  case Z80::SUB_HL_rr: // AND A(1) + SBC HL,rr(2) = 3
     return 3;
 
   case Z80::CMP16_FLAGS: // LD A,lo(1) + SUB lo(1) + LD A,hi(1) + SBC A,hi(1) =
@@ -1926,15 +1860,11 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::OUT8_C: // OUT (C),r = 2
     return 2;
 
-  // CAPTURE_PV: PUSH AF(1) + POP HL(1) + LD A,L(1) + RRCA(1) + RRCA(1) + AND
-  // n(2) = 7
-  case Z80::CAPTURE_PV:
-    return 7;
-
-  // SM83 signed overflow pseudos: 12 x 1-byte + 1 x 2-byte = 14 bytes
-  case Z80::SM83_SADDO_HL_rr:
-  case Z80::SM83_SSUBO_HL_rr:
-    return 14;
+  // Z80: AND A(1) + ADC/SBC HL,rr(2) + PUSH(1) + POP(1) + LD(1) + RRCA x2(2) +
+  // AND n(2) = 10. SM83: 13 x 1-byte + AND n(2) = 15.
+  case Z80::SADDO16:
+  case Z80::SSUBO16:
+    return STI->hasSM83() ? 15 : 10;
 
   // Four-byte instructions (IX/IY indexed)
   case Z80::LD_IX_nn:

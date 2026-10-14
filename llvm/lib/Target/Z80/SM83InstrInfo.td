@@ -115,28 +115,6 @@ def CALL_HL : Z80Inst<"call\t__call_hl">, InstCall {
   let Defs = [A, BC, DE, HL, FLAGS];
 }
 
-// SM83 signed 16-bit add with overflow detection.
-// HL = HL + rr, A = overflow (0 or 1).
-// SM83 has no P/V flag, so overflow is computed via sign bit comparison:
-//   overflow = (result_hi ^ lhs_hi) & (result_hi ^ rhs_hi), bit 7
-// Uses the "other" register pair (BC if rhs=DE, DE if rhs=BC) as temps.
-def SM83_SADDO_HL_rr : Z80Pseudo<(outs Ac:$ov), (ins GR16_BCDE:$rhs)> {
-  let Defs = [BC, DE, HL, FLAGS];
-  let Uses = [HL];
-  let mayLoad = false;
-  let mayStore = false;
-}
-
-// SM83 signed 16-bit sub with overflow detection.
-// HL = HL - rr, A = overflow (0 or 1).
-// overflow = (result_hi ^ lhs_hi) & (lhs_hi ^ rhs_hi), bit 7
-def SM83_SSUBO_HL_rr : Z80Pseudo<(outs Ac:$ov), (ins GR16_BCDE:$rhs)> {
-  let Defs = [BC, DE, HL, FLAGS];
-  let Uses = [HL];
-  let mayLoad = false;
-  let mayStore = false;
-}
-
 //===----------------------------------------------------------------------===//
 //  LDH Instructions (0xFF00 + 8-bit offset)
 //===----------------------------------------------------------------------===//

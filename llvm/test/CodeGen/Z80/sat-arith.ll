@@ -29,14 +29,14 @@ define i16 @test_usubsat(i16 %a, i16 %b) {
   ret i16 %r
 }
 
-; Test: signed add saturating (uses P/V flag capture via CAPTURE_PV pseudo)
+; Test: signed add saturating (the P/V flag reaches A through a scratch pair)
 define i16 @test_saddsat(i16 %a, i16 %b) {
 ; CHECK-LABEL: _test_saddsat:
 ; CHECK:       and a
 ; CHECK:       adc hl,de
 ; CHECK:       push af
-; CHECK-NEXT:  pop hl
-; CHECK-NEXT:  ld a,l
+; CHECK-NEXT:  pop {{bc|de}}
+; CHECK-NEXT:  ld a,{{c|e}}
 ; CHECK-NEXT:  rrca
 ; CHECK-NEXT:  rrca
 ; CHECK-NEXT:  and #1
@@ -45,14 +45,14 @@ define i16 @test_saddsat(i16 %a, i16 %b) {
   ret i16 %r
 }
 
-; Test: signed sub saturating (uses P/V flag capture via CAPTURE_PV pseudo)
+; Test: signed sub saturating (the P/V flag reaches A through a scratch pair)
 define i16 @test_ssubsat(i16 %a, i16 %b) {
 ; CHECK-LABEL: _test_ssubsat:
 ; CHECK:       and a
 ; CHECK:       sbc hl,de
 ; CHECK:       push af
-; CHECK-NEXT:  pop hl
-; CHECK-NEXT:  ld a,l
+; CHECK-NEXT:  pop {{bc|de}}
+; CHECK-NEXT:  ld a,{{c|e}}
 ; CHECK-NEXT:  rrca
 ; CHECK-NEXT:  rrca
 ; CHECK-NEXT:  and #1

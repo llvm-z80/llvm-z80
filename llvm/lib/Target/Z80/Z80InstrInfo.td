@@ -769,14 +769,6 @@ def SUB_HL_rr : Z80Inst<"sub_hl_rr"> {
   let Defs = [HL, A, FLAGS];
 }
 
-// AND A; ADC HL,rr (signed addition — sets P/V for overflow detection)
-def SADD_HL_rr : Z80Inst<"sadd_hl_rr"> {
-  let InOperandList = (ins GR16_BCDE:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, A, FLAGS];
-}
-
 // ADC HL,rr and SBC HL,rr with the carry or borrow in taken from a register,
 // restored into the flags right before the instruction that reads it. The
 // carry or borrow out is left in the flags.
@@ -798,17 +790,12 @@ def SBC_HL_rr_BI : Z80Inst<"sbc_hl_rr_bi"> {
 
 } // isPseudo, isCodeGenOnly
 
-// CAPTURE_PV: Read the P/V flag (bit 2 of F register) into A as 0 or 1.
-// Expanded in expandPostRAPseudo to: PUSH AF; POP HL; LD A,L; RRCA; RRCA; AND 1
-// Must be atomic (single pseudo) because the RA must not insert stack-modifying
-// instructions between the PUSH AF and POP HL.
-let isPseudo = true, isCodeGenOnly = true in {
-def CAPTURE_PV : Z80Inst<"capture_pv"> {
-  let InOperandList = (ins);
-  let OutOperandList = (outs Ac:$ov);
-  let Uses = [FLAGS];
-  let Defs = [HL, FLAGS];
-}
+// HL plus or minus a pair, with the signed overflow in A as 0 or 1. $tmp is
+// scratch.
+let Uses = [HL], Defs = [HL, FLAGS], Constraints = "@earlyclobber $tmp",
+    mayLoad = false, mayStore = false in {
+  def SADDO16 : Z80Pseudo<(outs Ac:$ov, GR16_BCDE:$tmp), (ins GR16_BCDE:$rhs)>;
+  def SSUBO16 : Z80Pseudo<(outs Ac:$ov, GR16_BCDE:$tmp), (ins GR16_BCDE:$rhs)>;
 }
 
 // Zero extend 8-bit to 16-bit.

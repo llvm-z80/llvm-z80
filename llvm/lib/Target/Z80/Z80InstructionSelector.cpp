@@ -3258,66 +3258,16 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     return false;
   }
 
-  case TargetOpcode::G_SADDO: {
-    // Signed add with overflow detection
-    // %result, %overflow = G_SADDO %a, %b
-    Register DstReg = MI.getOperand(0).getReg();
-    Register OverflowReg = MI.getOperand(1).getReg();
-    Register Src1Reg = MI.getOperand(2).getReg();
-    Register Src2Reg = MI.getOperand(3).getReg();
-    const LLT DstTy = MRI.getType(DstReg);
-    const auto &STI = MF.getSubtarget<Z80Subtarget>();
-
-    if (DstTy.getSizeInBits() <= 16) {
-      if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
-          !RBI.constrainGenericRegister(Src1Reg, Z80::GR16RegClass, MRI) ||
-          !RBI.constrainGenericRegister(Src2Reg, Z80::GR16_BCDERegClass, MRI))
-        return false;
-
-      bool OverflowUsed = !MRI.use_nodbg_empty(OverflowReg);
-      if (OverflowUsed &&
-          !RBI.constrainGenericRegister(OverflowReg, Z80::GR8RegClass, MRI))
-        return false;
-      Register Overflow = OverflowUsed ? OverflowReg : Register();
-
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
-          .addReg(Src1Reg);
-
-      if (STI.hasSM83()) {
-        // SM83: combined add + overflow detection (no P/V flag), the
-        // overflow coming out in A.
-        buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::SM83_SADDO_HL_rr, Overflow,
-                   Register(), MRI)
-            .addReg(Src2Reg);
-      } else {
-        // Z80: AND A; ADC HL,rr — sets P/V for signed overflow.
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SADD_HL_rr))
-            .addReg(Src2Reg);
-      }
-
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-          .addReg(Z80::HL);
-
-      // Z80: CAPTURE_PV reads the P/V flag (bit 2 of F) into A as 0 or 1. It
-      // goes through HL, so the result leaves HL first.
-      if (OverflowUsed && !STI.hasSM83())
-        buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::CAPTURE_PV, Overflow,
-                   Register(), MRI);
-      MI.eraseFromParent();
-      return true;
-    }
-    return false;
-  }
-
+  case TargetOpcode::G_SADDO:
   case TargetOpcode::G_SSUBO: {
-    // Signed subtract with overflow detection
-    // %result, %overflow = G_SSUBO %a, %b
+    // Signed add or subtract with overflow detection
+    // %result, %overflow = G_SADDO/G_SSUBO %a, %b
+    bool IsSub = Opcode == TargetOpcode::G_SSUBO;
     Register DstReg = MI.getOperand(0).getReg();
     Register OverflowReg = MI.getOperand(1).getReg();
     Register Src1Reg = MI.getOperand(2).getReg();
     Register Src2Reg = MI.getOperand(3).getReg();
     const LLT DstTy = MRI.getType(DstReg);
-    const auto &STI = MF.getSubtarget<Z80Subtarget>();
 
     if (DstTy.getSizeInBits() <= 16) {
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
@@ -3329,31 +3279,23 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       if (OverflowUsed &&
           !RBI.constrainGenericRegister(OverflowReg, Z80::GR8RegClass, MRI))
         return false;
-      Register Overflow = OverflowUsed ? OverflowReg : Register();
 
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
           .addReg(Src1Reg);
-
-      if (STI.hasSM83()) {
-        // SM83: combined sub + overflow detection (no P/V flag), the
-        // overflow coming out in A.
-        buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::SM83_SSUBO_HL_rr, Overflow,
-                   Register(), MRI)
+      if (OverflowUsed) {
+        Register Tmp = MRI.createVirtualRegister(&Z80::GR16_BCDERegClass);
+        buildAccOp(MBB, MI, MI.getDebugLoc(),
+                   IsSub ? Z80::SSUBO16 : Z80::SADDO16, OverflowReg, Register(),
+                   MRI)
+            .addDef(Tmp, RegState::Dead)
             .addReg(Src2Reg);
       } else {
-        // Z80: AND A; SBC HL,rr — sets P/V for signed overflow.
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::SUB_HL_rr))
+        BuildMI(MBB, MI, MI.getDebugLoc(),
+                TII.get(IsSub ? Z80::SUB_HL_rr : Z80::ADD_HL_rr))
             .addReg(Src2Reg);
       }
-
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
           .addReg(Z80::HL);
-
-      // Z80: CAPTURE_PV reads the P/V flag (bit 2 of F) into A as 0 or 1. It
-      // goes through HL, so the result leaves HL first.
-      if (OverflowUsed && !STI.hasSM83())
-        buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::CAPTURE_PV, Overflow,
-                   Register(), MRI);
       MI.eraseFromParent();
       return true;
     }
