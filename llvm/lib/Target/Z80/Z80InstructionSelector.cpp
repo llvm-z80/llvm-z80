@@ -1438,109 +1438,63 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       }
     }
 
-    // Try IX-indexed addressing: match G_PTR_ADD(COPY $ix, G_CONSTANT d)
-    // This produces LD r,(IX+d) instead of the multi-instruction HL-indirect
-    // sequence, which is much more efficient for stack argument access.
-    MachineInstr *AddrDef = MRI.getVRegDef(AddrReg);
-    if (AddrDef && AddrDef->getOpcode() == TargetOpcode::G_PTR_ADD) {
-      Register BaseReg = AddrDef->getOperand(1).getReg();
-      Register OffsetReg = AddrDef->getOperand(2).getReg();
-      MachineInstr *BaseDef = MRI.getVRegDef(BaseReg);
-      MachineInstr *OffsetDef = MRI.getVRegDef(OffsetReg);
+    // The address as a base and a constant displacement from the base.
+    MachineInstr *BaseDef = MRI.getVRegDef(AddrReg);
+    std::optional<int64_t> Disp = 0;
+    if (BaseDef && BaseDef->getOpcode() == TargetOpcode::G_PTR_ADD) {
+      Disp = getIConstantVRegSExtVal(BaseDef->getOperand(2).getReg(), MRI);
+      BaseDef = MRI.getVRegDef(BaseDef->getOperand(1).getReg());
+    }
+    unsigned Bits = DstTy.getSizeInBits();
 
-      bool IsIXBase = BaseDef && BaseDef->getOpcode() == TargetOpcode::COPY &&
-                      BaseDef->getOperand(1).isReg() &&
-                      BaseDef->getOperand(1).getReg() == Z80::IX;
-
-      int64_t Disp = 0;
-      bool IsConstOffset =
-          OffsetDef && OffsetDef->getOpcode() == TargetOpcode::G_CONSTANT;
-      if (IsConstOffset)
-        Disp = OffsetDef->getOperand(1).getCImm()->getSExtValue();
-
-      if (IsIXBase && IsConstOffset) {
-        if (DstTy.getSizeInBits() <= 8 && Disp >= -128 && Disp <= 127) {
-          // 8-bit IX-indexed load: LD r,(IX+d), into any register.
-          if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
-            return false;
-          BuildMI(MBB, MI, DL, TII.get(Z80::LD_r_IXd), DstReg).addImm(Disp);
-          MI.eraseFromParent();
-          return true;
-        }
-        if (DstTy.getSizeInBits() <= 16 && Disp >= -128 && Disp + 1 <= 127) {
-          // 16-bit IX-indexed load, a byte at a time.
-          if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
-            return false;
-          Register Lo = MRI.createVirtualRegister(&Z80::GR8RegClass);
-          Register Hi = MRI.createVirtualRegister(&Z80::GR8RegClass);
-          BuildMI(MBB, MI, DL, TII.get(Z80::LD_r_IXd), Lo).addImm(Disp);
-          BuildMI(MBB, MI, DL, TII.get(Z80::LD_r_IXd), Hi).addImm(Disp + 1);
-          BuildMI(MBB, MI, DL, TII.get(TargetOpcode::REG_SEQUENCE), DstReg)
-              .addReg(Lo)
-              .addImm(Z80::sub_lo)
-              .addReg(Hi)
-              .addImm(Z80::sub_hi);
-          MI.eraseFromParent();
-          return true;
-        }
-      }
-
-      // G_PTR_ADD(G_FRAME_INDEX, G_CONSTANT) - frame-relative with extra offset
-      // Used when multi-byte locals are narrowed (e.g., 32-bit stored as two
-      // 16-bit halves: low half at FI, high half at FI+2).
-      // Use RELOAD pseudos which properly declare HL/BC clobbers for large
-      // offsets.
-      bool IsFrameBase =
-          BaseDef && BaseDef->getOpcode() == TargetOpcode::G_FRAME_INDEX;
-      if (IsFrameBase && IsConstOffset) {
-        int FI = BaseDef->getOperand(1).getIndex();
-
-        if (DstTy.getSizeInBits() <= 8) {
-          if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
-            return false;
-          BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR8), DstReg)
-              .addFrameIndex(FI)
-              .addImm(Disp)
-              .cloneMemRefs(MI);
-          MI.eraseFromParent();
-          return true;
-        }
-        if (DstTy.getSizeInBits() <= 16) {
-          if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
-            return false;
-          BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR16), DstReg)
-              .addFrameIndex(FI)
-              .addImm(Disp)
-              .cloneMemRefs(MI);
-          MI.eraseFromParent();
-          return true;
-        }
-      }
+    // A frame slot is read through RELOAD. RELOAD declares the HL and BC
+    // clobbers that a large displacement needs.
+    if (BaseDef && Disp && Bits <= 16 &&
+        BaseDef->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
+      bool Byte = Bits <= 8;
+      if (!RBI.constrainGenericRegister(
+              DstReg, Byte ? Z80::GR8RegClass : Z80::GR16RegClass, MRI))
+        return false;
+      BuildMI(MBB, MI, DL, TII.get(Byte ? Z80::RELOAD_GR8 : Z80::RELOAD_GR16),
+              DstReg)
+          .addFrameIndex(BaseDef->getOperand(1).getIndex())
+          .addImm(*Disp)
+          .cloneMemRefs(MI);
+      MI.eraseFromParent();
+      return true;
     }
 
-    // Try IX-indexed addressing from G_FRAME_INDEX (no extra offset)
-    // Use RELOAD pseudos which properly declare HL/BC clobbers for large
-    // offsets.
-    if (AddrDef && AddrDef->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
-      int FI = AddrDef->getOperand(1).getIndex();
-
-      if (DstTy.getSizeInBits() <= 8) {
+    // A pointer in IX, such as an inline asm output pinned to IX, is read with
+    // LD r,(IX+d).
+    if (BaseDef && Disp && BaseDef->isCopy() &&
+        BaseDef->getOperand(1).getReg() == Z80::IX && MI.hasOneMemOperand()) {
+      MachineFunction &MF = *MBB.getParent();
+      const MachineMemOperand *MMO = *MI.memoperands_begin();
+      if (Bits <= 8 && isInt<8>(*Disp)) {
         if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
           return false;
-        BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR8), DstReg)
-            .addFrameIndex(FI)
-            .addImm(0)
+        BuildMI(MBB, MI, DL, TII.get(Z80::LD_r_IXd), DstReg)
+            .addImm(*Disp)
             .cloneMemRefs(MI);
         MI.eraseFromParent();
         return true;
       }
-      if (DstTy.getSizeInBits() <= 16) {
+      if (Bits <= 16 && isInt<8>(*Disp) && isInt<8>(*Disp + 1)) {
         if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI))
           return false;
-        BuildMI(MBB, MI, DL, TII.get(Z80::RELOAD_GR16), DstReg)
-            .addFrameIndex(FI)
-            .addImm(0)
-            .cloneMemRefs(MI);
+        Register Lo = MRI.createVirtualRegister(&Z80::GR8RegClass);
+        Register Hi = MRI.createVirtualRegister(&Z80::GR8RegClass);
+        BuildMI(MBB, MI, DL, TII.get(Z80::LD_r_IXd), Lo)
+            .addImm(*Disp)
+            .addMemOperand(MF.getMachineMemOperand(MMO, 0, LLT::scalar(8)));
+        BuildMI(MBB, MI, DL, TII.get(Z80::LD_r_IXd), Hi)
+            .addImm(*Disp + 1)
+            .addMemOperand(MF.getMachineMemOperand(MMO, 1, LLT::scalar(8)));
+        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::REG_SEQUENCE), DstReg)
+            .addReg(Lo)
+            .addImm(Z80::sub_lo)
+            .addReg(Hi)
+            .addImm(Z80::sub_hi);
         MI.eraseFromParent();
         return true;
       }
