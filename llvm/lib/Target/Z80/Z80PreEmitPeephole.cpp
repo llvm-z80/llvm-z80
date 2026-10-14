@@ -1913,10 +1913,12 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
                 if (It3 != MIE) {
                   Register StoreSrc2 = getStoreHLindSrcReg(*It3);
                   if (StoreSrc2.isValid()) {
-                    // Try redundant store elimination.
-                    if (tryElimRedundantStore(AbsOff, false, SrcLo, 0, false,
+                    // LD A,r in this store gives A a new value.
+                    if (isRegDeadAfter(std::next(It3), MBB, TRI, Z80::A) &&
+                        tryElimRedundantStore(AbsOff, false, SrcLo, 0, false,
                                               StoreSrc2, 0, MII, It1, It2, It3))
                       continue;
+                    invalidateSlotReg(TRI, Z80::A);
                     SlotVal SLo, SHi;
                     SLo.Reg = SrcLo;
                     SHi.Reg = StoreSrc2;

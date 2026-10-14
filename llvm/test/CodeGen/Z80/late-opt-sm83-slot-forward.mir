@@ -7,6 +7,8 @@
 --- |
   define void @forward_8bit() { ret void }
   define void @pointer_store_kept() { ret void }
+  define void @a_after_hl_plus_store() { ret void }
+  define void @hl_plus_store_sets_a() { ret void }
 ...
 ---
 name:            forward_8bit
@@ -56,3 +58,68 @@ body:             |
 # CHECK:      LD_HLind_r {{.*}}$b, implicit killed $hl
 # CHECK-NEXT: LDHL_SP_e 0
 # CHECK-NEXT: $a = LD_r_HLind
+
+...
+---
+name:            a_after_hl_plus_store
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 1, alignment: 1 }
+  - { id: 1, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $b, $c, $sp
+    LDHL_SP_e 4, implicit-def $hl, implicit-def $flags, implicit $sp
+    LD_HLind_r $a, implicit $hl :: (store (s8) into %stack.0)
+    LDHL_SP_e 0, implicit-def $hl, implicit-def $flags, implicit $sp
+    $a = LD_r_r $c
+    LD_HLI_A implicit-def $hl, implicit $hl, implicit $a :: (store (s8) into %stack.1)
+    LD_HLind_r $b, implicit $hl :: (store (s8) into %stack.1 + 1)
+    LDHL_SP_e 4, implicit-def $hl, implicit-def $flags, implicit $sp
+    $e = LD_r_HLind implicit $hl :: (load (s8) from %stack.0)
+    $d = LD_r_n 0
+    $c = LD_r_n 0
+    $b = LD_r_n 0
+    RET implicit $de, implicit $bc
+...
+---
+# The HL+ store loads A on its way to the slot, so the first slot no longer
+# has its value in A.
+# CHECK-LABEL: name: a_after_hl_plus_store
+# CHECK:      $a = LD_r_r $c
+# CHECK:      LDHL_SP_e 4
+# CHECK-NEXT: $e = LD_r_HLind
+
+...
+---
+name:            hl_plus_store_sets_a
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $b, $c, $sp
+    LDHL_SP_e 2, implicit-def $hl, implicit-def $flags, implicit $sp
+    LD_HLind_r $b, implicit $hl :: (store (s8) into %stack.0)
+    $hl = INC_rr $hl
+    $hl = INC_rr $hl
+    LDHL_SP_e 3, implicit-def $hl, implicit-def $flags, implicit $sp
+    LD_HLind_r $c, implicit $hl :: (store (s8) into %stack.0 + 1)
+    $d = LD_r_r $a
+    $hl = INC_rr $hl
+    $hl = INC_rr $hl
+    LDHL_SP_e 2, implicit-def $hl, implicit-def $flags, implicit $sp
+    $a = LD_r_r $b
+    LD_HLI_A implicit-def $hl, implicit $hl, implicit $a :: (store (s8) into %stack.0)
+    LD_HLind_r $c, implicit $hl :: (store (s8) into %stack.0 + 1)
+    $e = LD_r_n 0
+    RET implicit $a, implicit $de
+...
+---
+# The slots already hold what the HL+ store writes, but A is read after it,
+# so the store and its load of A stay.
+# CHECK-LABEL: name: hl_plus_store_sets_a
+# CHECK:      $d = LD_r_r
+# CHECK:      LDHL_SP_e 2
+# CHECK-NEXT: $a = LD_r_r {{.*}}$b
+# CHECK-NEXT: LD_HLI_A
