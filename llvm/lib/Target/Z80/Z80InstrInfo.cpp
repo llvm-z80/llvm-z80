@@ -380,7 +380,7 @@ void Z80InstrInfo::storeRegToStackSlot(
     if (RC->hasSuperClassEq(&Z80::GR16RegClass) ||
         TRI->getCommonSubClass(RC, &Z80::GR16RegClass) ||
         Z80::IR16RegClass.hasSubClassEq(RC)) {
-      // Whatever doesn't fit the GR16 operand goes through the Anyi16 twin;
+      // Whatever doesn't fit the GR16 operand goes through the Any16 twin;
       // see the definitions in Z80InstrInfo.td.
       bool InGR16 = SrcReg.isPhysical() ? Z80::GR16RegClass.contains(SrcReg)
                                         : Z80::GR16RegClass.hasSubClassEq(RC);
@@ -562,12 +562,10 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 }
 
 namespace {
-/// An accumulator pseudo and the real instruction it becomes. The real one
-/// names A implicitly and takes, besides, the pseudo's last operand, A
-/// itself, or nothing.
 struct AccPseudo {
   unsigned Pseudo;
   unsigned Real;
+  // The operand the real instruction takes besides A.
   enum { Operand, SelfA, NoOperand } Form;
 };
 } // namespace
@@ -1054,7 +1052,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     assert(Offset >= -128 && Offset + 1 <= 127 &&
            "Large offset should have been expanded in eliminateFrameIndex");
 
-    // SP is in neither operand class, GR16 or Anyi16, so it never gets here.
+    // SP is in neither operand class, GR16 or Any16, so it never gets here.
     if (SrcReg == Z80::SP)
       llvm_unreachable("SP cannot be spilled via SPILL_GR16");
 
@@ -1109,7 +1107,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     assert(Offset >= -128 && Offset + 1 <= 127 &&
            "Large offset should have been expanded in eliminateFrameIndex");
 
-    // SP is in neither operand class, GR16 or Anyi16, so it never gets here.
+    // SP is in neither operand class, GR16 or Any16, so it never gets here.
     if (DestReg == Z80::SP)
       llvm_unreachable("SP cannot be reloaded via RELOAD_GR16");
 

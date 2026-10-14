@@ -107,6 +107,14 @@ def LD_A_HLD : Inst8<"ld a, (hl-)", 0x3A> {
 //  Pseudo Instructions
 //===----------------------------------------------------------------------===//
 
+// Indirect call through HL via __call_hl trampoline.
+let isPseudo = true in
+def CALL_HL : Z80Inst<"call\t__call_hl">, InstCall {
+  let InOperandList = (ins);
+  let Uses = [HL];
+  let Defs = [A, BC, DE, HL, FLAGS];
+}
+
 // SM83 signed 16-bit add with overflow detection.
 // HL = HL + rr, A = overflow (0 or 1).
 // SM83 has no P/V flag, so overflow is computed via sign bit comparison:

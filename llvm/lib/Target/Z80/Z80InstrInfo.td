@@ -642,14 +642,14 @@ def RELOAD_GR16 : Z80Pseudo<(outs GR16:$dst), (ins i32imm:$fi, i32imm:$offset)> 
 }
 
 // Registers that don't fit the GR16 operand — physical IX/IY, and virtual
-// registers in the wider Anyi16 class — spill through a separate pair rather
+// registers in the wider Any16 class — spill through a separate pair rather
 // than a widened SPILL_GR16: the descriptor's class reaches the register
 // allocator through its temporaries, and widening it perturbs allocation.
-def SPILL_ANY16 : Z80Pseudo<(outs), (ins Anyi16:$src, i32imm:$fi, i32imm:$offset)> {
+def SPILL_ANY16 : Z80Pseudo<(outs), (ins Any16:$src, i32imm:$fi, i32imm:$offset)> {
   let mayStore = true;
   let mayLoad = false;
 }
-def RELOAD_ANY16 : Z80Pseudo<(outs Anyi16:$dst), (ins i32imm:$fi, i32imm:$offset)> {
+def RELOAD_ANY16 : Z80Pseudo<(outs Any16:$dst), (ins i32imm:$fi, i32imm:$offset)> {
   let mayLoad = true;
   let mayStore = false;
   let isReMaterializable = true;
@@ -1003,18 +1003,6 @@ def SADDSAT8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR8:$src)>;
 def SSUBSAT8 : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR8:$src)>;
 }
 } // mayLoad = false, mayStore = false
-
-// CALL_HL - SM83 indirect call through HL register.
-// Pseudo-instruction that expands to "call __call_hl" in expandPostRAPseudo.
-// The runtime __call_hl trampoline is just "jp (hl)" (1 byte).
-// No register shift needed: SM83 args are in DE/BC, so HL is free for
-// the function pointer.
-let isPseudo = true in
-def CALL_HL : Z80Inst<"call\t__call_hl">, InstCall {
-  let InOperandList = (ins);
-  let Uses = [HL];
-  let Defs = [A, BC, DE, HL, FLAGS];
-}
 
 // Call frame setup/destroy pseudos for stack argument passing.
 // These bracket call sequences where arguments are pushed onto the stack.

@@ -156,8 +156,8 @@ Z80RegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
                                            const MachineFunction &) const {
   if (RC->hasSuperClass(&Z80::GR8RegClass))
     return &Z80::GR8RegClass;
-  if (RC->hasSuperClass(&Z80::Anyi16RegClass))
-    return &Z80::Anyi16RegClass;
+  if (RC->hasSuperClass(&Z80::Any16RegClass))
+    return &Z80::Any16RegClass;
   return RC;
 }
 

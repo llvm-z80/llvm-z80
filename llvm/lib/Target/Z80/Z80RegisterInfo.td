@@ -163,14 +163,19 @@ def Ac : Z80Reg8Class<(add A)> {
 // General 16-bit registers: BC, DE, HL
 def GR16 : Z80Reg16Class<(add BC, DE, HL)>;
 
-// BC and DE only (for register scavenging temp in address computation)
+// BC and DE, for a pair used alongside HL
 def GR16_BCDE : Z80Reg16Class<(add BC, DE)>;
 
 // Index registers only
 def IR16 : Z80Reg16Class<(add IX, IY)>;
 
-// HL or index register (for indirect addressing)
+// HL, IX and IY, the pairs SP is copied to and from
 def HLI : Z80Reg16Class<(add HL, IX, IY)>;
+
+// Every pair a 16-bit value can be kept in.
+// We leave SP out here because, with SP in this class, a copy to or from SP
+// could be folded into a spill of SP, and SP cannot be spilled.
+def Any16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;
 
 // Stack pointer only
 def SPc : Z80Reg16Class<(add SP)>;
@@ -191,13 +196,3 @@ def CCR : RegisterClass<"Z80", [i8], 8, (add FLAGS)> {
   let CopyCost = -1;
   let isAllocatable = 0;
 }
-
-//===----------------------------------------------------------------------===//
-//  Combined register classes
-//===----------------------------------------------------------------------===//
-
-// All 16-bit storage locations. SP holds the stack, not a value: it is
-// reserved, so no value is allocated to it, and leaving it out keeps a copy
-// to or from SP from being folded into a spill slot access, which has no
-// form for SP.
-def Anyi16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;
