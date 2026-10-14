@@ -8,6 +8,7 @@
 --- |
   define void @spill_forwards() { ret void }
   define void @volatile_kept() { ret void }
+  define void @pointer_store_kept() { ret void }
 ...
 ---
 name:            spill_forwards
@@ -41,6 +42,27 @@ body:             |
 
 # CHECK-LABEL: name: volatile_kept
 # CHECK:      LD_IXd_r -2, $c
+# CHECK-NEXT: $l = LD_r_IXd -2
+# CHECK-NEXT: RET
+
+...
+---
+name:            pointer_store_kept
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a, $c, $de, $ix
+    LD_IXd_r -2, $c :: (store (s8) into %stack.0)
+    LD_DEind_A implicit $de, implicit $a
+    $l = LD_r_IXd -2 :: (load (s8) from %stack.0)
+    RET implicit $l
+
+# A store through a pointer may write the slot, so the load stays.
+# CHECK-LABEL: name: pointer_store_kept
+# CHECK:      LD_IXd_r -2, $c
+# CHECK-NEXT: LD_DEind_A
 # CHECK-NEXT: $l = LD_r_IXd -2
 # CHECK-NEXT: RET
 

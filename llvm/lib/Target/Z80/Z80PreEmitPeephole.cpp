@@ -2136,6 +2136,14 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
 
+        // We cannot tell which slot a store through a pointer writes, so we
+        // forget every slot.
+        if (MI.mayStore()) {
+          SPSlots.clear();
+          ++MII;
+          continue;
+        }
+
         // Any other instruction: invalidate entries for defined regs.
         for (const MachineOperand &MO : MI.operands()) {
           if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
@@ -2223,7 +2231,14 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
 
-      // Case 5: Any other instruction — invalidate entries for defined regs.
+      // Case 5: Any other store may write a slot through a pointer, so clear
+      // everything.
+      if (MI.mayStore()) {
+        AvailValues.clear();
+        continue;
+      }
+
+      // Case 6: Any other instruction invalidates entries for defined regs.
       for (const MachineOperand &MO : MI.operands()) {
         if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
           invalidateReg(AvailValues, TRI, MO.getReg());
