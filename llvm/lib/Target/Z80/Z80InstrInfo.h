@@ -569,6 +569,9 @@ class Z80InstrInfo : public Z80GenInstrInfo {
 public:
   Z80InstrInfo(const Z80Subtarget &STI);
 
+  const TargetRegisterClass *
+  getInlineAsmMemoryOperandRegClass(InlineAsm::ConstraintCode C) const override;
+
   Register isLoadFromStackSlot(const MachineInstr &MI,
                                int &FrameIndex) const override;
 

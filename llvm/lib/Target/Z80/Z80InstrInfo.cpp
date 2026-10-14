@@ -43,6 +43,11 @@ Z80InstrInfo::Z80InstrInfo(const Z80Subtarget &STI)
                       /*CFDestroyOpcode=*/Z80::ADJCALLSTACKUP),
       STI(&STI) {}
 
+const TargetRegisterClass *Z80InstrInfo::getInlineAsmMemoryOperandRegClass(
+    InlineAsm::ConstraintCode C) const {
+  return &Z80::GR16RegClass;
+}
+
 Register Z80InstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
                                            int &FrameIndex) const {
   switch (MI.getOpcode()) {
