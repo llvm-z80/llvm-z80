@@ -33,9 +33,9 @@ name:            fold_across_debug
 tracksRegLiveness: true
 body:             |
   bb.0:
-    $c = LD_r_IXd 10
+    $c = LD_r_IXd 10, implicit $ix
     DBG_VALUE $c, $noreg, !5, !DIExpression(), debug-location !7
-    $a = LD_r_IXd 7
+    $a = LD_r_IXd 7, implicit $ix
     XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
     RET implicit $a
 ...

@@ -430,6 +430,7 @@ class LDrIdxd<string mnemonic, bits<8> prefix, string idx>
   let InOperandList = (ins disp8:$imm);
   let mayLoad = 1;
   let mayStore = 0;
+  let Uses = !if(!eq(idx, "ix"), [IX], [IY]);
   let hasSideEffects = 0;
 }
 
@@ -448,6 +449,7 @@ class LDIdxdr<string mnemonic, bits<8> prefix, string idx>
   let InOperandList = (ins disp8:$imm, GR8:$src);
   let mayLoad = 0;
   let mayStore = 1;
+  let Uses = !if(!eq(idx, "ix"), [IX], [IY]);
   let hasSideEffects = 0;
 }
 

@@ -18,8 +18,8 @@ stack:
 body:             |
   bb.0:
     liveins: $c, $ix
-    LD_IXd_r -2, $c :: (store (s8) into %stack.0)
-    $l = LD_r_IXd -2 :: (load (s8) from %stack.0)
+    LD_IXd_r -2, $c, implicit $ix :: (store (s8) into %stack.0)
+    $l = LD_r_IXd -2, implicit $ix :: (load (s8) from %stack.0)
     RET implicit $l
 
 # CHECK-LABEL: name: spill_forwards
@@ -36,8 +36,8 @@ stack:
 body:             |
   bb.0:
     liveins: $c, $ix
-    LD_IXd_r -2, $c :: (volatile store (s8) into %stack.0)
-    $l = LD_r_IXd -2 :: (volatile load (s8) from %stack.0)
+    LD_IXd_r -2, $c, implicit $ix :: (volatile store (s8) into %stack.0)
+    $l = LD_r_IXd -2, implicit $ix :: (volatile load (s8) from %stack.0)
     RET implicit $l
 
 # CHECK-LABEL: name: volatile_kept
@@ -54,9 +54,9 @@ stack:
 body:             |
   bb.0:
     liveins: $a, $c, $de, $ix
-    LD_IXd_r -2, $c :: (store (s8) into %stack.0)
+    LD_IXd_r -2, $c, implicit $ix :: (store (s8) into %stack.0)
     LD_DEind_A implicit $de, implicit $a
-    $l = LD_r_IXd -2 :: (load (s8) from %stack.0)
+    $l = LD_r_IXd -2, implicit $ix :: (load (s8) from %stack.0)
     RET implicit $l
 
 # A store through a pointer may write the slot, so the load stays.

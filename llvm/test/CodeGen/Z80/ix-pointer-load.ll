@@ -8,7 +8,7 @@ define i8 @byte() {
 ; CHECK-LABEL: _byte:
 ; CHECK:       ld a,(ix+4)
 ; MIR-LABEL:   name: byte
-; MIR:         LD_r_IXd 4 :: (load (s8) from %ir.p)
+; MIR:         LD_r_IXd 4, implicit $ix :: (load (s8) from %ir.p)
   %fp = call ptr asm sideeffect "", "={ix}"()
   %p = getelementptr i8, ptr %fp, i16 4
   %v = load i8, ptr %p
@@ -20,8 +20,8 @@ define i16 @pair() {
 ; CHECK:       ld e,(ix+-6)
 ; CHECK-NEXT:  ld d,(ix+-5)
 ; MIR-LABEL:   name: pair
-; MIR:         LD_r_IXd -6 :: (volatile load (s8) from %ir.p)
-; MIR-NEXT:    LD_r_IXd -5 :: (volatile load (s8) from %ir.p + 1)
+; MIR:         LD_r_IXd -6, implicit $ix :: (volatile load (s8) from %ir.p)
+; MIR-NEXT:    LD_r_IXd -5, implicit $ix :: (volatile load (s8) from %ir.p + 1)
   %fp = call ptr asm sideeffect "", "={ix}"()
   %p = getelementptr i8, ptr %fp, i16 -6
   %v = load volatile i16, ptr %p

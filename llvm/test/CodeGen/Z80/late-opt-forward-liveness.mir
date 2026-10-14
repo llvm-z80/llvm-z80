@@ -17,8 +17,8 @@ body:             |
   bb.0:
     liveins: $a, $ix
     $c = LD_r_r killed $a
-    LD_IXd_r -4, killed $c :: (store (s16) into %stack.0, align 1)
-    $e = LD_r_IXd -4 :: (load (s16) from %stack.0, align 1)
+    LD_IXd_r -4, killed $c, implicit $ix :: (store (s16) into %stack.0, align 1)
+    $e = LD_r_IXd -4, implicit $ix :: (load (s16) from %stack.0, align 1)
     RET implicit $e
 ...
 ---
@@ -34,8 +34,8 @@ body:             |
   bb.0:
     liveins: $a, $ix
     $c = LD_r_r killed $a
-    LD_IXd_r -4, killed $c :: (store (s16) into %stack.0, align 1)
-    $c = LD_r_IXd -4 :: (load (s16) from %stack.0, align 1)
+    LD_IXd_r -4, killed $c, implicit $ix :: (store (s16) into %stack.0, align 1)
+    $c = LD_r_IXd -4, implicit $ix :: (load (s16) from %stack.0, align 1)
     RET implicit $c
 ...
 ---

@@ -18,9 +18,9 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $ix
-    LD_IXd_n -2, 0
-    LD_IXd_n -3, 0
-    LD_IXd_n -4, 7
+    LD_IXd_n -2, 0, implicit $ix
+    LD_IXd_n -3, 0, implicit $ix
+    LD_IXd_n -4, 7, implicit $ix
     RET
 
 # CHECK-LABEL: name: two_zeros
@@ -36,8 +36,8 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $ix
-    LD_IXd_n -2, 7
-    LD_IXd_n -3, 9
+    LD_IXd_n -2, 7, implicit $ix
+    LD_IXd_n -3, 9, implicit $ix
     RET
 
 # Nothing repeats, so there is nothing to amortize the load against.
@@ -53,9 +53,9 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $ix
-    LD_IXd_n -2, 0
-    LD_IXd_n -3, 0
-    LD_IXd_n -4, 0
+    LD_IXd_n -2, 0, implicit $ix
+    LD_IXd_n -3, 0, implicit $ix
+    LD_IXd_n -4, 0, implicit $ix
     RET
 
 # Saving a byte for a few cycles is not the trade optsize takes.
@@ -71,9 +71,9 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $ix
-    LD_IXd_n -2, 0
-    LD_IXd_n -3, 0
-    LD_IXd_n -4, 0
+    LD_IXd_n -2, 0, implicit $ix
+    LD_IXd_n -3, 0, implicit $ix
+    LD_IXd_n -4, 0, implicit $ix
     RET
 
 # CHECK-LABEL: name: tuned_for_speed

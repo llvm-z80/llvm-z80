@@ -343,8 +343,8 @@ def HALT_FD : InstFD8<"halt", 0x76>;
 // Opcode: FD 36 d n for IY
 //===----------------------------------------------------------------------===//
 
-def LD_IXd_n : InstDD16Imm<"ld", 0x36> { let AsmString = "ld ( ix + $disp ), $val"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IYd_n : InstFD16Imm<"ld", 0x36> { let AsmString = "ld ( iy + $disp ), $val"; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
+def LD_IXd_n : InstDD16Imm<"ld", 0x36> { let AsmString = "ld ( ix + $disp ), $val"; let Uses = [IX]; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
+def LD_IYd_n : InstFD16Imm<"ld", 0x36> { let AsmString = "ld ( iy + $disp ), $val"; let Uses = [IY]; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
 
 //===----------------------------------------------------------------------===//
 //  IX-indexed ALU instructions (DD prefix)

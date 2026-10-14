@@ -16,8 +16,8 @@ stack:
 body:             |
   bb.0:
     liveins: $ix, $b
-    $e = LD_r_IXd -2 :: (load (s8) from %stack.0)
-    $d = LD_r_IXd -1 :: (load (s8) from %stack.0 + 1)
+    $e = LD_r_IXd -2, implicit $ix :: (load (s8) from %stack.0)
+    $d = LD_r_IXd -1, implicit $ix :: (load (s8) from %stack.0 + 1)
     $e = LD_r_r $b
     RET implicit $de
 ...
@@ -33,8 +33,8 @@ stack:
 body:             |
   bb.0:
     liveins: $ix, $b
-    $e = LD_r_IXd -2 :: (volatile load (s8) from %stack.0)
-    $d = LD_r_IXd -1 :: (volatile load (s8) from %stack.0 + 1)
+    $e = LD_r_IXd -2, implicit $ix :: (volatile load (s8) from %stack.0)
+    $d = LD_r_IXd -1, implicit $ix :: (volatile load (s8) from %stack.0 + 1)
     $e = LD_r_r $b
     RET implicit $de
 ...
@@ -53,8 +53,8 @@ stack:
 body:             |
   bb.0:
     liveins: $ix
-    $e = LD_r_IXd -2 :: (load (s8) from %stack.0)
-    $d = LD_r_IXd -1 :: (load (s8) from %stack.0 + 1)
+    $e = LD_r_IXd -2, implicit $ix :: (load (s8) from %stack.0)
+    $d = LD_r_IXd -1, implicit $ix :: (load (s8) from %stack.0 + 1)
     RET implicit $de
 ...
 ---
