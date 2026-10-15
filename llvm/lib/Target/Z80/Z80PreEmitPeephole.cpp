@@ -482,7 +482,7 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
         }
         if (Scan->isCall() || Scan->isInlineAsm() ||
             Scan->hasUnmodeledSideEffects() ||
-            (Ordered && Scan->mayLoad() && Scan->hasOrderedMemoryRef()) ||
+            (Ordered && Scan->hasOrderedMemoryRef()) ||
             Scan->readsRegister(Loaded, TRI) ||
             Scan->modifiesRegister(Loaded, TRI))
           break;
