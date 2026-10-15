@@ -57,6 +57,9 @@ static bool linksInto(uint32_t inner, uint32_t outer) {
   if (inner == outer)
     return true;
   switch (outer) {
+  case EF_Z80_MACH_Z80:
+  case EF_Z80_MACH_SM83:
+    return false;
   case EF_Z80_MACH_Z180:
   case EF_Z80_MACH_R800:
   case EF_Z80_MACH_Z80N:
@@ -102,11 +105,14 @@ static uint32_t getMach(InputFile *f) {
 // The output takes the most capable input CPU, and every input must be
 // linkable with it.
 uint32_t Z80::calcEFlags() const {
-  uint32_t mach = 0;
-  InputFile *machFile = nullptr;
-  for (InputFile *f : ctx.objectFiles) {
+  if (ctx.objectFiles.empty())
+    return EF_Z80_MACH_Z80;
+
+  InputFile *machFile = ctx.objectFiles[0];
+  uint32_t mach = getMach(machFile);
+  for (InputFile *f : ArrayRef(ctx.objectFiles).slice(1)) {
     uint32_t objMach = getMach(f);
-    if (!mach || linksInto(mach, objMach)) {
+    if (linksInto(mach, objMach)) {
       mach = objMach;
       machFile = f;
     } else if (!linksInto(objMach, mach)) {
@@ -115,7 +121,7 @@ uint32_t Z80::calcEFlags() const {
                      << machFile;
     }
   }
-  return mach ? mach : EF_Z80_MACH_Z80;
+  return mach;
 }
 
 RelExpr Z80::getRelExpr(RelType type, const Symbol &s,

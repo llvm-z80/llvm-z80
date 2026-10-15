@@ -18,6 +18,13 @@
 ; EZ80: Flags: 0x4, EZ80{{$}}
 ; SM83: Flags: 0x5, SM83{{$}}
 
+; A link that extracts nothing from its archives has no object, and the output
+; is Z80.
+
+; RUN: llvm-ar rcs z180.a z180.o
+; RUN: ld.lld z180.a -o out && llvm-readelf -h out | FileCheck %s --check-prefix=Z80
+; Z80: Flags: 0x1, Z80{{$}}
+
 ; RUN: not ld.lld z80.o sm83.o -o /dev/null 2>&1 | FileCheck %s --check-prefix=ERR-SM83
 ; RUN: not ld.lld none.o sm83.o -o /dev/null 2>&1 | FileCheck %s --check-prefix=ERR-NONE
 ; RUN: not ld.lld z180.o r800.o -o /dev/null 2>&1 | FileCheck %s --check-prefix=ERR-R800
