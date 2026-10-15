@@ -1437,6 +1437,8 @@ void CodeGenModule::Release() {
                               "StrictVTablePointersRequirement",
                               llvm::MDNode::get(VMContext, Ops));
   }
+  if (LangOpts.Freestanding)
+    getModule().addModuleFlag(llvm::Module::Warning, "Freestanding", 1);
   if (getModuleDebugInfo() || getTriple().isOSWindows())
     // We support a single version in the linked module. The LLVM
     // parser will drop debug info with a different version number
