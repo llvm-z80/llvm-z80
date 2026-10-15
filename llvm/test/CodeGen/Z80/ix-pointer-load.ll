@@ -35,3 +35,26 @@ define i8 @no_offset() {
   %v = load i8, ptr %fp
   ret i8 %v
 }
+
+; Once a later asm writes IX, the pointer is read through another register.
+
+define i8 @rewritten() {
+; CHECK-LABEL: _rewritten:
+; CHECK-NOT:   (ix+
+; CHECK:       ret
+  %p = call ptr asm sideeffect "", "={ix}"()
+  %q = call ptr asm sideeffect "", "={ix}"()
+  %v = load i8, ptr %p
+  ret i8 %v
+}
+
+define i8 @clobbered() {
+; CHECK-LABEL: _clobbered:
+; CHECK-NOT:   (ix+
+; CHECK:       ret
+  %fp = call ptr asm sideeffect "", "={ix}"()
+  call void asm sideeffect "", "~{ix}"()
+  %p = getelementptr i8, ptr %fp, i16 1
+  %v = load i8, ptr %p
+  ret i8 %v
+}

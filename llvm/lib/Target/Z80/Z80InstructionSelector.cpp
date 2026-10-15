@@ -1464,10 +1464,19 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       return true;
     }
 
-    // A pointer in IX, such as an inline asm output pinned to IX, is read with
-    // LD r,(IX+d).
-    if (BaseDef && Disp && BaseDef->isCopy() &&
-        BaseDef->getOperand(1).getReg() == Z80::IX && MI.hasOneMemOperand()) {
+    // A pointer copied out of IX, such as an inline asm output pinned to IX,
+    // is read with LD r,(IX+d) only when no instruction between the COPY from
+    // IX and the load writes IX.
+    bool IXBase = BaseDef && Disp && BaseDef->isCopy() &&
+                  BaseDef->getOperand(1).getReg() == Z80::IX &&
+                  BaseDef->getParent() == &MBB && MI.hasOneMemOperand();
+    if (IXBase)
+      IXBase = llvm::none_of(
+          make_range(std::next(BaseDef->getIterator()), MI.getIterator()),
+          [&](const MachineInstr &I) {
+            return I.modifiesRegister(Z80::IX, &TRI);
+          });
+    if (IXBase) {
       MachineFunction &MF = *MBB.getParent();
       const MachineMemOperand *MMO = *MI.memoperands_begin();
       if (Bits <= 8 && isInt<8>(*Disp)) {
