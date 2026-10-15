@@ -157,13 +157,26 @@ bool Z80AsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
 }
 
 void Z80AsmPrinter::emitStartOfAsmFile(Module &M) {
-  // TODO: Emit Z80-specific directives if needed
+  if (!MAI.isSDCC() && !MAI.isZ88DK())
+    return;
+  StringRef Format = MAI.isSDCC() ? "sdasz80" : "z88dk";
+  for (const GlobalValue &GV : M.global_values())
+    if (GV.isWeakForLinker() && !GV.hasCommonLinkage())
+      OutContext.reportWarning(SMLoc(), "weak linkage of '" + GV.getName() +
+                                            "' is ignored in the " + Format +
+                                            " format");
+  for (const Function &F : M)
+    if (!F.isDeclaration() && F.getAlign() && *F.getAlign() > 1)
+      OutContext.reportWarning(SMLoc(), "alignment of '" + F.getName() +
+                                            "' is ignored in the " + Format +
+                                            " format");
 }
 
 void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
   if (MAI.isSDCC() && TM.getTargetTriple().getEnvironment() == Triple::SDCC &&
       GV->hasInitializer() && !GV->isConstant() &&
-      (GV->hasExternalLinkage() || GV->hasLocalLinkage()) &&
+      (GV->hasExternalLinkage() || GV->hasLocalLinkage() ||
+       GV->hasWeakLinkage() || GV->hasLinkOnceLinkage()) &&
       !GV->isThreadLocal() && !GV->hasSection() && !GV->hasComdat() &&
       GV->getAddressSpace() == 0) {
     const DataLayout &DL = GV->getDataLayout();
@@ -196,6 +209,13 @@ void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
     return;
   }
 
+  if ((MAI.isSDCC() || MAI.isZ88DK()) && GV->hasInitializer() &&
+      GV->getAlign() && *GV->getAlign() > 1)
+    OutContext.reportWarning(SMLoc(), "alignment of '" + GV->getName() +
+                                          "' is ignored in the " +
+                                          (MAI.isSDCC() ? "sdasz80" : "z88dk") +
+                                          " format");
+
   if (MAI.isSDCC()) {
     // BSS locals: sdasz80 doesn't support .local/.comm directives.
     // Handle zero-initialized variables by emitting in _DATA with explicit
@@ -217,10 +237,6 @@ void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
   }
 
   if (MAI.isZ88DK()) {
-    if (GV->hasInitializer() && GV->getAlign() && *GV->getAlign() > 1)
-      OutContext.reportWarning(SMLoc(), "alignment of '" + GV->getName() +
-                                            "' is ignored in the z88dk format");
-
     // z80asm has no .local/.comm, so define such globals in the BSS section.
     if (GV->hasLocalLinkage() || GV->hasCommonLinkage()) {
       const TargetLoweringObjectFile &TLOF = getObjFileLowering();

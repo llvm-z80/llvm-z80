@@ -1619,8 +1619,9 @@ void MCAsmStreamer::emitAlignmentDirective(uint64_t ByteAlignment,
                                            std::optional<int64_t> Value,
                                            unsigned ValueSize,
                                            unsigned MaxBytesToEmit) {
-  // z80asm aligns only relative to the module start, which is not enough.
-  if (MAI->isZ88DK())
+  // z80asm and sdasz80 align only relative to the start of a module or an
+  // area, so the alignment is lost at link time.
+  if (MAI->isZ88DK() || MAI->isSDCC())
     return;
 
   if (MAI->isAIX()) {

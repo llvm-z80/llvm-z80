@@ -115,10 +115,10 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
   // sdasz80 uses .ds for zero-fill (not .zero)
   ZeroDirective = "\t.ds\t";
 
-  // Without this the generic alias emission forces .globl onto every
-  // alias, local ones included (AsmPrinter falls back to MCSA_Global when
-  // no weak-reference directive exists).
-  WeakRefDirective = "\t.weak\t";
+  // We emit weak symbols as global, the closest form in sdasz80. Setting the
+  // weak-reference directive also keeps local aliases local.
+  WeakDirective = "\t.globl\t";
+  WeakRefDirective = "\t.globl\t";
 
   // sdasz80 escape handling differs from GNU as; emit strings as .db bytes
   AsciiDirective = nullptr;
@@ -135,30 +135,28 @@ unsigned Z80MCAsmInfoSDCC::getMaxInstLength(const MCSubtargetInfo *STI) const {
   return getZ80MaxInstLength(STI, MaxInstLength);
 }
 
+StringRef Z80MCAsmInfoSDCC::getAreaName(StringRef Name) {
+  if (Name.starts_with("_"))
+    return Name;
+  if (Name == ".text" || Name.starts_with(".text."))
+    return "_CODE";
+  if (Name == ".data" || Name.starts_with(".data."))
+    return "_DATA";
+  if (Name == ".bss" || Name.starts_with(".bss."))
+    return "_BSS";
+  if (Name == ".rodata" || Name.starts_with(".rodata."))
+    return "_CODE";
+  return "";
+}
+
 void Z80MCAsmInfoSDCC::printSwitchToSection(const MCSection &Section,
                                             uint32_t Subsection,
                                             const Triple &T,
                                             raw_ostream &OS) const {
-  StringRef Name = Section.getName();
-
-  if (Name.starts_with("_")) {
+  // Z80TargetAsmStreamer reports the sections that have no sdasz80 area.
+  StringRef Name = getAreaName(Section.getName());
+  if (!Name.empty())
     OS << "\t.area\t" << Name << "\n";
-    return;
-  }
-
-  // Map ELF section names to sdasz80 .area directives
-  if (Name == ".text" || Name.starts_with(".text."))
-    OS << "\t.area\t_CODE\n";
-  else if (Name == ".data" || Name.starts_with(".data."))
-    OS << "\t.area\t_DATA\n";
-  else if (Name == ".bss" || Name.starts_with(".bss."))
-    OS << "\t.area\t_BSS\n";
-  else if (Name == ".rodata" || Name.starts_with(".rodata."))
-    OS << "\t.area\t_CODE\n";
-  else
-    reportFatalUsageError("Cannot map section '" + Name +
-                          "' to an sdasz80 area. If you want to use a custom "
-                          "name, prepend it with an underscore.");
 }
 
 //===----------------------------------------------------------------------===//
@@ -188,8 +186,9 @@ Z80MCAsmInfoZ88DK::Z80MCAsmInfoZ88DK(const Triple &TT,
   AscizDirective = nullptr;
 
   GlobalDirective = "\tGLOBAL\t";
-  // Without a weak-reference directive every alias, local ones included, is
-  // made global. z80asm has no weak symbols, and GLOBAL is the closest form.
+  // We emit weak symbols as GLOBAL, the closest form in z80asm. Setting the
+  // weak-reference directive also keeps local aliases local.
+  WeakDirective = "\tGLOBAL\t";
   WeakRefDirective = "\tGLOBAL\t";
 
   initializeAtSpecifiers(AtSpecifiers);

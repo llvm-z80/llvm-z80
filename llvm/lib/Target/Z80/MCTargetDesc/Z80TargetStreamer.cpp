@@ -75,12 +75,19 @@ static bool HasPrefix(StringRef Name, StringRef Prefix) {
 void Z80TargetAsmStreamer::changeSection(const MCSection *CurSection,
                                          MCSection *Section,
                                          uint32_t SubSection, raw_ostream &OS) {
-  // Without a z88dk name the contents would land in the previous section.
+  // Without a z88dk name or an sdasz80 area the contents would land in the
+  // previous section.
   MCContext &Ctx = getStreamer().getContext();
   if (Ctx.getAsmInfo().isZ88DK() &&
       Z80MCAsmInfoZ88DK::getSectionName(Section->getName()).empty())
     Ctx.reportError(SMLoc(), "section '" + Section->getName() +
                                  "' cannot be emitted in the z88dk format");
+  if (Ctx.getAsmInfo().isSDCC() &&
+      Z80MCAsmInfoSDCC::getAreaName(Section->getName()).empty())
+    Ctx.reportError(SMLoc(), "section '" + Section->getName() +
+                                 "' cannot be emitted in the sdasz80 format; "
+                                 "start the name with '_' to use it as an "
+                                 "area name");
   MCTargetStreamer::changeSection(CurSection, Section, SubSection, OS);
   HasBSS |= HasPrefix(Section->getName(), ".bss");
   HasData |= HasPrefix(Section->getName(), ".data");
