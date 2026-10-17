@@ -1,0 +1,22 @@
+[package]
+name = "asxxxx-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+asxxxx = { path = ".." }
+libfuzzer-sys = "0.4"
+
+# Kept out of the z80-utils workspace, since it builds only with nightly.
+[workspace]
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false
