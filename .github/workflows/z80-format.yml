@@ -1,0 +1,38 @@
+name: Z80 format
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: z80-format-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: clang-format and darker
+    runs-on: ubuntu-latest
+    container:
+      image: 'ghcr.io/llvm/ci-ubuntu-26.04-format:latest@sha256:bf8fe9a3eec74b90450335e93b233097c27729f4b1041372e5dd20e6489ded68'
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      # The checkout of a pull request is a merge commit, so HEAD~1 is the base
+      # branch and only the changed lines are checked. The extensions match the
+      # upstream check, so TableGen and JSON files are not checked.
+      - name: C and C++
+        run: git-clang-format --diff --extensions c,h,cpp,hpp,cxx,hxx,inc,cppm,cl HEAD~1 HEAD
+
+      - name: Python
+        run: |
+          files=$(git diff --name-only --diff-filter=d HEAD~1 HEAD -- '*.py')
+          if [ -n "$files" ]; then
+            darker --check --diff -r HEAD~1...HEAD $files
+          fi
