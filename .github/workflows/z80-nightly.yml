@@ -1,4 +1,4 @@
-name: Z80 nightly package
+name: Z80 nightly
 
 on:
   schedule:
@@ -48,7 +48,7 @@ jobs:
           current=$(gh release view nightly --repo "$GITHUB_REPOSITORY" --json body --jq .body 2> /dev/null \
                       | grep -oE '/commit/[0-9a-f]{40}' | head -1 | cut -d/ -f3 || true)
           if [ "$passed" = 0 ]; then
-            echo "::notice::Z80 backend CI has not passed on $GITHUB_SHA, so the nightly is left as it is"
+            echo "::notice::Z80 tests have not passed on $GITHUB_SHA, so the nightly is left as it is"
             build=false
           elif [ "$GITHUB_SHA" = "$current" ] && [ "$FORCE" != true ]; then
             echo "The nightly is already at $GITHUB_SHA"
@@ -160,7 +160,7 @@ jobs:
             echo
             echo "* Linux X64: [xz archive]($url/$PKG.tar.xz) ([signature]($url/$PKG.tar.xz.jsonl))"
             echo
-            echo "This package is replaced once a day by a build of the latest \`main\` commit, if the Z80 backend CI passed on that commit."
+            echo "This package is replaced once a day by a build of the latest \`main\` commit, if the Z80 tests passed on that commit."
             echo
             echo "## Verifying Packages"
             echo

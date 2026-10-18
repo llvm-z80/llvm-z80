@@ -1,0 +1,10 @@
+@LIT_SITE_CFG_IN_HEADER@
+
+config.llvm_tools_dir = lit_config.substitute(path(r"@LLVM_TOOLS_DIR@"))
+config.z80_tools_obj_root = path(r"@Z80_TOOLS_OBJ_ROOT@")
+config.targets_to_build = "@Z80_TEST_TARGETS_TO_BUILD@"
+
+import lit.llvm
+lit.llvm.initialize(lit_config, config)
+
+lit_config.load_config(config, os.path.join(path(r"@Z80_TOOLS_TEST_DIR@"), "lit.cfg.py"))

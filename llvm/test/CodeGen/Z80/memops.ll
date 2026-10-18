@@ -91,7 +91,7 @@ define void @test_memmove_constant_backward() {
 ; pointers are one short of a full length past their bases: 8+15 and 24+15.
 ; Getting either offset wrong, or picking LDIR, corrupts the overlap. The
 ; overlapping copy is executed for real by
-; z80-utils/test-runner/testcases/clang/test_65_block_moves.c.
+; z80-test/e2e/c/block-moves.c.
 ; CHECK:       ld hl,#_memmove_buf+23
 ; CHECK-NEXT:  ld de,#_memmove_buf+39
 ; CHECK-NEXT:  ld bc,#16

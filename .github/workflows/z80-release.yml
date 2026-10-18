@@ -1,4 +1,4 @@
-name: Z80 release packages
+name: Z80 release
 
 on:
   workflow_dispatch:

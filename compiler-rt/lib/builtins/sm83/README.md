@@ -110,4 +110,5 @@ So a symbol gets `.globl` only if it is one of:
    `Output:`, and anything surprising about the algorithm. State register usage
    in terms of the convention above rather than repeating it.
 3. Add the Z80 counterpart in `../z80/` if it applies.
-4. `ninja Z80Runtime` builds it; `z80-utils` exercises it.
+4. `ninja Z80Runtime` builds it, and `ninja check-z80` runs the tests in
+   `z80-test/` against it.

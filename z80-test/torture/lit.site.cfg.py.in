@@ -1,0 +1,15 @@
+@LIT_SITE_CFG_IN_HEADER@
+
+config.llvm_tools_dir = lit_config.substitute(path(r"@LLVM_TOOLS_DIR@"))
+config.targets_to_build = "@Z80_TEST_TARGETS_TO_BUILD@"
+config.z80_torture_obj_root = path(r"@Z80_TORTURE_OBJ_ROOT@")
+config.z80_torture_source_dir = path(r"@Z80_TORTURE_SOURCE_DIR@")
+config.z80_cpu = "@Z80_TORTURE_CPU@"
+config.z80_opt = "@Z80_TORTURE_OPT@"
+config.z80_variant = "@Z80_TORTURE_VARIANT@"
+config.z80_clang_flags = "@Z80_TORTURE_CLANG_FLAGS@"
+
+import lit.llvm
+lit.llvm.initialize(lit_config, config)
+
+lit_config.load_config(config, os.path.join(path(r"@Z80_TORTURE_CONFIG_DIR@"), "lit.cfg.py"))

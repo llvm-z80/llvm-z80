@@ -1,0 +1,37 @@
+## Intel HEX, as sdld writes it. The program is ld de,1 then halt.
+
+# RUN: rm -rf %t && split-file %s %t
+
+# RUN: z80-run --cpu=z80 --expect-result=1 --report=- %t/prog.ihx | FileCheck %s
+# CHECK: {"cpu":"z80","cycles":10,"expected":1,"file":"{{.*}}","pc":3,"result":1,"stop":"halt"}
+
+## Intel HEX names no CPU.
+# RUN: not z80-run --report=- %t/prog.ihx 2>&1 | FileCheck %s --check-prefix=NOCPU
+# NOCPU: z80-run: error: --cpu is required for Intel HEX input
+# NOCPU: {"error":"usage",
+
+# RUN: not z80-run --cpu=z80 --report=- %t/checksum.ihx 2>&1 | FileCheck %s --check-prefix=CHECKSUM
+# CHECKSUM: z80-run: error: {{.*}}: malformed Intel HEX record on line 1
+# CHECKSUM: {"error":"not-z80",
+
+# RUN: not z80-run --cpu=z80 --report=- %t/high.ihx 2>&1 | FileCheck %s --check-prefix=HIGH
+# HIGH: z80-run: error: {{.*}}: the program does not fit in the 64 KB address space
+# HIGH: {"error":"too-large",
+
+## A base near the top of the 32-bit range does not wrap around.
+# RUN: not z80-run --cpu=z80 --report=- %t/wrap.ihx 2>&1 | FileCheck %s --check-prefix=HIGH
+
+#--- prog.ihx
+:040000001101007674
+:00000001FF
+#--- checksum.ihx
+:040000001101007675
+:00000001FF
+#--- high.ihx
+:020000040001F9
+:040000001101007674
+:00000001FF
+#--- wrap.ihx
+:02000004FFFFFC
+:04FFFF001101007676
+:00000001FF

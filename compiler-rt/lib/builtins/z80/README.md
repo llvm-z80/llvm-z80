@@ -97,4 +97,5 @@ So a symbol gets `.globl` only if it is one of:
    in terms of the convention above rather than repeating it.
 3. Add the same function to `../sm83/` if it applies; the two are separate
    implementations because the calling conventions differ.
-4. `ninja Z80Runtime` builds it; `z80-utils` exercises it.
+4. `ninja Z80Runtime` builds it, and `ninja check-z80` runs the tests in
+   `z80-test/` against it.
