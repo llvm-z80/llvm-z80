@@ -29,8 +29,7 @@ SDCC is optional. With `sdasz80` and `sdldz80` (`sdasgb` and `sdldgb` for the
 SM83) on `PATH`, the SDCC-format configurations run, and with `sdcc` itself the
 `sdcc-abi` tests run too. Without them those tests are reported as unsupported.
 
-Each configuration of `z80-e2e` and `z80-torture` has its own directory in the
-build tree, so one configuration or one test can be run on its own:
+One configuration or one test can be run on its own:
 
 ```bash
 build/bin/llvm-lit build/tools/z80-test/e2e/z80-Os-elf
@@ -49,16 +48,16 @@ The configurations of `check-z80` come from these CMake cache variables:
 | `Z80_TORTURE_CPUS` | `z80;sm83` |
 | `Z80_TORTURE_OPT_LEVELS` | `O2;Os` |
 
-`ninja -C build check-z80-all` runs more configurations, all of them with
-`-verify-machineinstrs`: the end-to-end tests at every optimization level with
-every combination of the variants, and the torture tests at every optimization
-level with each variant alone. It takes about 15 minutes on 12 cores.
+`ninja -C build check-z80-all` runs the end-to-end and torture tests at every
+optimization level with the variants below, all of them with
+`-verify-machineinstrs`.
 
 | Variant | Flags |
 |---------|-------|
 | `omit-fp` | `-fomit-frame-pointer` (Z80 only) |
 | `no-static-frames` | `-mllvm -z80-static-frames=false` (`-O1` and above) |
 | `inline-rt` | `-Xclang -target-feature -Xclang +inline-i16-runtime` |
+| `fast-math` | `-ffast-math` (only the f32 tests in `e2e/c`) |
 | `verify` | `-mllvm -verify-machineinstrs` |
 
 ## z80-run
@@ -83,7 +82,7 @@ z80-run [options] <ELF or Intel HEX file>
 
 | Option | Meaning |
 |--------|---------|
-| `--cpu=z80\|sm83` | CPU to emulate. An ELF file names its CPU in its header |
+| `--cpu=z80\|sm83` | CPU to emulate. Defaults to the CPU in the ELF header |
 | `--result=de\|bc\|hl\|<variable>` | where the result is read when the program halts. Defaults to `de` on the Z80 and `bc` on the SM83 |
 | `--expect-result=<value>\|any` | value the result must have. Defaults to 0 |
 | `--max-cycles=<n>` | T-states the program may spend, with an optional `k`, `M`, `G` or `T` suffix. Defaults to `10G` |
@@ -107,8 +106,8 @@ from the CoreMark submodule with that build's Clang and with SDCC.
 
 ## End-to-end tests
 
-A test is a program whose `main` returns a status, usually one bit per check.
-The RUN lines compile it and give z80-run the value it must return:
+The RUN lines of a test compile the program and run it on z80-run with the
+expected result:
 
 ```c
 // RUN: %cc %s -o %t
@@ -124,20 +123,17 @@ The RUN lines compile it and give z80-run the value it must return:
 | `%{sdcc}` | `sdcc` for the configuration's CPU |
 | `%{sdcc-lib}` | SDCC's library for the configuration's CPU |
 
-`UNSUPPORTED:` and `REQUIRES:` can name the CPU (`z80`, `sm83`), the
-optimization level (`O0` to `Oz`), a variant, the format (`elf`, `sdcc`) and
-`sdcc-compiler`.
+The features for `UNSUPPORTED:` and `REQUIRES:` are the CPU (`z80`, `sm83`),
+the optimization level (`O0` to `Oz`), the variants, the format (`elf`, `sdcc`)
+and `sdcc-compiler`.
 
 The tests are in three directories:
 
-* `e2e/c/` holds C programs.
-* `e2e/ir/` holds LLVM IR programs, which run at `O0` to `O3` and not with
-  `omit-fp`.
-* `e2e/sdcc-abi/` holds programs with one half compiled by SDCC, which run only
-  in the SDCC format.
+* `e2e/c/`: C programs.
+* `e2e/ir/`: LLVM IR programs.
+* `e2e/sdcc-abi/`: programs with one half compiled by SDCC.
 
-An `sdcc-abi` test keeps both halves in one file and splits them with
-`split-file`:
+The two halves of an `sdcc-abi` test are in one file, split with `split-file`:
 
 ```c
 // RUN: rm -rf %t && split-file %s %t
@@ -153,9 +149,10 @@ An `sdcc-abi` test keeps both halves in one file and splits them with
 
 ## GCC torture tests
 
-The tests in `vendor/gcc-torture/compile` have to compile. The tests in
-`vendor/gcc-torture/execute` are linked with `torture/crt0/<cpu>.asm` and pass
-when `main` returns 0; `abort()` makes the program return `0xDEAD`.
+A test in `vendor/gcc-torture/compile` passes when it compiles. A test in
+`vendor/gcc-torture/execute` is linked with `torture/crt0/<cpu>.asm` and passes
+when `main` returns 0. A call to `abort()` ends the run with the result
+`0xDEAD`.
 
 `torture/manifest.txt` lists the tests this target cannot pass, with a
 `skip=<reason>` such as `libc` or `int16`, and the failures that are Clang's,
