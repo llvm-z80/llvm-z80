@@ -1,5 +1,6 @@
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0xFFFF %t
+// UNSUPPORTED: fast-math
 
 /* IEEE 754 infinity and NaN edge cases. */
 typedef unsigned char uint8_t;

@@ -30,7 +30,7 @@ LABELS = {
 KINDS = ["z80-torture", "z80-e2e"]
 CPUS = ["z80", "sm83"]
 OPT_LEVELS = ["O0", "O1", "O2", "O3", "Os", "Oz"]
-COMPONENTS = ["omit-fp", "no-static-frames", "inline-rt", "verify"]
+COMPONENTS = ["omit-fp", "no-static-frames", "inline-rt", "fast-math", "verify"]
 COLORS = {"passed": "brightgreen", "failed": "red", "unsupported": "lightgrey"}
 # These keep the output under the 1 MiB of a GitHub job summary.
 MAX_GROUPS = 30

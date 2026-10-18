@@ -1,5 +1,6 @@
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0xFFFF %t
+// UNSUPPORTED: fast-math
 
 /* IEEE 754-2019 minimumNumber and maximumNumber on f32, including the order
    -0 < +0. */

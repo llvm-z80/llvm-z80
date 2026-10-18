@@ -1,5 +1,6 @@
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0xFFFF %t
+// UNSUPPORTED: fast-math
 
 /* Float and int32 conversion edge cases, and mixed float arithmetic. */
 typedef unsigned char uint8_t;
