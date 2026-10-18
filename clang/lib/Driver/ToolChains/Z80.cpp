@@ -132,8 +132,7 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Forward user linker flags (-Wl, -Xlinker).
-  Args.AddAllArgs(CmdArgs, options::OPT_Wl_COMMA);
-  Args.AddAllArgs(CmdArgs, options::OPT_Xlinker);
+  Args.AddAllArgValues(CmdArgs, options::OPT_Wl_COMMA, options::OPT_Xlinker);
 
   const char *Exec = Args.MakeArgString(TC.GetProgramPath(LinkerName));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
@@ -212,8 +211,7 @@ void z80::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Forward user linker flags (-Wl, -Xlinker).
-  Args.AddAllArgs(CmdArgs, options::OPT_Wl_COMMA);
-  Args.AddAllArgs(CmdArgs, options::OPT_Xlinker);
+  Args.AddAllArgValues(CmdArgs, options::OPT_Wl_COMMA, options::OPT_Xlinker);
 
   const char *Exec = Args.MakeArgString(TC.GetProgramPath("ld.lld"));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
