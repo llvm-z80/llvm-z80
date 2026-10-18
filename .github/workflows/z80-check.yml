@@ -69,7 +69,17 @@ jobs:
       - name: Build and run ${{ inputs.target }}
         env:
           TARGET: ${{ inputs.target }}
-        run: LIT_OPTS="-sv" ninja -C build "$TARGET"
+        run: LIT_OPTS="-sv -o $PWD/build/results.json" ninja -C build "$TARGET"
+
+      - name: Write the result tables
+        if: always()
+        continue-on-error: true
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [ -f build/results.json ]; then
+            python3 z80-test/tools/matrix.py --markdown --title "$TARGET" build/results.json >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Summary
         if: always()
