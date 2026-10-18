@@ -206,7 +206,7 @@ set(z80_lit_paths
 # every unit test.
 set(z80_test_depends
   FileCheck count not split-file yaml2obj llvm-config llc opt llvm-mc
-  llvm-objdump llvm-objcopy llvm-readobj llvm-ar)
+  llvm-objdump llvm-objcopy llvm-readobj llvm-readelf llvm-ar)
 if(TARGET z80-run)
   list(APPEND z80_test_depends z80-run)
 endif()
