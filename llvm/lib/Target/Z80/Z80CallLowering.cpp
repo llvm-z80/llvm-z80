@@ -939,6 +939,40 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   return true;
 }
 
+bool Z80CallLoweringCommon::isEligibleForTailCallOptimization(
+    MachineFunction &MF, const CallLoweringInfo &Info,
+    unsigned StackArgBytes) const {
+  if (!Info.IsTailCall)
+    return false;
+
+  // The callee reads stack arguments right after the return address, and our
+  // caller still uses that memory.
+  if (StackArgBytes > 0)
+    return false;
+
+  // Interrupt handlers and callee-cleanup functions do not tail call.
+  const Function &Caller = MF.getFunction();
+  if (Caller.hasFnAttribute("interrupt") ||
+      MF.getInfo<Z80FunctionInfo>()->StackParamBytes > 0)
+    return false;
+
+  // The callee returns straight to our caller, so the callee must return the
+  // same type in the same registers.
+  if (!Caller.getReturnType()->isVoidTy()) {
+    if (Info.OrigRet.Ty != Caller.getReturnType())
+      return false;
+    const CallingConvRegs &CallerRegs = getRegsForCC(Caller.getCallingConv());
+    const CallingConvRegs &CalleeRegs = getRegsForCC(Info.CallConv);
+    if (CallerRegs.Ret_I8 != CalleeRegs.Ret_I8 ||
+        CallerRegs.Ret_I16 != CalleeRegs.Ret_I16 ||
+        CallerRegs.Ret_I32_Hi != CalleeRegs.Ret_I32_Hi ||
+        CallerRegs.Ret_I32_Lo != CalleeRegs.Ret_I32_Lo)
+      return false;
+  }
+
+  return true;
+}
+
 bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                       CallLoweringInfo &Info) const {
   MachineFunction &MF = MIRBuilder.getMF();
