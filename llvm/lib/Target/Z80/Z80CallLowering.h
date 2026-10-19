@@ -49,7 +49,6 @@ struct CallingConvRegs {
 
   // Indirect call
   Register IndirectCallReg; // Z80: IY, SM83: HL
-  unsigned IndirectCallOpc; // Z80: CALL_IY, SM83: CALL_HL
 
   // First-argument register for an i8 argument.  Only __z88dk_fastcall reads
   // it; sdcccall(1) hardcodes the first i8 argument to A, and the stack

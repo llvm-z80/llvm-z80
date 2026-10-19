@@ -33,7 +33,6 @@ SM83CallLowering::SM83CallLowering(const TargetLowering *TL)
                                 /*Ret_I32_Hi=*/Z80::DE,
                                 /*Ret_I32_Lo=*/Z80::BC,
                                 /*IndirectCallReg=*/Z80::HL,
-                                /*IndirectCallOpc=*/Z80::CALL_HL,
                                 /*First_I8=*/Register(),
                                 /*Third_I16=*/Z80::HL,
                                 /*Half_1=*/Z80::E,
@@ -57,5 +56,4 @@ SM83CallLowering::SM83CallLowering(const TargetLowering *TL)
                                 /*Ret_I32_Hi=*/Z80::HL,
                                 /*Ret_I32_Lo=*/Z80::DE,
                                 /*IndirectCallReg=*/Z80::HL,
-                                /*IndirectCallOpc=*/Z80::CALL_HL,
                             }) {}
