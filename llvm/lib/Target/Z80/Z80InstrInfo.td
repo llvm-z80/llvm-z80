@@ -1020,6 +1020,18 @@ let isPseudo = true, isReturn = true, isTerminator = true, isBarrier = true,
 def RET_CLEANUP : Z80Pseudo<(outs), (ins i16imm:$bytes)>;
 }
 
+// Tail calls
+let isCall = true, isReturn = true, isTerminator = true, isBarrier = true,
+    hasSideEffects = true, mayLoad = true, mayStore = true in {
+let Uses = [SP], Defs = [A, BC, DE, HL, IY, FLAGS] in
+def TCRETURN_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                  PseudoInstExpansion<(JP_nn imm16:$dst)>;
+let Uses = [SP, IY], Defs = [A, BC, DE, HL, IY, FLAGS] in
+def TCRETURN_IY : Z80Pseudo<(outs), (ins)>, PseudoInstExpansion<(JP_IYind)>;
+let Uses = [SP, HL], Defs = [A, BC, DE, HL, FLAGS] in
+def TCRETURN_HL : Z80Pseudo<(outs), (ins)>, PseudoInstExpansion<(JP_HLind)>;
+}
+
 // SM83-only instructions and pseudos
 include "SM83InstrInfo.td"
 
