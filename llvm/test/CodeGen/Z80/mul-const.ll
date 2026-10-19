@@ -26,7 +26,7 @@ define i16 @mul257(i16 %x) {
 }
 
 ; CHECK-LABEL: _mul1000:
-; CHECK:       call ___mulhi3
+; CHECK:       jp ___mulhi3
 define i16 @mul1000(i16 %x) {
   %r = mul i16 %x, 1000
   ret i16 %r

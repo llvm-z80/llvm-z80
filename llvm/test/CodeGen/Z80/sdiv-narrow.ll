@@ -7,7 +7,7 @@
 ; -128 / -1 is 128, which no byte holds, so a quotient used at 16 bits stays a
 ; 16-bit division.
 ; CHECK-LABEL: _div16:
-; CHECK:       call ___divhi3
+; CHECK:       jp ___divhi3
 define i16 @div16(i8 %a, i8 %b) {
   %x = sext i8 %a to i16
   %y = sext i8 %b to i16
