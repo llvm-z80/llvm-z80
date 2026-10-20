@@ -180,6 +180,8 @@ class Z80Inst<string asmstr> : Instruction {
   let mayStore = true;
   let hasSideEffects = true;
 
+  let hasNoSchedulingInfo = isPseudo;
+
   let DecoderNamespace = "Z80";
 }
 

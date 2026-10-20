@@ -201,12 +201,13 @@ endforeach()
 
 set(z80_lit_paths
   ${LLVM_MAIN_SRC_DIR}/test/CodeGen/Z80
-  ${LLVM_MAIN_SRC_DIR}/test/MC/Z80)
+  ${LLVM_MAIN_SRC_DIR}/test/MC/Z80
+  ${LLVM_MAIN_SRC_DIR}/test/tools/llvm-mca/Z80)
 # The tools are listed by hand, since the *-test-depends targets also build
 # every unit test.
 set(z80_test_depends
   FileCheck count not split-file yaml2obj llvm-config llc opt llvm-mc
-  llvm-objdump llvm-objcopy llvm-readobj llvm-readelf llvm-ar)
+  llvm-mca llvm-objdump llvm-objcopy llvm-readobj llvm-readelf llvm-ar)
 if(TARGET z80-run)
   list(APPEND z80_test_depends z80-run)
 endif()

@@ -558,6 +558,7 @@ class Z80Pseudo<dag outs, dag ins> : Instruction {
   let hasSideEffects = false;
   let isPseudo = true;
   let isCodeGenOnly = true;
+  let hasNoSchedulingInfo = true;
 }
 
 // The 8-bit ALU with the accumulator as an operand. The real instructions

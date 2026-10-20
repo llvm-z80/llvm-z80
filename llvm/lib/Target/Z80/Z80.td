@@ -21,10 +21,11 @@ include "llvm/TableGen/SearchableTable.td"
 //===---------------------------------------------------------------------===//
 
 include "Z80Features.td"
-include "Z80Devices.td"
 include "Z80RegisterInfo.td"
 include "Z80RegisterBanks.td"
 include "Z80InstrInfo.td"
+include "Z80Schedule.td"
+include "Z80Devices.td"
 include "Z80Combine.td"
 
 def Z80InstrInfoDef : InstrInfo {

@@ -10,19 +10,19 @@
 
 // Every processor allows static frames; a function opts out through the
 // no-static-frame spelling of the target attribute.
-class Proc<string Name, list<SubtargetFeature> Features>
-    : Processor<Name, NoItineraries,
-                !listconcat(Features, [FeatureStaticFrame])>;
+class Proc<string Name, list<SubtargetFeature> Features,
+           SchedMachineModel Model = NoSchedModel>
+    : ProcessorModel<Name, Model, !listconcat(Features, [FeatureStaticFrame])>;
 
 //===---------------------------------------------------------------------===//
 // Standard Z80 Processors
 //===---------------------------------------------------------------------===//
 
 // Original Zilog Z80
-def : Proc<"z80", [FeatureZ80]>;
+def : Proc<"z80", [FeatureZ80], Z80Model>;
 
 // Z80 with undocumented instructions enabled
-def : Proc<"z80-undoc", [FeatureZ80, FeatureUndocumented]>;
+def : Proc<"z80-undoc", [FeatureZ80, FeatureUndocumented], Z80Model>;
 
 //===---------------------------------------------------------------------===//
 // Z180 Series
@@ -51,5 +51,5 @@ def : Proc<"ez80", [FeatureEZ80]>;
 //===---------------------------------------------------------------------===//
 
 // Sharp SM83 (LR35902)
-def : Proc<"sm83", [FeatureSM83]>;
+def : Proc<"sm83", [FeatureSM83], SM83Model>;
 def : ProcessorAlias<"gbz80", "sm83">;
