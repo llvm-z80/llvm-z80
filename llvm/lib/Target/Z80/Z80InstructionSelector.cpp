@@ -1030,30 +1030,16 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         RBI.constrainGenericRegister(DstReg, *RC, MRI);
         // Don't fail here - let register allocator handle it
       }
-      // Both virtual: propagate register class from whichever side has one,
-      // or assign a default class based on the LLT type.
-      // NOTE: Cross-size COPYs (s16→s8, s8→s16) should have been converted
-      // to G_TRUNC/G_ANYEXT by the post-legalization combiner. If any remain,
-      // they will fail here — that's intentional to surface the bug early.
+      // If source and destination are both virtual, each side without a class
+      // takes the default class for its own type.
       else if (DstReg.isVirtual() && SrcReg.isVirtual()) {
-        const TargetRegisterClass *DstRC = MRI.getRegClassOrNull(DstReg);
-        const TargetRegisterClass *SrcRC = MRI.getRegClassOrNull(SrcReg);
-        if (DstRC && !SrcRC)
-          RBI.constrainGenericRegister(SrcReg, *DstRC, MRI);
-        else if (SrcRC && !DstRC)
-          RBI.constrainGenericRegister(DstReg, *SrcRC, MRI);
-        else if (!DstRC && !SrcRC) {
-          // Neither has a class — assign based on LLT type
-          LLT Ty = MRI.getType(DstReg);
-          if (!Ty.isValid())
-            Ty = MRI.getType(SrcReg);
-          if (Ty.isValid()) {
-            const TargetRegisterClass *RC = Ty.getSizeInBits() <= 8
-                                                ? &Z80::GR8RegClass
-                                                : &Z80::GR16RegClass;
-            RBI.constrainGenericRegister(DstReg, *RC, MRI);
-            RBI.constrainGenericRegister(SrcReg, *RC, MRI);
-          }
+        for (Register Reg : {DstReg, SrcReg}) {
+          if (MRI.getRegClassOrNull(Reg))
+            continue;
+          const TargetRegisterClass *RC = MRI.getType(Reg).getSizeInBits() <= 8
+                                              ? &Z80::GR8RegClass
+                                              : &Z80::GR16RegClass;
+          RBI.constrainGenericRegister(Reg, *RC, MRI);
         }
         return true;
       }
