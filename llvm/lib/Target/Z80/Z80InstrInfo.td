@@ -332,10 +332,12 @@ def LD_IXd_r : LDIdxdr<"ld", 0xDD, "ix">;
 def LD_IYd_r : LDIdxdr<"ld", 0xFD, "iy">;
 }
 
-// A DD or FD prefix in front of HALT does nothing, and naming the pair keeps
-// it out of the three-byte indexed patterns it would otherwise sit inside.
+// A DD or FD prefix in front of HALT does nothing, so the disassembler decodes
+// the pair as HALT and not as an indexed load.
+let AsmVariantName = "NonParsable" in {
 def HALT_DD : InstDD8<"halt", 0x76>;
 def HALT_FD : InstFD8<"halt", 0x76>;
+}
 
 //===----------------------------------------------------------------------===//
 // Indexed addressing: LD (IX+d),n / LD (IY+d),n - Store immediate to indexed
