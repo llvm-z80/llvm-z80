@@ -18,6 +18,7 @@
 #include "Z80Subtarget.h"
 
 #include "llvm/CodeGen/LivePhysRegs.h"
+#include "llvm/CodeGen/LiveRegUnits.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -26,6 +27,7 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOutliner.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetSchedule.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -522,6 +524,155 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   default:
     return TargetInstrInfo::getSPAdjust(MI);
   }
+}
+
+using InstrSeq = SmallVector<MachineInstr *, 8>;
+
+/// Return the cheapest of \p Candidates and delete the other candidates. Under
+/// optsize the cheapest has the fewest bytes and then the fewest cycles, and
+/// otherwise the fewest cycles and then the fewest bytes. When two candidates
+/// cost the same, the candidate listed first is returned.
+static InstrSeq takeCheapest(MachineFunction &MF,
+                             MutableArrayRef<InstrSeq> Candidates) {
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  TargetSchedModel SchedModel;
+  SchedModel.init(&MF.getSubtarget());
+  bool OptSize = MF.getFunction().hasOptSize();
+  auto Cost = [&](const InstrSeq &Candidate) {
+    unsigned Bytes = 0, Cycles = 0;
+    for (const MachineInstr *MI : Candidate) {
+      Bytes += TII.getInstSizeInBytes(*MI);
+      Cycles += SchedModel.computeInstrLatency(MI);
+    }
+    return OptSize ? std::pair(Bytes, Cycles) : std::pair(Cycles, Bytes);
+  };
+
+  InstrSeq *Best = &Candidates.front();
+  std::pair<unsigned, unsigned> BestCost = Cost(*Best);
+  for (InstrSeq &Candidate : Candidates.drop_front()) {
+    std::pair<unsigned, unsigned> CandidateCost = Cost(Candidate);
+    if (CandidateCost < BestCost) {
+      Best = &Candidate;
+      BestCost = CandidateCost;
+    }
+  }
+  for (InstrSeq &Candidate : Candidates)
+    if (&Candidate != Best)
+      for (MachineInstr *MI : Candidate)
+        MF.deleteMachineInstr(MI);
+  return std::move(*Best);
+}
+
+/// Build the cheapest sequence that raises SP by \p Amount and writes no
+/// register \p Live holds.
+static InstrSeq buildStackRelease(MachineFunction &MF, const DebugLoc &DL,
+                                  unsigned Amount, const LiveRegUnits &Live) {
+  const auto &STI = MF.getSubtarget<Z80Subtarget>();
+  const Z80InstrInfo &TII = *STI.getInstrInfo();
+  bool IsSM83 = STI.hasSM83();
+  auto Append = [&](InstrSeq &Seq, unsigned Opc,
+                    MCRegister Dst = MCRegister()) {
+    MachineInstrBuilder MIB = Dst ? BuildMI(MF, DL, TII.get(Opc), Dst)
+                                  : BuildMI(MF, DL, TII.get(Opc));
+    Seq.push_back(MIB);
+    return MIB;
+  };
+
+  MCRegister FreePair;
+  for (MCRegister Pair : {Z80::AF, Z80::BC, Z80::DE, Z80::HL})
+    if (Live.available(Pair)) {
+      FreePair = Pair;
+      break;
+    }
+  // POP of a free pair for every two bytes, INC SP for an odd byte
+  auto AppendSteps = [&](InstrSeq &Seq, unsigned Bytes) {
+    for (; FreePair && Bytes >= 2; Bytes -= 2)
+      Append(Seq, Z80::getPopOpcode(FreePair));
+    for (; Bytes; --Bytes)
+      Append(Seq, Z80::INC_SP);
+  };
+  // LD HL,Amount; ADD HL,SP; LD SP,HL
+  auto AppendThroughHL = [&](InstrSeq &Seq) {
+    Append(Seq, Z80::LD_rr_nn, Z80::HL).addImm(Amount);
+    Append(Seq, Z80::ADD_HL_SP);
+    Append(Seq, Z80::LD_SP_HL);
+  };
+
+  SmallVector<InstrSeq, 4> Candidates;
+
+  // POP and INC SP
+  AppendSteps(Candidates.emplace_back(), Amount);
+
+  if (Live.available(Z80::HL)) {
+    AppendThroughHL(Candidates.emplace_back());
+  } else if (Live.available(Z80::BC)) {
+    // LD C,L; LD B,H; LD HL,Amount; ADD HL,SP; LD SP,HL; LD L,C; LD H,B
+    // H and L are copied only when live.
+    InstrSeq &Seq = Candidates.emplace_back();
+    for (auto [Hold, Half] : {std::pair(Z80::C, Z80::L), {Z80::B, Z80::H}})
+      if (!Live.available(Half))
+        Append(Seq, Z80::LD_r_r, Hold).addReg(Half);
+    AppendThroughHL(Seq);
+    for (auto [Hold, Half] : {std::pair(Z80::C, Z80::L), {Z80::B, Z80::H}})
+      if (!Live.available(Half))
+        Append(Seq, Z80::LD_r_r, Half).addReg(Hold);
+  }
+
+  if (IsSM83) {
+    // ADD SP,e moves at most 127 bytes.
+    unsigned Adds = Amount / 127, Rest = Amount % 127;
+    auto AppendAdds = [&](InstrSeq &Seq) {
+      for (unsigned N = 0; N < Adds; ++N)
+        Append(Seq, Z80::ADD_SP_e).addImm(127);
+    };
+
+    // ADD SP,127 ...; ADD SP,Rest
+    {
+      InstrSeq &Seq = Candidates.emplace_back();
+      AppendAdds(Seq);
+      if (Rest)
+        Append(Seq, Z80::ADD_SP_e).addImm(Rest);
+    }
+
+    // ADD SP,127 ..., then POP and INC SP for the rest
+    if (Adds && Rest) {
+      InstrSeq &Seq = Candidates.emplace_back();
+      AppendAdds(Seq);
+      AppendSteps(Seq, Rest);
+    }
+  } else {
+    // EX DE,HL; LD HL,Amount; ADD HL,SP; LD SP,HL; EX DE,HL
+    if (!Live.available(Z80::HL) && Live.available(Z80::DE)) {
+      InstrSeq &Seq = Candidates.emplace_back();
+      Append(Seq, Z80::EX_DE_HL)
+          ->findRegisterUseOperand(Z80::DE, STI.getRegisterInfo())
+          ->setIsUndef();
+      AppendThroughHL(Seq);
+      Append(Seq, Z80::EX_DE_HL);
+    }
+
+    // LD IY,Amount; ADD IY,SP; LD SP,IY
+    if (Live.available(Z80::IY)) {
+      InstrSeq &Seq = Candidates.emplace_back();
+      Append(Seq, Z80::LD_IY_nn).addImm(Amount);
+      Append(Seq, Z80::ADD_IY_SP);
+      Append(Seq, Z80::LD_SP_IY);
+    }
+  }
+
+  return takeCheapest(MF, Candidates);
+}
+
+void Z80InstrInfo::releaseStack(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator I,
+                                const DebugLoc &DL, unsigned Amount) const {
+  LiveRegUnits Live(*STI->getRegisterInfo());
+  Live.addLiveOuts(MBB);
+  for (MachineInstr &MI : reverse(make_range(I, MBB.end())))
+    if (!MI.isDebugInstr())
+      Live.stepBackward(MI);
+  for (MachineInstr *MI : buildStackRelease(*MBB.getParent(), DL, Amount, Live))
+    MBB.insert(I, MI);
 }
 
 // A frame slot access says whether it is volatile in its memory operand, and
@@ -1709,8 +1860,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   // SM83 expansions are larger due to lacking ADC HL,HL / SBC HL,DE / EX DE,HL
   // / DJNZ and requiring byte-wise emulation + PUSH/POP AF for counter.
   {
-    const auto &STI = MI.getParent()->getParent()->getSubtarget<Z80Subtarget>();
-    bool IsSM83 = STI.hasSM83();
+    bool IsSM83 = STI->hasSM83();
     // clang-format off
     switch (Opcode) {
     case Z80::MUL16:  return IsSM83 ? 24 : 20;
@@ -1744,7 +1894,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
       unsigned Amount = MI.getOperand(0).getImm();
       if (Amount == 0)
         return 1;
-      bool ReadsHL = MI.readsRegister(Z80::HL, STI.getRegisterInfo());
+      bool ReadsHL = MI.readsRegister(Z80::HL, STI->getRegisterInfo());
       if (IsSM83)
         return (ReadsHL ? 3 : 2) + 2 * ((Amount + 126) / 127);
       if (Amount <= 8)

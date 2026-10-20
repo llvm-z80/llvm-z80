@@ -627,6 +627,11 @@ public:
 
   int getSPAdjust(const MachineInstr &MI) const override;
 
+  /// Raise SP by \p Amount in front of \p I with the cheapest sequence that
+  /// writes no register live at \p I.
+  void releaseStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                    const DebugLoc &DL, unsigned Amount) const;
+
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
                                       ArrayRef<unsigned> Ops, int FrameIndex,
                                       MachineInstr *&CopyMI,

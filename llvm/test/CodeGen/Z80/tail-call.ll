@@ -35,10 +35,9 @@ define i16 @args(i16 %a, i16 %b) {
 ; CHECK-LABEL: _frame:
 ; Z80:         ld e,l
 ; Z80-NEXT:    ld d,h
-; Z80-NEXT:    pop af
-; Z80-NEXT:    pop af
-; Z80-NEXT:    pop af
-; Z80-NEXT:    pop af
+; Z80-NEXT:    ld iy,8
+; Z80-NEXT:    add iy,sp
+; Z80-NEXT:    ld sp,iy
 ; SM83:        add sp,8
 ; CHECK-NEXT:  jp _g
 define i16 @frame(i16 %a) {
