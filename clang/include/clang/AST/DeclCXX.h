@@ -257,6 +257,7 @@ public:
 /// Represents a C++ struct/union/class.
 class CXXRecordDecl : public RecordDecl {
   friend class ASTDeclMerger;
+  friend class ASTDeclUnmerger;
   friend class ASTDeclReader;
   friend class ASTDeclWriter;
   friend class ASTNodeImporter;
@@ -691,6 +692,10 @@ public:
   bool hasFriends() const {
     return data().FirstFriend.isValid();
   }
+
+  bool hasLazyFriends() const { return data().FirstFriend.isOffset(); }
+
+  void loadLazyFriends();
 
   /// \c true if a defaulted copy constructor for this class would be
   /// deleted.

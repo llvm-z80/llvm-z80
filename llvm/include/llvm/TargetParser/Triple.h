@@ -275,7 +275,9 @@ public:
     AMDGPUSubArch13,
     AMDGPUSubArch1310,
     FirstAMDGPUSubArch = AMDGPUSubArch6,
-    LastAMDGPUSubArch = AMDGPUSubArch1310
+    LastAMDGPUSubArch = AMDGPUSubArch1310,
+
+    AArch64SubArch_arm64e_x1
   };
   enum VendorType {
     UnknownVendor,
@@ -1219,6 +1221,11 @@ public:
   bool isArm64e() const {
     return getArch() == Triple::aarch64 &&
            getSubArch() == Triple::AArch64SubArch_arm64e;
+  }
+
+  bool isArm64e_x1() const {
+    return getArch() == Triple::aarch64 &&
+           getSubArch() == Triple::AArch64SubArch_arm64e_x1;
   }
 
   // Tests whether the target is N32.
