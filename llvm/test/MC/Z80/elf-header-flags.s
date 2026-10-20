@@ -4,7 +4,8 @@
 ; RUN: llvm-mc -triple=z80 -mcpu=r800 -filetype=obj %s -o - | llvm-readelf -h - | FileCheck %s --check-prefix=R800
 ; RUN: llvm-mc -triple=z80 -mcpu=ez80 -filetype=obj %s -o - | llvm-readelf -h - | FileCheck %s --check-prefix=EZ80
 ; RUN: llvm-mc -triple=sm83 -filetype=obj %s -o - | llvm-readelf -h - | FileCheck %s --check-prefix=SM83
-; RUN: llvm-mc -triple=sm83 -mcpu=gameboy -filetype=obj %s -o - | llvm-readobj -h - | FileCheck %s --check-prefix=SM83-LLVM
+; RUN: llvm-mc -triple=z80 -mcpu=gbz80 -filetype=obj %s -o - | llvm-readelf -h - | FileCheck %s --check-prefix=SM83
+; RUN: llvm-mc -triple=sm83 -filetype=obj %s -o - | llvm-readobj -h - | FileCheck %s --check-prefix=SM83-LLVM
 
 ; The machine number and the CPU values in e_flags are the ones GNU binutils
 ; uses for Z80 ELF files.
