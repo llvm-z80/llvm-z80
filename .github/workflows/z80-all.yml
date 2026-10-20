@@ -1,0 +1,19 @@
+name: Z80 all tests
+
+on:
+  schedule:
+    - cron: "0 21 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: z80-all-${{ github.ref }}
+
+jobs:
+  check:
+    uses: ./.github/workflows/z80-check.yml
+    with:
+      target: check-z80-all
+      timeout-minutes: 360

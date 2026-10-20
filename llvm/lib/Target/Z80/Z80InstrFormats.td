@@ -118,10 +118,11 @@ class addr16at<int offset> : Operand<i32> {
 def addr16 : addr16at<1>;
 def addr16at2 : addr16at<2>;
 
-/// 8-bit signed immediate operand (for SM83 ADD SP,e / LDHL SP,e)
+/// 8-bit signed immediate operand (for SM83 ADD SP,e / LDHL SP,e). A symbol
+/// operand gets the signed displacement relocation.
 class simm8at<int offset> : Operand<i32> {
-  let ParserMatchClass = ImmediateAsmOperand<"Imm8">;
-  let EncoderMethod = "encodeImm<Z80::Imm8, " # offset # ">";
+  let ParserMatchClass = ImmediateAsmOperand<"Disp8">;
+  let EncoderMethod = "encodeImm<Z80::Disp8, " # offset # ">";
   let DecoderMethod = "decodeSImmOperand<8>";
   let OperandType = "OPERAND_IMM8";
   let OperandNamespace = "Z80Op";
@@ -178,6 +179,8 @@ class Z80Inst<string asmstr> : Instruction {
   let mayLoad = true;
   let mayStore = true;
   let hasSideEffects = true;
+
+  let hasNoSchedulingInfo = isPseudo;
 
   let DecoderNamespace = "Z80";
 }
@@ -429,6 +432,7 @@ class LDrIdxd<string mnemonic, bits<8> prefix, string idx>
   let InOperandList = (ins disp8:$imm);
   let mayLoad = 1;
   let mayStore = 0;
+  let Uses = !if(!eq(idx, "ix"), [IX], [IY]);
   let hasSideEffects = 0;
 }
 
@@ -447,6 +451,7 @@ class LDIdxdr<string mnemonic, bits<8> prefix, string idx>
   let InOperandList = (ins disp8:$imm, GR8:$src);
   let mayLoad = 0;
   let mayStore = 1;
+  let Uses = !if(!eq(idx, "ix"), [IX], [IY]);
   let hasSideEffects = 0;
 }
 

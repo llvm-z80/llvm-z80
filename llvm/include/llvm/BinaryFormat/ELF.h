@@ -318,6 +318,7 @@ enum {
   EM_COOL = 217,          // iCelero CoolEngine
   EM_NORC = 218,          // Nanoradio Optimized RISC
   EM_CSR_KALIMBA = 219,   // CSR Kalimba architecture family
+  EM_Z80 = 220,           // Zilog Z80 and variants
   EM_AMDGPU = 224,        // AMD GPU architecture
   EM_RISCV = 243,         // RISC-V
   EM_LANAI = 244,         // Lanai 32-bit processor
@@ -325,7 +326,6 @@ enum {
   EM_VE = 251,            // NEC SX-Aurora VE
   EM_CSKY = 252,          // C-SKY 32-bit processor
   EM_LOONGARCH = 258,     // LoongArch
-  EM_Z80 = 8080,          // Zilog Z80 and variants
 };
 
 // Object file classes.
@@ -524,12 +524,17 @@ enum {
   STO_Z80_STRONG_REF = 0x40  // Strongly referenced symbol
 };
 
-// Z80 ELF flags
+// Z80 ELF flags. The low byte names a single CPU, with the same values as GNU
+// binutils.
 enum : unsigned {
-  EF_Z80_ARCH_Z80 = 0x00000001,     // Standard Z80 instruction set
-  EF_Z80_ARCH_Z180 = 0x00000002,    // Z180 extensions
-  EF_Z80_ARCH_EZ80 = 0x00000004,    // eZ80 24-bit extensions
-  EF_Z80_ARCH_R800 = 0x00000008,    // R800 (MSX TurboR) extensions
+  EF_Z80_MACH_Z80 = 0x01,
+  EF_Z80_MACH_Z180 = 0x02,
+  EF_Z80_MACH_R800 = 0x03,
+  EF_Z80_MACH_EZ80_Z80 = 0x04,
+  EF_Z80_MACH_SM83 = 0x05,
+  EF_Z80_MACH_Z80N = 0x06,
+  EF_Z80_MACH_EZ80_ADL = 0x84,
+  EF_Z80_MACH_MSK = 0xff,
 };
 
 // ELF Relocation types for AVR

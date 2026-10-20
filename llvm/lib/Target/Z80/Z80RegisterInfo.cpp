@@ -104,6 +104,11 @@ Z80RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
   return Z80_CSR_RegMask;
 }
 
+const TargetRegisterClass *
+Z80RegisterInfo::getPointerRegClass(unsigned Kind) const {
+  return &Z80::GR16RegClass;
+}
+
 BitVector Z80RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
@@ -154,10 +159,10 @@ BitVector Z80RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 const TargetRegisterClass *
 Z80RegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
                                            const MachineFunction &) const {
-  if (RC->hasSuperClass(&Z80::Anyi8RegClass))
-    return &Z80::Anyi8RegClass;
-  if (RC->hasSuperClass(&Z80::Anyi16RegClass))
-    return &Z80::Anyi16RegClass;
+  if (RC->hasSuperClass(&Z80::GR8RegClass))
+    return &Z80::GR8RegClass;
+  if (RC->hasSuperClass(&Z80::Any16RegClass))
+    return &Z80::Any16RegClass;
   return RC;
 }
 
@@ -647,7 +652,7 @@ static void emitSPRelativeAddr(MachineBasicBlock &MBB,
     if (PreserveFlags)
       emitFlagSavePush(MBB, InsertBefore, DL, TII);
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::LDHL_SP_e))
-        .addImm(AdjOffset & 0xFF);
+        .addImm(AdjOffset);
     if (PreserveFlags)
       BuildMI(MBB, InsertBefore, DL, TII.get(Z80::POP_AF));
     return;

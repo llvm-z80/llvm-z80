@@ -48,12 +48,7 @@ static void emitLittleEndian(uint64_t Val, unsigned Size,
 
 static void addFixup(SmallVectorImpl<MCFixup> &Fixups, uint32_t Offset,
                      const MCExpr *Value, uint16_t Kind) {
-  bool PCRel = false;
-  switch (Kind) {
-  case Z80::PCRel8:
-  case Z80::PCRel16:
-    PCRel = true;
-  }
+  bool PCRel = Kind == Z80::PCRel8;
   Fixups.push_back(MCFixup::create(Offset, Value, Kind, PCRel));
 }
 

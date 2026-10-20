@@ -41,6 +41,9 @@ class Z80MCAsmInfoSDCC : public MCAsmInfo {
 public:
   explicit Z80MCAsmInfoSDCC(const Triple &TT, const MCTargetOptions &Options);
 
+  /// Returns the sdasz80 area of an ELF section, or "" if it has none.
+  static StringRef getAreaName(StringRef Name);
+
   unsigned getMaxInstLength(const MCSubtargetInfo *STI) const override;
 
   void printSwitchToSection(const MCSection &Section, uint32_t Subsection,

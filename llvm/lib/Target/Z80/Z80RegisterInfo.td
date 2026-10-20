@@ -30,14 +30,6 @@ def sub_lo : Z80SubRegIndex<8>;
 // High byte of a 16-bit register pair
 def sub_hi : Z80SubRegIndex<8, 8>;
 
-// Flag bits
-def sub_c : Z80SubRegIndex<1>;      // Carry (bit 0)
-def sub_n : Z80SubRegIndex<1>;      // Add/Subtract (bit 1)
-def sub_pv : Z80SubRegIndex<1>;     // Parity/Overflow (bit 2)
-def sub_h : Z80SubRegIndex<1>;      // Half-carry (bit 4)
-def sub_z : Z80SubRegIndex<1>;      // Zero (bit 6)
-def sub_s : Z80SubRegIndex<1>;      // Sign (bit 7)
-
 //===----------------------------------------------------------------------===//
 //  Register definitions
 //===----------------------------------------------------------------------===//
@@ -129,15 +121,8 @@ def DEp : Z80RegPair<42, "alt_de", Ep, Dp>;
 def HLp : Z80RegPair<43, "alt_hl", Lp, Hp>;
 
 //===----------------------------------------------------------------------===//
-//  Flag pseudo-registers (for instruction patterns)
+//  Flags pseudo-register
 //===----------------------------------------------------------------------===//
-
-def CF : Z80Reg<50, "cf">;   // Carry flag
-def NF : Z80Reg<51, "nf">;   // Add/Subtract flag
-def PVF : Z80Reg<52, "pvf">; // Parity/Overflow flag
-def HF : Z80Reg<53, "hf">;   // Half-carry flag
-def ZF : Z80Reg<54, "zf">;   // Zero flag
-def SF : Z80Reg<55, "sf">;   // Sign flag
 
 // Standalone FLAGS register for dependency tracking by RA/scheduler.
 // NOT a sub-register of AF to avoid implicit-def $af issues
@@ -151,9 +136,6 @@ def FLAGS : Z80Reg<56, "flags">;
 class Z80RegClass<list<ValueType> regTypes, int alignment, dag regList>
      : RegisterClass<"Z80", regTypes, alignment, regList>;
 
-class Z80Reg1Class<dag RegList>: Z80RegClass<[i1], 8, RegList> {
-  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<1, 8, 8>]>;
-}
 class Z80Reg8Class<dag RegList>: Z80RegClass<[i8], 8, RegList>;
 class Z80Reg16Class<dag RegList>: Z80RegClass<[i16], 8, RegList>;
 
@@ -181,45 +163,32 @@ def Ac : Z80Reg8Class<(add A)> {
 // General 16-bit registers: BC, DE, HL
 def GR16 : Z80Reg16Class<(add BC, DE, HL)>;
 
-// BC and DE only (for register scavenging temp in address computation)
+// BC and DE, for a pair used alongside HL
 def GR16_BCDE : Z80Reg16Class<(add BC, DE)>;
-
-// 16-bit registers for PUSH/POP: BC, DE, HL, AF
-def GR16_AF : Z80Reg16Class<(add BC, DE, HL, AF)>;
-
-// 16-bit registers for ADD HL,rr: BC, DE, HL, SP
-def GR16_SP : Z80Reg16Class<(add BC, DE, HL, SP)>;
-
-// 16-bit registers including SP (for LD rr,nn etc)
-def GR16_All : Z80Reg16Class<(add BC, DE, HL, SP)>;
 
 // Index registers only
 def IR16 : Z80Reg16Class<(add IX, IY)>;
 
-// HL or index register (for indirect addressing)
+// HL, IX and IY, the pairs SP is copied to and from
 def HLI : Z80Reg16Class<(add HL, IX, IY)>;
 
-// Pointer registers (can hold addresses)
-def Ptr16 : Z80Reg16Class<(add BC, DE, HL, IX, IY, SP)>;
+// Every pair a 16-bit value can be kept in.
+// We leave SP out here because, with SP in this class, a copy to or from SP
+// could be folded into a spill of SP, and SP cannot be spilled.
+def Any16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;
 
 // Stack pointer only
 def SPc : Z80Reg16Class<(add SP)>;
 
-// All 16-bit registers for PUSH/POP with indices
-def Push16 : Z80Reg16Class<(add BC, DE, HL, AF, IX, IY)>;
+// AF alone. Interrupts save AF, and inline asm can name AF.
+def AFc : Z80Reg16Class<(add AF)>;
 
 //===----------------------------------------------------------------------===//
 //  Flag register classes
 //===----------------------------------------------------------------------===//
 
+// F alone. Inline asm can name F.
 def Fc : Z80Reg8Class<(add F)>;
-
-let isAllocatable = false in {
-  def Flags : Z80Reg1Class<(add CF, NF, PVF, HF, ZF, SF)>;
-}
-
-// Carry flag class (for ADC, SBC, etc)
-def Cc : Z80Reg1Class<(add CF)>;
 
 // Condition code register class for FLAGS dependency tracking.
 // Non-allocatable, CopyCost=-1 prevents copying (like ARM's CCR for CPSR).
@@ -227,27 +196,3 @@ def CCR : RegisterClass<"Z80", [i8], 8, (add FLAGS)> {
   let CopyCost = -1;
   let isAllocatable = 0;
 }
-
-//===----------------------------------------------------------------------===//
-//  Combined register classes
-//===----------------------------------------------------------------------===//
-
-// All 8-bit storage locations
-def Anyi8 : Z80Reg8Class<(add GR8)>;
-
-// All 16-bit storage locations. SP holds the stack, not a value: it is
-// reserved, so no value is allocated to it, and leaving it out keeps a copy
-// to or from SP from being folded into a spill slot access, which has no
-// form for SP.
-def Anyi16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;
-
-//===----------------------------------------------------------------------===//
-//  Fake registers for multi-word values
-//===----------------------------------------------------------------------===//
-
-def Fake : Z80Reg<100, "fake">;
-let isAllocatable = false in {
-  def Fakei32 : Z80RegClass<[i32], 8, (add Fake)>;
-  def Fakei64 : Z80RegClass<[i64], 8, (add Fake)>;
-}
-

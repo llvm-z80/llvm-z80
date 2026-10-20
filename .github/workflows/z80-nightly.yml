@@ -1,0 +1,187 @@
+name: Z80 nightly
+
+on:
+  schedule:
+    - cron: "0 20 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild even if the nightly already has this commit"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: z80-nightly
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PKG: LLVM-Z80-nightly-Linux-X64
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    name: Check commit
+    if: github.repository == 'llvm-z80/llvm-z80' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          # The attestation records the run's commit, so only that one is built.
+          passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/z80-ci.yml/runs?branch=main&event=push&status=success&head_sha=$GITHUB_SHA&per_page=1" \
+                     --jq .total_count)
+          current=$(gh release view nightly --repo "$GITHUB_REPOSITORY" --json body --jq .body 2> /dev/null \
+                      | grep -oE '/commit/[0-9a-f]{40}' | head -1 | cut -d/ -f3 || true)
+          if [ "$passed" = 0 ]; then
+            echo "::notice::Z80 tests have not passed on $GITHUB_SHA, so the nightly is left as it is"
+            build=false
+          elif [ "$GITHUB_SHA" = "$current" ] && [ "$FORCE" != true ]; then
+            echo "The nightly is already at $GITHUB_SHA"
+            build=false
+          else
+            build=true
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build Linux-X64
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build clang lld
+
+      - name: Install SDCC
+        env:
+          SDCC: sdcc-4.6.0
+        run: |
+          cd "$RUNNER_TEMP"
+          url=https://github.com/llvm-z80/sdcc/releases/download/$SDCC
+          curl -fsSL --retry 5 -O "$url/$SDCC-x86_64-linux.tar.xz" -O "$url/sha256sums.txt"
+          grep "  $SDCC-x86_64-linux.tar.xz\$" sha256sums.txt | sha256sum -c -
+          tar -xf "$SDCC-x86_64-linux.tar.xz"
+          echo "$RUNNER_TEMP/$SDCC/bin" >> "$GITHUB_PATH"
+
+      # Shares the release build's cache, so each run keeps it warm.
+      - uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
+        with:
+          key: z80-release-Linux-X64
+          max-size: 1500M
+
+      - name: Configure and build
+        run: |
+          cmake -G Ninja -S llvm -B build \
+            -C clang/cmake/caches/Z80Release.cmake \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLLVM_PARALLEL_LINK_JOBS=2 \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DLLVM_USE_LINKER=lld
+          ninja -C build
+
+      - name: Install, smoke test and package
+        run: |
+          cmake --install build --prefix "$PKG" --strip
+          for arch in z80 sm83; do
+            if [ ! -f "$PKG/lib/$arch/${arch}_rt.lib" ]; then
+              echo "::error::$PKG has no SDCC-format $arch runtime"
+              exit 1
+            fi
+          done
+          printf 'int main(void) { return 0; }\n' > smoke.c
+          for target in z80 sm83; do
+            "$PKG/bin/clang" --target=$target -O1 smoke.c -o smoke-$target.elf
+          done
+          XZ_OPT=-T0 tar -cJf "$PKG.tar.xz" "$PKG"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nightly
+          path: ${{ env.PKG }}.tar.xz
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: nightly
+
+      - uses: actions/attest@v4
+        id: attest
+        with:
+          subject-path: ${{ env.PKG }}.tar.xz
+
+      - name: Save the attestation next to the package
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: jq -c . "$BUNDLE" > "$PKG.tar.xz.jsonl"
+
+      - name: Update the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo=$GITHUB_REPOSITORY
+          url="$GITHUB_SERVER_URL/$repo/releases/download/nightly"
+          {
+            echo "## LLVM-Z80 Nightly"
+            echo
+            echo "Built from \`main\` at $GITHUB_SERVER_URL/$repo/commit/$GITHUB_SHA on $(date -u +%Y-%m-%d)."
+            echo
+            echo "* Linux X64: [xz archive]($url/$PKG.tar.xz) ([signature]($url/$PKG.tar.xz.jsonl))"
+            echo
+            echo "This package is replaced once a day by a build of the latest \`main\` commit, if the Z80 tests passed on that commit."
+            echo
+            echo "## Verifying Packages"
+            echo
+            echo "Verify a package and its \`.jsonl\` attestation with [gh](https://cli.github.com/manual/gh_attestation_verify):"
+            echo '```'
+            echo "gh attestation verify --repo $repo <package>"
+            echo "gh attestation verify --repo $repo <package> --bundle <package>.jsonl"
+            echo '```'
+          } > notes.md
+
+          if ! gh release view nightly --repo "$repo" > /dev/null 2>&1; then
+            gh release create nightly "$PKG.tar.xz" "$PKG.tar.xz.jsonl" \
+              --repo "$repo" \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --title "LLVM-Z80 Nightly" \
+              --notes-file notes.md
+            exit 0
+          fi
+
+          # prepare reads the built commit from the body, so it goes last.
+          gh release upload nightly "$PKG.tar.xz" "$PKG.tar.xz.jsonl" --repo "$repo" --clobber
+          gh api -X PATCH "repos/$repo/git/refs/tags/nightly" -f sha="$GITHUB_SHA" > /dev/null
+          gh release edit nightly --repo "$repo" --notes-file notes.md

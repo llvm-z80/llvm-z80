@@ -45,7 +45,7 @@ Z80AsmBackend::createObjectTargetWriter() const {
 // MC measures a fixup to the byte it patches; a JR displacement is measured
 // from the end of the instruction and an SM83 LDH offset from 0xFF00. The
 // relaxation decision and the encoding both start here so they cannot drift
-// apart. lld::Z80::relocate makes the same adjustments.
+// apart.
 static uint64_t encodedValue(const MCFixup &Fixup, uint64_t Value) {
   if (Fixup.isPCRel())
     Value -= 1;
@@ -85,10 +85,7 @@ MCFixupKindInfo Z80AsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"Addr24_Segment", 0, 16, 0},
       {"Addr24_Segment_Low", 0, 8, 0},
       {"Addr24_Segment_High", 0, 8, 0},
-      {"Addr13", 0, 13, 0},
       {"PCRel8", 0, 8, 0},
-      {"PCRel16", 0, 16, 0},
-      {"AddrAsciz", 0, 16, 0},
       {"Disp8", 0, 8, 0}, // 8-bit signed displacement for indexed addressing
       {"LDH8", 0, 8, 0},  // SM83 LDH operand: 8-bit offset from 0xFF00
   };
@@ -111,8 +108,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   // A resolved fixup is encoded directly and emits no relocation, so the
   // linker's range checks never see it; an out-of-range value would be
   // silently truncated (an LDH to a symbol outside 0xFF00-0xFFFF would
-  // quietly poke a different hardware register). Refuse loudly instead,
-  // mirroring the checks lld applies to the unresolved ones.
+  // quietly poke a different hardware register). Refuse loudly instead.
   if (IsResolved) {
     int64_t SVal = static_cast<int64_t>(Value);
     bool InRange = true;
@@ -123,9 +119,6 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
     case Z80::PCRel8:
       InRange = isInt<8>(SVal);
       Msg = "relative branch target out of range";
-      break;
-    case Z80::PCRel16:
-      InRange = isInt<16>(SVal);
       break;
     case Z80::Disp8:
       InRange = isInt<8>(SVal);
@@ -145,11 +138,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
     case Z80::Imm16:
     case Z80::Addr16:
     case Z80::Addr24_Segment:
-    case Z80::AddrAsciz:
       InRange = isInt<16>(SVal) || isUInt<16>(Value);
-      break;
-    case Z80::Addr13:
-      InRange = isUInt<13>(Value);
       break;
     case Z80::Addr24:
       InRange = isInt<24>(SVal) || isUInt<24>(Value);
@@ -159,7 +148,14 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
       getContext().reportError(Fixup.getLoc(), Msg);
   }
 
-  maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+  // As GNU as does, a JR or DJNZ relocation keeps the instruction-end
+  // adjustment in its addend.
+  MCValue RelocTarget = Target;
+  if (Fixup.isPCRel())
+    RelocTarget =
+        MCValue::get(Target.getAddSym(), Target.getSubSym(),
+                     Target.getConstant() - 1, Target.getSpecifier());
+  maybeAddReloc(F, Fixup, RelocTarget, Value, IsResolved);
 
   unsigned Kind = Fixup.getKind();
   unsigned NumBytes = 0;
@@ -183,10 +179,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   case FK_Data_2:
   case Z80::Addr16:
   case Z80::Addr24_Segment:
-  case Z80::PCRel16:
-  case Z80::AddrAsciz:
   case Z80::Imm16:
-  case Z80::Addr13:
     NumBytes = 2;
     break;
   case Z80::Addr24:

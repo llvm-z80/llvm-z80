@@ -1,0 +1,88 @@
+name: Z80 check
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "The check target to build and run"
+        required: true
+        type: string
+      timeout-minutes:
+        required: false
+        type: number
+        default: 180
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # Node 20 is deprecated on the runners, so JavaScript actions run on Node 24.
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Check out the test submodules
+        run: git submodule update --init --recursive --depth 1 z80-test/vendor
+
+      - name: Install SDCC
+        env:
+          SDCC: sdcc-4.6.0
+        run: |
+          cd "$RUNNER_TEMP"
+          url=https://github.com/llvm-z80/sdcc/releases/download/$SDCC
+          curl -fsSL --retry 5 -O "$url/$SDCC-x86_64-linux.tar.xz" -O "$url/sha256sums.txt"
+          grep "  $SDCC-x86_64-linux.tar.xz\$" sha256sums.txt | sha256sum -c -
+          tar -xf "$SDCC-x86_64-linux.tar.xz"
+          echo "$RUNNER_TEMP/$SDCC/bin" >> "$GITHUB_PATH"
+
+      - name: Verify build tools
+        run: |
+          cmake --version | head -1
+          ninja --version
+          cc --version | head -1
+          sdcc --version | head -1
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
+        with:
+          key: z80-ci-${{ runner.os }}
+          max-size: "2G"
+
+      - name: Configure
+        run: |
+          cmake -C clang/cmake/caches/Z80.cmake -G Ninja -S llvm -B build \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLLVM_OPTIMIZED_TABLEGEN=ON \
+            -DLLVM_EXTERNAL_PROJECTS=z80-test \
+            -DLLVM_EXTERNAL_Z80_TEST_SOURCE_DIR="$GITHUB_WORKSPACE/z80-test"
+
+      - name: Build and run ${{ inputs.target }}
+        env:
+          TARGET: ${{ inputs.target }}
+        run: LIT_OPTS="-sv -o $PWD/build/results.json" ninja -C build "$TARGET"
+
+      - name: Write the result tables
+        if: always()
+        continue-on-error: true
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [ -f build/results.json ]; then
+            python3 z80-test/tools/matrix.py --markdown --title "$TARGET" build/results.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Build dir size:"; du -sh build || true
+          echo "ccache stats:"; ccache -s || true

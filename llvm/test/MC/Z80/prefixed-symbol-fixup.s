@@ -15,14 +15,12 @@
 	in	a,(_p)		; DB nn — a port operand fixup belongs at +1,
 	out	(_p),a		; D3 nn — not on the opcode byte
 
-; llvm-readelf cannot name relocations for the Z80 EM value, so match the
-; offsets only: the instructions start at 0, 4, 8, 0xc, 0x10, 0x13, 0x17,
-; 0x19.
-; CHECK: 00000002
-; CHECK: 00000006
-; CHECK: 0000000a
-; CHECK: 0000000e
-; CHECK: 00000011
-; CHECK: 00000015
-; CHECK: 00000018
-; CHECK: 0000001a
+; The instructions start at 0, 4, 8, 0xc, 0x10, 0x13, 0x17, 0x19.
+; CHECK: 00000002 {{.*}} R_Z80_16 {{.*}} _x
+; CHECK: 00000006 {{.*}} R_Z80_16 {{.*}} _x
+; CHECK: 0000000a {{.*}} R_Z80_16 {{.*}} _x
+; CHECK: 0000000e {{.*}} R_Z80_16 {{.*}} _x
+; CHECK: 00000011 {{.*}} R_Z80_16 {{.*}} _x
+; CHECK: 00000015 {{.*}} R_Z80_16 {{.*}} _x
+; CHECK: 00000018 {{.*}} R_Z80_8 {{.*}} _p
+; CHECK: 0000001a {{.*}} R_Z80_8 {{.*}} _p

@@ -1,6 +1,11 @@
-[submodule "z80-utils/vendor/gcc-torture"]
-	path = z80-utils/vendor/gcc-torture
+[submodule "z80-test/vendor/gcc-torture"]
+	path = z80-test/vendor/gcc-torture
 	url = https://github.com/llvm-z80/gcc-c-torture
-[submodule "z80-utils/vendor/stdcbench"]
-	path = z80-utils/vendor/stdcbench
-	url = https://github.com/llvm-z80/stdcbench
+[submodule "z80-test/vendor/z88dk"]
+	path = z80-test/vendor/z88dk
+	url = https://github.com/z88dk/z88dk
+	shallow = true
+[submodule "z80-test/vendor/coremark"]
+	path = z80-test/vendor/coremark
+	url = https://github.com/eembc/coremark
+	shallow = true

@@ -36,7 +36,6 @@ const struct ModifierEntry {
     {"z80_24segment", Z80MCExpr::VK_ADDR24_SEGMENT},
     {"z80_24segmentlo", Z80MCExpr::VK_ADDR24_SEGMENT_LO},
     {"z80_24segmenthi", Z80MCExpr::VK_ADDR24_SEGMENT_HI},
-    {"z80_13", Z80MCExpr::VK_ADDR13},
 };
 
 } // end of anonymous namespace
@@ -117,12 +116,6 @@ int64_t Z80MCExpr::evaluateAsInt64(int64_t Value) const {
   case Z80MCExpr::VK_ADDR24:
     Value &= 0xffffff;
     break;
-  case Z80MCExpr::VK_ADDR13:
-    Value &= 0x1fff;
-    break;
-
-  case Z80MCExpr::VK_ADDR_ASCIZ:
-    llvm_unreachable("Unable to evaluate VK_ADDR_ASCIZ as int64.");
 
   case Z80MCExpr::VK_NONE:
     llvm_unreachable("Uninitialized expression.");
@@ -166,12 +159,6 @@ Z80::Fixups Z80MCExpr::getFixupKind() const {
     break;
   case VK_ADDR24_SEGMENT_LO:
     Kind = Z80::Addr24_Segment_Low;
-    break;
-  case VK_ADDR13:
-    Kind = Z80::Addr13;
-    break;
-  case VK_ADDR_ASCIZ:
-    Kind = Z80::AddrAsciz;
     break;
   case VK_NONE:
     llvm_unreachable("Uninitialized expression");

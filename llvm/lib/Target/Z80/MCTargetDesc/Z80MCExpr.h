@@ -32,8 +32,6 @@ public:
     VK_ADDR24_SEGMENT,
     VK_ADDR24_SEGMENT_LO,
     VK_ADDR24_SEGMENT_HI,
-    VK_ADDR13,
-    VK_ADDR_ASCIZ
   };
 
   /// Creates an Z80 machine code expression.

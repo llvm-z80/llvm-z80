@@ -86,12 +86,13 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
   // -i: produce Intel HEX output (.ihx)
   CmdArgs.push_back("-i");
 
-  // sdldz80 convention: first non-option argument is the output base name.
-  // sdldz80 strips any extension and appends .ihx (e.g. "a.out" -> "a.ihx").
-  // We pre-strip the extension so our IhxFile computation matches.
-  SmallString<256> OutputBase(Output.getFilename());
-  llvm::sys::path::replace_extension(OutputBase, "");
-  CmdArgs.push_back(Args.MakeArgString(OutputBase));
+  // sdldz80 rewrites what follows the last dot anywhere in this path, so the
+  // path passed already ends in .ihx.
+  SmallString<256> IhxFile(Output.getFilename());
+  if (!Args.hasArg(options::OPT_o))
+    llvm::sys::path::replace_extension(IhxFile, "");
+  IhxFile += ".ihx";
+  CmdArgs.push_back(Args.MakeArgString(IhxFile));
 
   // Select target-specific tools and runtime paths.
   bool IsSM83 = TC.getTriple().isSM83();
@@ -100,7 +101,14 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
   const char *RtLibBase = IsSM83 ? "sm83_rt" : "z80_rt";
   const char *LinkerName = IsSM83 ? "sdldgb" : "sdldz80";
 
-  // SDCC toolchain: no custom crt0 — SDCC's own startup handles initialization.
+  // Link crt0 first so startup code is at address 0x0000.
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
+    SmallString<256> Crt0Path(TC.getDriver().Dir);
+    llvm::sys::path::append(Crt0Path, "..", "lib", SubDir,
+                            IsSM83 ? "sm83_crt0.rel" : "z80_crt0.rel");
+    if (llvm::sys::fs::exists(Crt0Path))
+      CmdArgs.push_back(Args.MakeArgString(Crt0Path));
+  }
 
   // Add input object files.
   for (const auto &II : Inputs) {
@@ -124,20 +132,14 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Forward user linker flags (-Wl, -Xlinker).
-  Args.AddAllArgs(CmdArgs, options::OPT_Wl_COMMA);
-  Args.AddAllArgs(CmdArgs, options::OPT_Xlinker);
+  Args.AddAllArgValues(CmdArgs, options::OPT_Wl_COMMA, options::OPT_Xlinker);
 
   const char *Exec = Args.MakeArgString(TC.GetProgramPath(LinkerName));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
                                          Exec, CmdArgs, Inputs, Output));
 
-  // sdldz80 produces <output_base>.ihx.
-  // Only rename if the user explicitly specified -o with a non-.ihx name.
-  // Otherwise, let the .ihx file be the final output (e.g. default: a.ihx).
-  SmallString<256> IhxFile(OutputBase);
-  IhxFile += ".ihx";
-  if (Args.hasArg(options::OPT_o) &&
-      StringRef(Output.getFilename()) != StringRef(IhxFile)) {
+  // Rename the .ihx file to the name -o asked for.
+  if (Args.hasArg(options::OPT_o)) {
     ArgStringList MvArgs;
     MvArgs.push_back(Args.MakeArgString(IhxFile));
     MvArgs.push_back(Output.getFilename());
@@ -209,8 +211,7 @@ void z80::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Forward user linker flags (-Wl, -Xlinker).
-  Args.AddAllArgs(CmdArgs, options::OPT_Wl_COMMA);
-  Args.AddAllArgs(CmdArgs, options::OPT_Xlinker);
+  Args.AddAllArgValues(CmdArgs, options::OPT_Wl_COMMA, options::OPT_Xlinker);
 
   const char *Exec = Args.MakeArgString(TC.GetProgramPath("ld.lld"));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),

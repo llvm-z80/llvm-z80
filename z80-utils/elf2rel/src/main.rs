@@ -30,17 +30,12 @@ use std::process;
 
 // Z80 ELF relocation types
 const R_Z80_NONE: u32 = 0;
-const R_Z80_IMM8: u32 = 1;
-const R_Z80_ADDR8: u32 = 2;
-const R_Z80_ADDR16: u32 = 3;
-const R_Z80_ADDR16_LO: u32 = 4;
-const R_Z80_ADDR16_HI: u32 = 5;
-const R_Z80_PCREL_8: u32 = 6;
-const R_Z80_PCREL_16: u32 = 12;
-const R_Z80_FK_DATA_4: u32 = 13;
-const R_Z80_FK_DATA_8: u32 = 14;
-const R_Z80_IMM16: u32 = 16;
-const R_SM83_LDH8: u32 = 19;
+const R_Z80_8: u32 = 1;
+const R_Z80_8_PCREL: u32 = 3;
+const R_Z80_16: u32 = 4;
+const R_Z80_32: u32 = 6;
+const R_Z80_BYTE0: u32 = 7;
+const R_Z80_BYTE1: u32 = 8;
 
 // ASxxxx relocation mode bits
 const R_BYTE: u8 = 0x01;
@@ -50,6 +45,7 @@ const R_PCR: u8 = 0x04;
 const SDCC_AREAS: &[(&str, u8)] = &[
     ("_CODE", 0),
     ("_DATA", 0),
+    ("_BSS", 0),
     ("_INITIALIZED", 0),
     ("_DABS", 8),
     ("_HOME", 0),
@@ -62,12 +58,12 @@ const SDCC_AREAS: &[(&str, u8)] = &[
 const AR_MAGIC: &[u8; 8] = b"!<arch>\n";
 const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 
-fn section_to_area(name: &str) -> &'static str {
-    if name == ".text" || name.starts_with(".text.") {
+fn section_to_area(name: &str, sh_type: u32) -> &'static str {
+    if sh_type == elf::SHT_NOBITS {
+        "_BSS"
+    } else if name == ".text" || name.starts_with(".text.") {
         "_CODE"
     } else if name == ".data" || name.starts_with(".data.") {
-        "_DATA"
-    } else if name == ".bss" || name.starts_with(".bss.") {
         "_DATA"
     } else if name == ".rodata" || name.starts_with(".rodata.") {
         "_CODE"
@@ -301,10 +297,11 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
     let endian = LE;
 
     let machine = header.e_machine.get(endian);
-    if machine != 0x1F90 {
+    if machine != elf::EM_Z80 {
         return Err(format!(
-            "not a Z80 ELF (e_machine=0x{:04X}, expected 0x1F90)",
-            machine
+            "not a Z80 ELF (e_machine={}, expected {})",
+            machine,
+            elf::EM_Z80
         ));
     }
 
@@ -354,19 +351,16 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
             continue;
         }
 
-        let area_name = section_to_area(name);
+        let area_name = section_to_area(name, sh_type);
         let area = area_data.get_mut(area_name).unwrap();
-        let offset = area.bytes.len() as u32;
-        section_area_map.insert(si, (area_name, offset));
+        let area_size = area_sizes.get_mut(area_name).unwrap();
+        section_area_map.insert(si, (area_name, *area_size));
+        *area_size += section.sh_size(endian);
 
         if sh_type == elf::SHT_PROGBITS {
             let section_data = section.data(endian, data).unwrap_or(&[]);
             area.bytes.extend_from_slice(section_data);
-        } else {
-            let size = section.sh_size(endian) as usize;
-            area.bytes.resize(area.bytes.len() + size, 0);
         }
-        *area_sizes.get_mut(area_name).unwrap() = area.bytes.len() as u32;
     }
 
     struct RelSymbol {
@@ -465,13 +459,12 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
             }
 
             let (size, mut mode) = match r_type {
-                R_Z80_ADDR16 | R_Z80_IMM16 => (2, 0u8),
-                R_Z80_ADDR8 | R_Z80_IMM8 | R_SM83_LDH8 => (1, R_BYTE),
-                R_Z80_PCREL_8 => (1, R_BYTE | R_PCR),
-                R_Z80_PCREL_16 => (2, R_PCR),
-                R_Z80_ADDR16_LO => (1, R_BYTE),
-                R_Z80_ADDR16_HI => (1, R_BYTE),
-                R_Z80_FK_DATA_4 | R_Z80_FK_DATA_8 => continue,
+                R_Z80_16 => (2, 0u8),
+                R_Z80_8 => (1, R_BYTE),
+                R_Z80_8_PCREL => (1, R_BYTE | R_PCR),
+                R_Z80_BYTE0 => (1, R_BYTE),
+                R_Z80_BYTE1 => (1, R_BYTE),
+                R_Z80_32 => continue,
                 _ => {
                     eprintln!(
                         "warning: unsupported relocation type {} at offset 0x{:04X}",
@@ -517,7 +510,10 @@ fn convert_elf_to_rel(data: &[u8], module_name: &str) -> Result<Vec<u8>, String>
 
             let byte_offset = (area_base_offset + r_offset) as usize;
 
-            let addend = if !is_sym_ref {
+            // sdld measures a PCR byte from the end of the field, while the
+            // ELF addend already holds that adjustment.
+            let pcr_bias = if r_type == R_Z80_8_PCREL { 1 } else { 0 };
+            let addend = pcr_bias + if !is_sym_ref {
                 let sym = symbols_table
                     .symbol(object::SymbolIndex(r_sym as usize))
                     .unwrap();
@@ -838,5 +834,55 @@ fn main() {
             eprintln!("error: {}", e);
             process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use object::write::{Object, Symbol, SymbolSection};
+    use object::{
+        Architecture, BinaryFormat, Endianness, SectionKind, SymbolFlags, SymbolKind, SymbolScope,
+    };
+
+    #[test]
+    fn bss_takes_its_own_area_without_bytes() {
+        let mut obj = Object::new(BinaryFormat::Elf, Architecture::I386, Endianness::Little);
+        let text = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
+        obj.append_section_data(text, &[0xC9], 1);
+        for name in ["_a", "_b"] {
+            let bss = obj.add_section(
+                Vec::new(),
+                format!(".bss.{name}").into_bytes(),
+                SectionKind::UninitializedData,
+            );
+            obj.append_section_bss(bss, 0x800, 1);
+            obj.add_symbol(Symbol {
+                name: name.as_bytes().to_vec(),
+                value: 0,
+                size: 0x800,
+                kind: SymbolKind::Data,
+                scope: SymbolScope::Linkage,
+                weak: false,
+                section: SymbolSection::Section(bss),
+                flags: SymbolFlags::None,
+            });
+        }
+        let mut elf = obj.write().unwrap();
+        // object has no Z80 architecture, so write an i386 ELF32 and retarget it.
+        elf[18..20].copy_from_slice(&0x1F90u16.to_le_bytes());
+
+        let rel = convert_elf_to_rel(&elf, "bss").unwrap();
+        let expected = "XL4\n\
+            H 2 areas 3 global symbols\n\
+            M bss\n\
+            S .__.ABS. Def00000000\n\
+            A _CODE size 1 flags 0 addr 0\n\
+            T 00 00 00 00 C9\n\
+            R 00 00 00 00\n\
+            A _BSS size 1000 flags 0 addr 0\n\
+            S _a Def00000000\n\
+            S _b Def00000800\n";
+        assert_eq!(String::from_utf8(rel).unwrap(), expected);
     }
 }

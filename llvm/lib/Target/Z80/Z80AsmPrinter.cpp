@@ -23,6 +23,7 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/BinaryFormat/Z80Flags.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -30,6 +31,7 @@
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAssembler.h"
@@ -155,15 +157,70 @@ bool Z80AsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
 }
 
 void Z80AsmPrinter::emitStartOfAsmFile(Module &M) {
-  // TODO: Emit Z80-specific directives if needed
+  if (!MAI.isSDCC() && !MAI.isZ88DK())
+    return;
+  StringRef Format = MAI.isSDCC() ? "sdasz80" : "z88dk";
+  for (const GlobalValue &GV : M.global_values())
+    if (GV.isWeakForLinker() && !GV.hasCommonLinkage())
+      OutContext.reportWarning(SMLoc(), "weak linkage of '" + GV.getName() +
+                                            "' is ignored in the " + Format +
+                                            " format");
+  for (const Function &F : M)
+    if (!F.isDeclaration() && F.getAlign() && *F.getAlign() > 1)
+      OutContext.reportWarning(SMLoc(), "alignment of '" + F.getName() +
+                                            "' is ignored in the " + Format +
+                                            " format");
 }
 
 void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
+  if (MAI.isSDCC() && TM.getTargetTriple().getEnvironment() == Triple::SDCC &&
+      GV->hasInitializer() && !GV->isConstant() &&
+      (GV->hasExternalLinkage() || GV->hasLocalLinkage() ||
+       GV->hasWeakLinkage() || GV->hasLinkOnceLinkage()) &&
+      !GV->isThreadLocal() && !GV->hasSection() && !GV->hasComdat() &&
+      GV->getAddressSpace() == 0) {
+    const DataLayout &DL = GV->getDataLayout();
+    MCSymbol *GVSym = getSymbol(GV);
+    uint64_t Size = DL.getTypeAllocSize(GV->getValueType());
+
+    if (getGVAlignment(GV, DL) != Align(1)) {
+      GV->getContext().emitError("SDCC initialized data requires alignment 1");
+      return;
+    }
+
+    if (GV->getInitializer()->isNullValue()) {
+      // Zero integers and all-zero aggregates can go in the _DATA section.
+      OutStreamer->switchSection(OutContext.getELFSection(
+          "_DATA", ELF::SHT_NOBITS, ELF::SHF_ALLOC | ELF::SHF_WRITE));
+      emitLinkage(GV, GVSym);
+      OutStreamer->emitLabel(GVSym);
+      OutStreamer->emitZeros(Size);
+    } else {
+      OutStreamer->switchSection(OutContext.getELFSection(
+          "_INITIALIZED", ELF::SHT_NOBITS, ELF::SHF_ALLOC | ELF::SHF_WRITE));
+      emitLinkage(GV, GVSym);
+      OutStreamer->emitLabel(GVSym);
+      OutStreamer->emitZeros(Size);
+
+      OutStreamer->switchSection(OutContext.getELFSection(
+          "_INITIALIZER", ELF::SHT_PROGBITS, ELF::SHF_ALLOC));
+      emitGlobalConstant(DL, GV->getInitializer());
+    }
+    return;
+  }
+
+  if ((MAI.isSDCC() || MAI.isZ88DK()) && GV->hasInitializer() &&
+      GV->getAlign() && *GV->getAlign() > 1)
+    OutContext.reportWarning(SMLoc(), "alignment of '" + GV->getName() +
+                                          "' is ignored in the " +
+                                          (MAI.isSDCC() ? "sdasz80" : "z88dk") +
+                                          " format");
+
   if (MAI.isSDCC()) {
     // BSS locals: sdasz80 doesn't support .local/.comm directives.
     // Handle zero-initialized variables by emitting in _DATA with explicit
     // zero bytes. (.ds in sdasz80 reserves space but does NOT zero-initialize.)
-    if (GV->hasLocalLinkage() &&
+    if (!GV->isConstant() && !GV->hasSection() && GV->hasLocalLinkage() &&
         (!GV->hasInitializer() || GV->getInitializer()->isNullValue())) {
       MCSymbol *GVSym = getSymbol(GV);
       const DataLayout &DL = GV->getDataLayout();
@@ -180,10 +237,6 @@ void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
   }
 
   if (MAI.isZ88DK()) {
-    if (GV->hasInitializer() && GV->getAlign() && *GV->getAlign() > 1)
-      OutContext.reportWarning(SMLoc(), "alignment of '" + GV->getName() +
-                                            "' is ignored in the z88dk format");
-
     // z80asm has no .local/.comm, so define such globals in the BSS section.
     if (GV->hasLocalLinkage() || GV->hasCommonLinkage()) {
       const TargetLoweringObjectFile &TLOF = getObjFileLowering();

@@ -49,7 +49,6 @@ struct CallingConvRegs {
 
   // Indirect call
   Register IndirectCallReg; // Z80: IY, SM83: HL
-  unsigned IndirectCallOpc; // Z80: CALL_IY, SM83: CALL_HL
 
   // First-argument register for an i8 argument.  Only __z88dk_fastcall reads
   // it; sdcccall(1) hardcodes the first i8 argument to A, and the stack
@@ -159,6 +158,11 @@ protected:
   const CallingConvRegs &getRegsForCC(CallingConv::ID CC) const {
     return decodeZ80CC(CC).usesZ88dkRegs() ? CCRegs0 : CCRegs;
   }
+
+  /// Whether \p Info can become a jump.
+  bool isEligibleForTailCallOptimization(MachineFunction &MF,
+                                         const CallLoweringInfo &Info,
+                                         unsigned StackArgBytes) const;
 
 public:
   Z80CallLoweringCommon(const TargetLowering *TL, CallingConvRegs Regs,

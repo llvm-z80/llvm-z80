@@ -36,6 +36,9 @@ public:
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
   const TargetRegisterClass *
+  getPointerRegClass(unsigned Kind = 0) const override;
+
+  const TargetRegisterClass *
   getLargestLegalSuperClass(const TargetRegisterClass *RC,
                             const MachineFunction &) const override;
 

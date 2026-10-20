@@ -1,0 +1,10 @@
+# z80-run PGO training corpus: one program per line, followed by the z80-run
+# options for the program. build-corpus.sh rebuilds the programs.
+coremark-z80-O0.elf
+coremark-z80-O2.elf
+coremark-z80-Os.elf
+coremark-sm83-O0.elf
+coremark-sm83-O2.elf
+coremark-sm83-Os.elf
+coremark-sdcc-z80.ihx --cpu=z80
+coremark-sdcc-sm83.ihx --cpu=sm83

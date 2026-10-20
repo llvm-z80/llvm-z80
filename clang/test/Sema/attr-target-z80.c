@@ -28,5 +28,5 @@ __attribute__((target("nonsense"))) void f_junk(void) {}
 
 // A processor name is not a feature name, and naming one as a feature is the
 // same mistake.
-// expected-warning@+1 {{unsupported 'gameboy' in the 'target' attribute string; 'target' attribute ignored}}
-__attribute__((target("gameboy"))) void f_cpu_as_feature(void) {}
+// expected-warning@+1 {{unsupported 'z80-undoc' in the 'target' attribute string; 'target' attribute ignored}}
+__attribute__((target("z80-undoc"))) void f_cpu_as_feature(void) {}

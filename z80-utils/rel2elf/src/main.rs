@@ -14,7 +14,7 @@ use std::process;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const EM_Z80: u16 = 0x1F90;
+const EM_Z80: u16 = 220;
 const ET_REL: u16 = 1;
 const ELFCLASS32: u8 = 1;
 const ELFDATA2LSB: u8 = 1;
@@ -38,13 +38,26 @@ const STT_SECTION: u8 = 3;
 const SHN_UNDEF: u16 = 0;
 const SHN_ABS: u16 = 0xFFF1;
 
-const R_Z80_ADDR8: u32 = 2;
-const R_Z80_ADDR16: u32 = 3;
-const R_Z80_ADDR16_LO: u32 = 4;
-const R_Z80_ADDR16_HI: u32 = 5;
-const R_Z80_PCREL_8: u32 = 6;
-const R_Z80_PCREL_16: u32 = 12;
-const R_SM83_LDH8: u32 = 19;
+// Z80 ELF relocation types
+const R_Z80_8: u32 = 1;
+const R_Z80_8_PCREL: u32 = 3;
+const R_Z80_16: u32 = 4;
+const R_Z80_BYTE0: u32 = 7;
+const R_Z80_BYTE1: u32 = 8;
+
+/// The e_flags CPU value GNU binutils uses for an SDCC port or `--cpu` name,
+/// if it has one.
+fn cpu_flags(name: &str) -> Option<u32> {
+    match name {
+        "z80" => Some(0x01),
+        "z180" => Some(0x02),
+        "r800" => Some(0x03),
+        "ez80" | "ez80_z80" => Some(0x04),
+        "sm83" | "gbz80" => Some(0x05),
+        "z80n" => Some(0x06),
+        _ => None,
+    }
+}
 
 const R_BYTE: u8 = 0x01;
 const R_SYM: u8 = 0x02;
@@ -105,6 +118,7 @@ struct RawSymbol {
 
 struct RawModule {
     addr_bytes: usize,
+    cpu: Option<u32>,
     areas: Vec<RawArea>,
     symbols: Vec<RawSymbol>,
     tr_pairs: Vec<RawTRPair>,
@@ -151,6 +165,7 @@ struct ElfSymbol {
 }
 
 struct ElfModule {
+    e_flags: u32,
     sections: Vec<ElfSection>,
     symbols: Vec<ElfSymbol>,
 }
@@ -292,6 +307,7 @@ fn parse_hex_bytes(s: &str) -> Vec<u8> {
 
 fn parse_rel(text: &str) -> Result<RawModule, String> {
     let mut addr_bytes = 4usize;
+    let mut cpu = None;
     let mut areas: Vec<RawArea> = Vec::new();
     let mut symbols: Vec<RawSymbol> = Vec::new();
     let mut tr_pairs: Vec<RawTRPair> = Vec::new();
@@ -311,7 +327,15 @@ fn parse_rel(text: &str) -> Result<RawModule, String> {
                     addr_bytes = addr_bytes.clamp(2, 4);
                 }
             }
-            Some(b'H') | Some(b'O') | Some(b'M') => {}
+            Some(b'H') | Some(b'M') => {}
+            Some(b'O') => {
+                // SDCC records its target port here, e.g. "O -msm83 sdcccall(1)".
+                for opt in line[1..].split_whitespace() {
+                    if let Some(f) = opt.strip_prefix("-m").and_then(cpu_flags) {
+                        cpu = Some(f);
+                    }
+                }
+            }
             Some(b'S') => {
                 if line.len() < 4 {
                     continue;
@@ -393,6 +417,7 @@ fn parse_rel(text: &str) -> Result<RawModule, String> {
 
     Ok(RawModule {
         addr_bytes,
+        cpu,
         areas,
         symbols,
         tr_pairs,
@@ -548,6 +573,7 @@ fn section_name(area_name: &str, _is_bss: bool) -> &str {
     match area_name {
         "_CODE" => ".text",
         "_DATA" => ".data",
+        "_BSS" => ".bss",
         "_HOME" => ".text.home",
         "_GSINIT" => ".text.gsinit",
         "_GSFINAL" => ".text.gsfinal",
@@ -562,7 +588,7 @@ fn section_name(area_name: &str, _is_bss: bool) -> &str {
 fn section_flags(area_name: &str) -> u32 {
     match area_name {
         "_CODE" | "_HOME" | "_GSINIT" | "_GSFINAL" | "_CABS" => SHF_ALLOC | SHF_EXECINSTR,
-        "_DATA" | "_INITIALIZED" | "_DABS" => SHF_ALLOC | SHF_WRITE,
+        "_DATA" | "_BSS" | "_INITIALIZED" | "_DABS" => SHF_ALLOC | SHF_WRITE,
         "_INITIALIZER" => SHF_ALLOC,
         _ => SHF_ALLOC,
     }
@@ -599,7 +625,7 @@ fn read_addend_unsigned(data: &[u8], offset: usize, is_byte: bool) -> u32 {
 fn is_byte_wide(r_type: u32) -> bool {
     matches!(
         r_type,
-        R_Z80_ADDR8 | R_Z80_ADDR16_LO | R_Z80_ADDR16_HI | R_Z80_PCREL_8 | R_SM83_LDH8
+        R_Z80_8 | R_Z80_BYTE0 | R_Z80_BYTE1 | R_Z80_8_PCREL
     )
 }
 
@@ -625,8 +651,9 @@ fn transform(raw: &mut RawModule) -> ElfModule {
         }
 
         // Step 2e: BSS detection
-        let is_bss =
-            area.name == "_DATA" && buf.relocs.is_empty() && buf.data.iter().all(|&b| b == 0);
+        let is_bss = matches!(area.name.as_str(), "_DATA" | "_BSS")
+            && buf.relocs.is_empty()
+            && buf.data.iter().all(|&b| b == 0);
         let sh_addr = if area.flags & AREA_FLAG_ABS != 0 {
             area.addr
         } else {
@@ -722,39 +749,22 @@ fn transform(raw: &mut RawModule) -> ElfModule {
             let is_sym = r_mode & R_SYM != 0;
             let is_pcr = r_mode & R_PCR != 0;
 
-            // Check HRAM reference
-            let is_hram = if is_sym {
-                let sym = &raw.symbols[r_index as usize];
-                sym.is_defined
-                    && sym
-                        .area_index
-                        .map_or(false, |ai| raw.areas[ai].name == "_HRAM")
-            } else {
-                raw.areas
-                    .get(r_index as usize)
-                    .map_or(false, |a| a.name == "_HRAM")
-            };
-
             // Determine ELF relocation type
             let r_type = if is_bytx {
                 if is_msb {
-                    R_Z80_ADDR16_HI
+                    R_Z80_BYTE1
                 } else {
-                    R_Z80_ADDR16_LO
+                    R_Z80_BYTE0
                 }
             } else {
                 match (is_byte, is_pcr) {
-                    (true, true) => R_Z80_PCREL_8,
-                    (true, false) if is_msb => R_Z80_ADDR16_HI,
-                    (true, false) => {
-                        if is_hram {
-                            R_SM83_LDH8
-                        } else {
-                            R_Z80_ADDR8
-                        }
+                    (true, true) => R_Z80_8_PCREL,
+                    (true, false) => if is_msb { R_Z80_BYTE1 } else { R_Z80_8 },
+                    (false, true) => {
+                        eprintln!("warning: unsupported 16-bit PC-relative relocation at offset 0x{r_offset:04X}");
+                        continue;
                     }
-                    (false, true) => R_Z80_PCREL_16,
-                    (false, false) => R_Z80_ADDR16,
+                    (false, false) => R_Z80_16,
                 }
             };
 
@@ -801,6 +811,10 @@ fn transform(raw: &mut RawModule) -> ElfModule {
                 (sym_idx, addend)
             };
 
+            // sdld measures a PCR byte from the end of the field; the ELF
+            // addend carries that adjustment instead.
+            let addend = if r_type == R_Z80_8_PCREL { addend - 1 } else { addend };
+
             elf_relocs.push(ElfReloc {
                 offset: r_offset,
                 r_type,
@@ -825,7 +839,11 @@ fn transform(raw: &mut RawModule) -> ElfModule {
         sections[sec_idx].relocs = elf_relocs;
     }
 
-    ElfModule { sections, symbols }
+    ElfModule {
+        e_flags: raw.cpu.unwrap_or(0),
+        sections,
+        symbols,
+    }
 }
 
 // ── Phase 3: Emit ───────────────────────────────────────────────────────────
@@ -1071,7 +1089,7 @@ fn emit_elf(module: &ElfModule) -> Vec<u8> {
     push_u32(&mut buf, 0); // e_entry
     push_u32(&mut buf, 0); // e_phoff
     push_u32(&mut buf, sh_offset);
-    push_u32(&mut buf, 0); // e_flags
+    push_u32(&mut buf, module.e_flags);
     push_u16(&mut buf, elf_header_size as u16);
     push_u16(&mut buf, 0); // e_phentsize
     push_u16(&mut buf, 0); // e_phnum
@@ -1115,14 +1133,15 @@ fn emit_elf(module: &ElfModule) -> Vec<u8> {
 
 // ── Conversion entry points ─────────────────────────────────────────────────
 
-fn convert_rel_to_elf(data: &[u8]) -> Result<Vec<u8>, String> {
+fn convert_rel_to_elf(data: &[u8], cpu: Option<u32>) -> Result<Vec<u8>, String> {
     let text = std::str::from_utf8(data).map_err(|_| "invalid UTF-8 in .rel file")?;
     let mut raw = parse_rel(text)?;
+    raw.cpu = raw.cpu.or(cpu);
     let module = transform(&mut raw);
     Ok(emit_elf(&module))
 }
 
-fn convert_lib_to_ar(data: &[u8]) -> Result<Vec<u8>, String> {
+fn convert_lib_to_ar(data: &[u8], cpu: Option<u32>) -> Result<Vec<u8>, String> {
     let members = parse_ar(data)?;
     let mut out_members = Vec::new();
 
@@ -1134,7 +1153,7 @@ fn convert_lib_to_ar(data: &[u8]) -> Result<Vec<u8>, String> {
             .to_string_lossy()
             .into_owned();
 
-        match convert_rel_to_elf(&member.data) {
+        match convert_rel_to_elf(&member.data, cpu) {
             Ok(elf_data) => {
                 out_members.push(ArMember {
                     name: o_name,
@@ -1153,9 +1172,22 @@ fn convert_lib_to_ar(data: &[u8]) -> Result<Vec<u8>, String> {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let mut cpu = None;
+    let mut args: Vec<String> = Vec::new();
+    for arg in env::args() {
+        if let Some(name) = arg.strip_prefix("--cpu=") {
+            cpu = Some(cpu_flags(name).unwrap_or_else(|| {
+                eprintln!("error: unknown CPU '{}'", name);
+                process::exit(1);
+            }));
+        } else {
+            args.push(arg);
+        }
+    }
     if args.len() < 2 {
-        eprintln!("Usage: rel2elf <input.rel|input.lib> [output.o|output.a]");
+        eprintln!(
+            "Usage: rel2elf [--cpu=z80|z180|r800|ez80|sm83|z80n] <input.rel|input.lib> [output.o|output.a]"
+        );
         process::exit(1);
     }
 
@@ -1178,9 +1210,9 @@ fn main() {
     };
 
     let result = if is_ar {
-        convert_lib_to_ar(&data)
+        convert_lib_to_ar(&data, cpu)
     } else {
-        convert_rel_to_elf(&data)
+        convert_rel_to_elf(&data, cpu)
     };
 
     match result {

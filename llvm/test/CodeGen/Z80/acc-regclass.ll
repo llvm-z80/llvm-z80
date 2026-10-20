@@ -46,7 +46,7 @@ define i8 @chain(i8 %a, i8 %b, i8 %c) {
 ; SM83-NEXT:  ld a,d
 ; SM83-NEXT:  xor 18
 ; SM83-NEXT:  ld d,a
-; SM83-NEXT:  call _g
+; SM83-NEXT:  jp _g
 declare i16 @g(i16)
 
 define i16 @pair_arg(i16 %a) {

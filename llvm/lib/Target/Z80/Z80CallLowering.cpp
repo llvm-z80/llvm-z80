@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include <memory>
 
@@ -296,6 +297,16 @@ ArgAssignment classifyArg(const CallingConvRegs &Regs, unsigned &RegParamCount,
 
   return Result;
 }
+
+/// The call opcode, or the jump opcode for a tail call.
+static unsigned getCallOpcode(const CallingConvRegs &Regs, bool IsIndirect,
+                              bool IsTailCall) {
+  if (!IsIndirect)
+    return IsTailCall ? Z80::TCRETURN_nn : Z80::CALL_nn;
+  if (Regs.IndirectCallReg == Z80::IY)
+    return IsTailCall ? Z80::TCRETURN_IY : Z80::CALL_IY;
+  return IsTailCall ? Z80::TCRETURN_HL : Z80::CALL_HL;
+}
 } // anonymous namespace
 
 //===----------------------------------------------------------------------===//
@@ -318,7 +329,6 @@ Z80CallLowering::Z80CallLowering(const TargetLowering *TL)
                                 /*Ret_I32_Hi=*/Z80::HL,
                                 /*Ret_I32_Lo=*/Z80::DE,
                                 /*IndirectCallReg=*/Z80::IY,
-                                /*IndirectCallOpc=*/Z80::CALL_IY,
                                 /*First_I8=*/Register(),
                                 /*Third_I16=*/Z80::BC,
                                 /*Half_1=*/Z80::L,
@@ -341,7 +351,6 @@ Z80CallLowering::Z80CallLowering(const TargetLowering *TL)
                                 /*Ret_I32_Hi=*/Z80::DE,
                                 /*Ret_I32_Lo=*/Z80::HL,
                                 /*IndirectCallReg=*/Z80::IY,
-                                /*IndirectCallOpc=*/Z80::CALL_IY,
                                 /*First_I8=*/Z80::L,
                             }) {}
 
@@ -939,6 +948,40 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   return true;
 }
 
+bool Z80CallLoweringCommon::isEligibleForTailCallOptimization(
+    MachineFunction &MF, const CallLoweringInfo &Info,
+    unsigned StackArgBytes) const {
+  if (!Info.IsTailCall)
+    return false;
+
+  // The callee reads stack arguments right after the return address, and our
+  // caller still uses that memory.
+  if (StackArgBytes > 0)
+    return false;
+
+  // Interrupt handlers and callee-cleanup functions do not tail call.
+  const Function &Caller = MF.getFunction();
+  if (Caller.hasFnAttribute("interrupt") ||
+      MF.getInfo<Z80FunctionInfo>()->StackParamBytes > 0)
+    return false;
+
+  // The callee returns straight to our caller, so the callee must return the
+  // same type in the same registers.
+  if (!Caller.getReturnType()->isVoidTy()) {
+    if (Info.OrigRet.Ty != Caller.getReturnType())
+      return false;
+    const CallingConvRegs &CallerRegs = getRegsForCC(Caller.getCallingConv());
+    const CallingConvRegs &CalleeRegs = getRegsForCC(Info.CallConv);
+    if (CallerRegs.Ret_I8 != CalleeRegs.Ret_I8 ||
+        CallerRegs.Ret_I16 != CalleeRegs.Ret_I16 ||
+        CallerRegs.Ret_I32_Hi != CalleeRegs.Ret_I32_Hi ||
+        CallerRegs.Ret_I32_Lo != CalleeRegs.Ret_I32_Lo)
+      return false;
+  }
+
+  return true;
+}
+
 bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                       CallLoweringInfo &Info) const {
   MachineFunction &MF = MIRBuilder.getMF();
@@ -1045,10 +1088,22 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   if (SRetPtrReg.isValid())
     StackArgBytes += 2;
 
+  bool IsTailCall = isEligibleForTailCallOptimization(MF, Info, StackArgBytes);
+  if (Info.IsMustTailCall && !IsTailCall) {
+    const Function &F = MF.getFunction();
+    F.getContext().diagnose(DiagnosticInfoUnsupported(
+        F, "musttail call cannot be lowered as a tail call",
+        MIRBuilder.getDebugLoc()));
+  }
+  Info.IsTailCall = IsTailCall;
+
   // --- Pass 2: Emit code ---
 
   // Emit ADJCALLSTACKDOWN
-  MIRBuilder.buildInstr(Z80::ADJCALLSTACKDOWN).addImm(StackArgBytes).addImm(0);
+  if (!IsTailCall)
+    MIRBuilder.buildInstr(Z80::ADJCALLSTACKDOWN)
+        .addImm(StackArgBytes)
+        .addImm(0);
 
   // Push stack arguments so the callee sees the expected layout.
   // sdcccall(0)/__z88dk_callee: right-to-left (last arg pushed first, so the
@@ -1222,18 +1277,25 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   }
 
   // Build the call instruction with dynamic implicit uses for argument regs
+  unsigned CallOpc = getCallOpcode(Regs, Info.Callee.isReg(), IsTailCall);
   MachineInstrBuilder CallMI;
   if (Info.Callee.isReg()) {
     MIRBuilder.buildCopy(Regs.IndirectCallReg, Info.Callee.getReg());
-    CallMI = MIRBuilder.buildInstr(Regs.IndirectCallOpc);
+    CallMI = MIRBuilder.buildInstr(CallOpc);
   } else {
-    CallMI = MIRBuilder.buildInstr(Z80::CALL_nn);
+    CallMI = MIRBuilder.buildInstr(CallOpc);
     CallMI.add(Info.Callee);
   }
 
   // Add implicit uses for each physical register used as an argument
   for (Register Reg : ArgRegs)
     CallMI.addUse(Reg, RegState::Implicit);
+
+  if (IsTailCall) {
+    MF.getFrameInfo().setHasTailCall();
+    Info.LoweredTailCall = true;
+    return true;
+  }
 
   // Compute callee-cleanup amount before emitting return value handling.
   // For callee-cleanup calls, ADJCALLSTACKUP must be emitted BEFORE sret loads

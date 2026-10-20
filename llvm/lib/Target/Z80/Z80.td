@@ -21,10 +21,11 @@ include "llvm/TableGen/SearchableTable.td"
 //===---------------------------------------------------------------------===//
 
 include "Z80Features.td"
-include "Z80Devices.td"
 include "Z80RegisterInfo.td"
 include "Z80RegisterBanks.td"
 include "Z80InstrInfo.td"
+include "Z80Schedule.td"
+include "Z80Devices.td"
 include "Z80Combine.td"
 
 def Z80InstrInfoDef : InstrInfo {
@@ -60,7 +61,7 @@ def Z80AsmParserVariantZilog : AsmParserVariant {
 // Target Declaration
 //===---------------------------------------------------------------------===//
 
-defm : RemapAllTargetPseudoPointerOperands<Ptr16>;
+defm : RemapAllTargetPseudoPointerOperands<GR16>;
 
 def Z80 : Target {
   let InstructionSet         = Z80InstrInfoDef;

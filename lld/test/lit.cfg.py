@@ -99,6 +99,7 @@ llvm_config.feature_config(
                 "SystemZ": "systemz",
                 "WebAssembly": "wasm",
                 "X86": "x86",
+                "Z80": "z80",
             },
         ),
         ("--assertion-mode", {"ON": "asserts"}),

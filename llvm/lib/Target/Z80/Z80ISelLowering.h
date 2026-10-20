@@ -31,6 +31,11 @@ public:
     return false;
   }
 
+  // Soft-float comparison libcalls return a C int, which is 16 bits here.
+  MVT::SimpleValueType getCmpLibcallReturnType() const override {
+    return MVT::i16;
+  }
+
   // While integer division isn't "cheap", long division is not all that much
   // slower than long multiplication, and the division->multiplication
   // optimization this disables performs multiplciation at double the width,

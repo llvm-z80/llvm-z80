@@ -47,6 +47,7 @@
 #include "Z80FixupImplicitDefs.h"
 #include "Z80IndexIV.h"
 #include "Z80LowerSelect.h"
+#include "Z80LowerThreadLocal.h"
 #include "Z80MachineFunctionInfo.h"
 #include "Z80NarrowMemAccess.h"
 #include "Z80NonReentrant.h"
@@ -74,6 +75,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80FixupImplicitDefsPass(PR);
   initializeZ80PreEmitPeepholePass(PR);
   initializeZ80LowerSelectPass(PR);
+  initializeZ80LowerThreadLocalPass(PR);
   initializeZ80NarrowMemAccessPass(PR);
   initializeZ80ShiftRotateChainPass(PR);
   initializeZ80NonReentrantPass(PR);
@@ -104,10 +106,6 @@ bool Z80TargetMachine::useStaticFrames() const {
   llvm_unreachable("unhandled boolOrDefault");
 }
 
-static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
-  return RM ? *RM : Reloc::Static;
-}
-
 Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
                                    StringRef CPU, StringRef FS,
                                    const TargetOptions &Options,
@@ -116,7 +114,7 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
                                    CodeGenOptLevel OL, bool JIT)
     : CodeGenTargetMachineImpl(T, TT.computeDataLayout(), TT,
                                selectZ80CPU(CPU, TT), FS, Options,
-                               getEffectiveRelocModel(RM),
+                               Reloc::Static,
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
       SubTarget(TT, selectZ80CPU(CPU, TT).str(), FS.str(), *this) {
   this->TLOF = std::make_unique<Z80TargetObjectFile>();
@@ -133,11 +131,9 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
   this->Options.EnableMachineOutliner = true;
   this->Options.SupportsDefaultOutlining = true;
 
-  // z80asm has neither PIC nor an address-significance table.
-  if (getMCAsmInfo().isZ88DK()) {
-    this->RM = Reloc::Static;
+  // z88dk-z80asm has no address-significance table.
+  if (getMCAsmInfo().isZ88DK())
     this->Options.EmitAddrsig = false;
-  }
 }
 
 const Z80Subtarget *
@@ -233,6 +229,7 @@ TargetPassConfig *Z80TargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 void Z80PassConfig::addIRPasses() {
+  addPass(createZ80LowerThreadLocalPass(getZ80TargetMachine()));
   addPass(createZ80CheckUnsupportedPass());
   addPass(createAtomicExpandLegacyPass());
 

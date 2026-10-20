@@ -14,8 +14,8 @@ stack:
 body:             |
   bb.0:
     liveins: $ix
-    LD_IXd_r -4, undef $c :: (store (s8) into %stack.0)
-    $a = LD_r_IXd -4 :: (load (s8) from %stack.0)
+    LD_IXd_r -4, undef $c, implicit $ix :: (store (s8) into %stack.0)
+    $a = LD_r_IXd -4, implicit $ix :: (load (s8) from %stack.0)
     RET implicit $a
 ...
 ---

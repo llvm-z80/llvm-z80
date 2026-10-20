@@ -459,6 +459,10 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
     Register Loaded =
         FromSlot ? getLoadIXdDstReg(*MII) : getLoadHLindDstReg(*MII);
     if (Loaded.isValid()) {
+      bool Ordered =
+          llvm::any_of(MII->memoperands(), [](const MachineMemOperand *MMO) {
+            return !MMO->isUnordered();
+          });
       int64_t Slot = FromSlot ? Z80::idxSlotOperand(*MII).getImm() : 0;
       // The consumer to fold into. It need not come next, as long as
       // nothing in between disturbs the register or what the load reads.
@@ -477,6 +481,8 @@ static bool foldCopyIntoFrameAccess(MachineBasicBlock &MBB,
           break;
         }
         if (Scan->isCall() || Scan->isInlineAsm() ||
+            Scan->hasUnmodeledSideEffects() ||
+            (Ordered && Scan->hasOrderedMemoryRef()) ||
             Scan->readsRegister(Loaded, TRI) ||
             Scan->modifiesRegister(Loaded, TRI))
           break;
@@ -1066,11 +1072,17 @@ static bool hoistLDHLOutOfFlagSave(MachineBasicBlock &MBB,
 
     LLVM_DEBUG(dbgs() << "  Flag save: hoisting " << *LDHL);
     BuildMI(MBB, At, LDHL->getDebugLoc(), TII->get(Z80::LDHL_SP_e))
-        .addImm(Disp & 0xFF);
+        .addImm(Disp);
     auto After = std::next(Pop);
+    SmallVector<MCRegister, 1> EmptyA;
+    if (Z80::readsUndef(*MII, Z80::A))
+      EmptyA.push_back(Z80::A);
     MBB.erase(Pop);
     MBB.erase(LDHL);
     MBB.erase(MII);
+    // Without the POP AF, an A that the save held empty has no definition, so
+    // the later reads of A are marked undef.
+    Z80::markEmptyReads(After, MBB.end(), TRI, EmptyA);
     MII = After;
     ++NumFlagSavesHoisted;
     Changed = true;
@@ -1151,7 +1163,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
     }
 
     if (Opc == Z80::LDHL_SP_e) {
-      // The stored immediate is the masked byte of a signed displacement.
+      // The immediate is a signed 8-bit displacement.
       int64_t N = SignExtend64<8>(MI.getOperand(0).getImm() & 0xFF);
       if (Known && isRegDeadAfter(Next, MBB, TRI, Z80::FLAGS)) {
         int64_t D = N - Off;
@@ -1907,10 +1919,12 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
                 if (It3 != MIE) {
                   Register StoreSrc2 = getStoreHLindSrcReg(*It3);
                   if (StoreSrc2.isValid()) {
-                    // Try redundant store elimination.
-                    if (tryElimRedundantStore(AbsOff, false, SrcLo, 0, false,
+                    // LD A,r in this store gives A a new value.
+                    if (isRegDeadAfter(std::next(It3), MBB, TRI, Z80::A) &&
+                        tryElimRedundantStore(AbsOff, false, SrcLo, 0, false,
                                               StoreSrc2, 0, MII, It1, It2, It3))
                       continue;
+                    invalidateSlotReg(TRI, Z80::A);
                     SlotVal SLo, SHi;
                     SLo.Reg = SrcLo;
                     SHi.Reg = StoreSrc2;
@@ -2136,6 +2150,14 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
 
+        // We cannot tell which slot a store through a pointer writes, so we
+        // forget every slot.
+        if (MI.mayStore()) {
+          SPSlots.clear();
+          ++MII;
+          continue;
+        }
+
         // Any other instruction: invalidate entries for defined regs.
         for (const MachineOperand &MO : MI.operands()) {
           if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
@@ -2223,7 +2245,14 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
 
-      // Case 5: Any other instruction — invalidate entries for defined regs.
+      // Case 5: Any other store may write a slot through a pointer, so clear
+      // everything.
+      if (MI.mayStore()) {
+        AvailValues.clear();
+        continue;
+      }
+
+      // Case 6: Any other instruction invalidates entries for defined regs.
       for (const MachineOperand &MO : MI.operands()) {
         if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
           invalidateReg(AvailValues, TRI, MO.getReg());

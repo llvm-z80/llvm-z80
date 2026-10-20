@@ -1,0 +1,37 @@
+## Inputs and options that z80-run rejects. The error also goes into the
+## report when --report is given.
+
+# RUN: rm -rf %t && split-file %s %t
+
+# RUN: not z80-run --max-cycles=0 %s 2>&1 | FileCheck %s --check-prefix=CYCLES
+# CYCLES: z80-run: error: --max-cycles expects a positive count, not '0'
+
+# RUN: not z80-run --expect-result=0x10000 %s 2>&1 | FileCheck %s --check-prefix=EXPECT
+# EXPECT: z80-run: error: --expect-result expects a 16-bit value or 'any', not '0x10000'
+
+# RUN: not z80-run --no-such-option %s 2>&1 | FileCheck %s --check-prefix=OPTION
+# OPTION: Unknown command line argument '--no-such-option'
+
+# RUN: not z80-run --report=- %t/missing 2>&1 | FileCheck %s --check-prefix=MISSING
+# MISSING: z80-run: error: {{.*}}missing: {{[Nn]}}o such file or directory
+# MISSING: {"error":"no-input",
+
+# RUN: not z80-run --report=- %s 2>&1 | FileCheck %s --check-prefix=FORMAT
+# FORMAT: z80-run: error: {{.*}}errors.test: neither ELF nor Intel HEX
+# FORMAT: {"error":"not-z80",
+
+## An object file still needs linking.
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/prog.s -o %t/prog.o
+# RUN: not z80-run --report=- %t/prog.o 2>&1 | FileCheck %s --check-prefix=OBJECT
+# OBJECT: z80-run: error: {{.*}}: not an executable; link the program first
+# OBJECT: {"error":"not-z80",
+
+# RUN: ld.lld %t/prog.o -o %t/prog
+# RUN: not z80-run --result=nowhere --report=- %t/prog 2>&1 | FileCheck %s --check-prefix=SYMBOL
+# SYMBOL: z80-run: error: --result names 'nowhere', which is neither a register nor a symbol of {{.*}}
+# SYMBOL: {"error":"usage",
+
+#--- prog.s
+	.globl	_start
+_start:
+	halt

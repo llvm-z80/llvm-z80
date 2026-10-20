@@ -1,0 +1,132 @@
+## Every way a run can end other than reaching the expected result.
+
+# RUN: rm -rf %t && split-file %s %t
+
+## A jump to itself never ends, since no interrupt is ever raised.
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/jr-self.s -o %t/jr-self.o
+# RUN: ld.lld %t/jr-self.o -o %t/jr-self
+# RUN: not z80-run --report=- %t/jr-self 2>&1 | FileCheck %s --check-prefix=HANG
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/jp-self.s -o %t/jp-self.o
+# RUN: ld.lld %t/jp-self.o -o %t/jp-self
+# RUN: not z80-run --report=- %t/jp-self 2>&1 | FileCheck %s --check-prefix=HANG
+# HANG: z80-run: {{.*}}: endless loop: the instruction at 0x{{[0-9A-F]+}} jumps to itself
+# HANG: "stop":"hang"
+
+## So do a conditional jump to itself with a condition that holds and a jump
+## through a register that holds the address of the jump.
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/jr-z-self.s -o %t/jr-z-self.o
+# RUN: ld.lld %t/jr-z-self.o -o %t/jr-z-self
+# RUN: not z80-run --report=- %t/jr-z-self 2>&1 | FileCheck %s --check-prefix=HANG
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/jp-c-self.s -o %t/jp-c-self.o
+# RUN: ld.lld %t/jp-c-self.o -o %t/jp-c-self
+# RUN: not z80-run --report=- %t/jp-c-self 2>&1 | FileCheck %s --check-prefix=HANG
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/jp-hl-self.s -o %t/jp-hl-self.o
+# RUN: ld.lld %t/jp-hl-self.o -o %t/jp-hl-self
+# RUN: not z80-run --report=- %t/jp-hl-self 2>&1 | FileCheck %s --check-prefix=HANG
+# RUN: llvm-mc -triple=sm83 -filetype=obj %t/sm83-jr-nc-self.s -o %t/sm83-jr-nc-self.o
+# RUN: ld.lld %t/sm83-jr-nc-self.o -o %t/sm83-jr-nc-self
+# RUN: not z80-run --report=- %t/sm83-jr-nc-self 2>&1 | FileCheck %s --check-prefix=HANG
+
+## A conditional jump to itself with a condition that fails falls through.
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/jr-nz-not-taken.s -o %t/jr-nz-not-taken.o
+# RUN: ld.lld %t/jr-nz-not-taken.o -o %t/jr-nz-not-taken
+# RUN: z80-run --expect-result=7 %t/jr-nz-not-taken
+
+## A longer loop runs until the budget is spent.
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/loop.s -o %t/loop.o
+# RUN: ld.lld %t/loop.o -o %t/loop
+# RUN: not z80-run --max-cycles=1k --report=- %t/loop 2>&1 | FileCheck %s --check-prefix=BUDGET
+# BUDGET: z80-run: {{.*}}: did not halt within 1000 cycles; last at 0x{{[0-9A-F]+}}
+# BUDGET: "stop":"budget"
+
+## z80-run defines no ED FE traps, so a trap is a fault.
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/trap.s -o %t/trap.o
+# RUN: ld.lld %t/trap.o -o %t/trap
+# RUN: not z80-run --report=- %t/trap 2>&1 | FileCheck %s --check-prefix=TRAP
+# TRAP: z80-run: {{.*}}: ED FE trap at 0x{{[0-9A-F]+}}
+# TRAP: "fault":"trap"
+# TRAP-SAME: "stop":"fault"
+
+## The SM83 locks up on the opcodes missing from the SM83 instruction set.
+# RUN: llvm-mc -triple=sm83 -filetype=obj %t/illegal.s -o %t/illegal.o
+# RUN: ld.lld %t/illegal.o -o %t/illegal
+# RUN: not z80-run --report=- %t/illegal 2>&1 | FileCheck %s --check-prefix=ILLEGAL
+# ILLEGAL: z80-run: {{.*}}: opcode 0xD3 at 0x{{[0-9A-F]+}} locks up the SM83
+# ILLEGAL: "fault":"illegal-opcode"
+
+## HALT with a DD prefix still halts the Z80. The run stops at the prefix,
+## and the cycles count up to the prefix.
+# RUN: llvm-mc -triple=z80 -filetype=obj %t/dd-halt.s -o %t/dd-halt.o
+# RUN: ld.lld %t/dd-halt.o -o %t/dd-halt
+# RUN: z80-run --expect-result=any --report=- %t/dd-halt | FileCheck %s --check-prefix=DDHALT
+# DDHALT: "cycles":4,
+# DDHALT-SAME: "stop":"halt"
+
+#--- jr-self.s
+	.globl	_start
+_start:
+	jr	_start
+
+#--- jp-self.s
+	.globl	_start
+_start:
+	jp	_start
+
+#--- jr-z-self.s
+	.globl	_start
+_start:
+	xor	a
+loop:
+	jr	z, loop
+
+#--- jp-c-self.s
+	.globl	_start
+_start:
+	scf
+loop:
+	jp	c, loop
+
+#--- jp-hl-self.s
+	.globl	_start
+_start:
+	ld	hl, loop
+loop:
+	jp	(hl)
+
+#--- sm83-jr-nc-self.s
+	.globl	_start
+_start:
+	and	a
+loop:
+	jr	nc, loop
+
+#--- jr-nz-not-taken.s
+	.globl	_start
+_start:
+	xor	a
+loop:
+	jr	nz, loop
+	ld	de, 7
+	halt
+
+#--- loop.s
+	.globl	_start
+_start:
+	inc	a
+	jr	_start
+
+#--- trap.s
+	.globl	_start
+_start:
+	.byte	0xED, 0xFE
+
+#--- illegal.s
+	.globl	_start
+_start:
+	.byte	0xD3
+
+#--- dd-halt.s
+	.globl	_start
+_start:
+	nop
+	.byte	0xDD, 0x76

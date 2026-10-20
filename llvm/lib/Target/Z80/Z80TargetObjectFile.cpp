@@ -13,6 +13,7 @@
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/SectionKind.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
@@ -29,10 +30,20 @@ MCSection *Z80TargetObjectFile::getExplicitSectionGlobal(
   return TargetLoweringObjectFileELF::getExplicitSectionGlobal(GO, SK, TM);
 }
 
-// z80asm reads '.' as an operator. '@' is legal in its identifiers but never in
-// C ones, so the replacement cannot collide with a user name.
-static void replaceDots(SmallVectorImpl<char> &Name) {
-  llvm::replace(Name, '.', '@');
+// z80asm treats '.' as an operator. Encode each dot-separated part of the
+// already-prefixed name as <length>_<part> prefixed with '_'.
+static void encodeDottedName(SmallVectorImpl<char> &Name) {
+  StringRef Original(Name.data(), Name.size());
+  if (!Original.contains('.'))
+    return;
+
+  SmallString<128> Encoded("_");
+  SmallVector<StringRef, 4> Parts;
+  Original.split(Parts, '.');
+  raw_svector_ostream OS(Encoded);
+  for (StringRef Part : Parts)
+    OS << Part.size() << '_' << Part;
+  Name.assign(Encoded.begin(), Encoded.end());
 }
 
 MCSymbol *Z80TargetObjectFile::getTargetSymbol(const GlobalValue *GV,
@@ -42,7 +53,7 @@ MCSymbol *Z80TargetObjectFile::getTargetSymbol(const GlobalValue *GV,
 
   SmallString<128> NameStr;
   TM.getNameWithPrefix(NameStr, GV, getMangler(), /*MayAlwaysUsePrivate=*/true);
-  replaceDots(NameStr);
+  encodeDottedName(NameStr);
   return getContext().getOrCreateSymbol(NameStr);
 }
 
@@ -51,5 +62,5 @@ void Z80TargetObjectFile::getNameWithPrefix(SmallVectorImpl<char> &OutName,
                                             const TargetMachine &TM) const {
   TargetLoweringObjectFileELF::getNameWithPrefix(OutName, GV, TM);
   if (TM.getMCAsmInfo().isZ88DK())
-    replaceDots(OutName);
+    encodeDottedName(OutName);
 }

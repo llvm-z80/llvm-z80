@@ -1325,6 +1325,7 @@ constexpr EnumStringDef<unsigned, 2> ElfMachineTypeDefs[] = {
   ENUM_ENT(EM_VIDEOCORE5,    "Broadcom VideoCore V processor"),
   ENUM_ENT(EM_78KOR,         "EM_78KOR"),
   ENUM_ENT(EM_56800EX,       "EM_56800EX"),
+  ENUM_ENT(EM_Z80,           "Zilog Z80"),
   ENUM_ENT(EM_AMDGPU,        "EM_AMDGPU"),
   ENUM_ENT(EM_RISCV,         "RISC-V"),
   ENUM_ENT(EM_LANAI,         "EM_LANAI"),
@@ -1781,6 +1782,17 @@ constexpr EnumStringDef<unsigned, 2> ElfHeaderXtensaFlagsDefs[] = {
 };
 constexpr auto ElfHeaderXtensaFlags =
     BUILD_ENUM_STRINGS(ElfHeaderXtensaFlagsDefs);
+
+constexpr EnumStringDef<unsigned, 2> ElfHeaderZ80FlagsDefs[] = {
+    ENUM_ENT(EF_Z80_MACH_Z80, "Z80"),
+    ENUM_ENT(EF_Z80_MACH_Z180, "Z180"),
+    ENUM_ENT(EF_Z80_MACH_R800, "R800"),
+    ENUM_ENT(EF_Z80_MACH_EZ80_Z80, "EZ80"),
+    ENUM_ENT(EF_Z80_MACH_SM83, "SM83"),
+    ENUM_ENT(EF_Z80_MACH_Z80N, "Z80N"),
+    ENUM_ENT(EF_Z80_MACH_EZ80_ADL, "EZ80, ADL"),
+};
+constexpr auto ElfHeaderZ80Flags = BUILD_ENUM_STRINGS(ElfHeaderZ80FlagsDefs);
 
 constexpr EnumStringDef<unsigned, 2> ElfSymOtherFlagsDefs[] = {
     ENUM_ENT_1(STV_INTERNAL),
@@ -3770,6 +3782,9 @@ template <class ELFT> void GNUELFDumper<ELFT>::printFileHeaders() {
   else if (e.e_machine == EM_XTENSA)
     ElfFlags = printFlags(e.e_flags, EnumStrings(ElfHeaderXtensaFlags),
                           unsigned(ELF::EF_XTENSA_MACH));
+  else if (e.e_machine == EM_Z80)
+    ElfFlags = printFlags(e.e_flags, EnumStrings(ElfHeaderZ80Flags),
+                          unsigned(ELF::EF_Z80_MACH_MSK));
   else if (e.e_machine == EM_CUDA) {
     unsigned Mask = e.e_ident[ELF::EI_ABIVERSION] == ELF::ELFABIVERSION_CUDA_V1
                         ? ELF::EF_CUDA_SM
@@ -7669,6 +7684,9 @@ template <class ELFT> void LLVMELFDumper<ELFT>::printFileHeaders() {
     else if (E.e_machine == EM_XTENSA)
       W.printFlags("Flags", E.e_flags, EnumStrings(ElfHeaderXtensaFlags),
                    unsigned(ELF::EF_XTENSA_MACH));
+    else if (E.e_machine == EM_Z80)
+      W.printFlags("Flags", E.e_flags, EnumStrings(ElfHeaderZ80Flags),
+                   unsigned(ELF::EF_Z80_MACH_MSK));
     else if (E.e_machine == EM_CUDA)
       W.printFlags("Flags", E.e_flags, EnumStrings(ElfHeaderNVPTXFlags),
                    unsigned(ELF::EF_CUDA_SM));

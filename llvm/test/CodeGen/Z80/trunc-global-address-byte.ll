@@ -54,8 +54,5 @@ define i8 @bank_and_load() {
   ret i8 %r
 }
 
-; llvm-readelf does not know the Z80 EM value, so match the raw relocation
-; info: the low byte of the Info column is the type — 04 = R_Z80_ADDR16_LO,
-; 05 = R_Z80_ADDR16_HI (llvm/include/llvm/BinaryFormat/ELFRelocs/Z80.def).
-; RELOC-DAG: {{0[0-9a-f]}}04 {{.*}} ___bank_music
-; RELOC-DAG: {{0[0-9a-f]}}05 {{.*}} ___bank_music
+; RELOC-DAG: R_Z80_BYTE0 {{.*}} ___bank_music
+; RELOC-DAG: R_Z80_BYTE1 {{.*}} ___bank_music

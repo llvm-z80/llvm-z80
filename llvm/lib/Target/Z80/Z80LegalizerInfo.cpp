@@ -28,6 +28,7 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/IntrinsicsZ80.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -132,7 +133,6 @@ static bool canonicalizeICmp(MachineInstr &MI, MachineRegisterInfo &MRI,
 Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   using namespace TargetOpcode;
 
-  const LLT S1 = LLT::scalar(1);
   const LLT S8 = LLT::scalar(8);
   const LLT S16 = LLT::scalar(16);
   const LLT S32 = LLT::scalar(32);
@@ -157,65 +157,54 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   getActionDefinitionsBuilder({G_GLOBAL_VALUE, G_BLOCK_ADDR}).legalFor({P0});
 
   // Integer extension/truncation
-  // s1->s8 is a no-op (s1 already lives in an 8-bit register on Z80)
   getActionDefinitionsBuilder({G_ANYEXT, G_SEXT, G_ZEXT})
-      .legalFor({{S16, S8}, {S8, S1}, {S16, S1}})
+      .legalFor({{S16, S8}})
       .scalarize(0)
       .widenScalarToNextPow2(1)
       .clampScalar(0, S8, S16);
 
-  // s1 lives in GR8 on Z80, so s1 is valid as a trunc destination.
   getActionDefinitionsBuilder(G_TRUNC)
-      .legalFor({{S8, S16}, {S1, S8}, {S1, S16}})
+      .legalFor({{S8, S16}})
       .scalarize(0)
       .widenScalarToNextPow2(1)
       .clampScalar(1, S8, S16);
 
-  // Basic ALU operations
-  // For 32-bit and larger, narrow to 16-bit which generates carry chains
-  // widenScalarToNextPow2 ensures non-pow2 types (e.g. s63 from f64 bit
-  // manipulation in Rust core) are widened before narrowScalar operates.
+  // Widen an odd width so that it splits into whole pairs.
   getActionDefinitionsBuilder({G_ADD, G_SUB})
       .legalFor({S8, S16})
       .scalarize(0)
       .widenScalarToNextPow2(0)
-      .narrowScalar(0, LegalizeMutations::changeTo(0, S16))
       .clampScalar(0, S8, S16);
 
-  // Carry-chain operations for multi-precision arithmetic
-  // G_UADDO: unsigned add with overflow (returns result + overflow flag)
-  // G_UADDE: unsigned add with carry in (for chaining)
-  // These are used when narrowing 32-bit+ operations. An odd width is widened
-  // to a power of two first, as for G_ADD, so that it splits into whole
-  // pairs rather than leaving a 1-bit piece on top.
+  // Widen an odd width so that it splits into whole pairs.
   getActionDefinitionsBuilder({G_UADDO, G_SADDO})
-      .legalFor({{S16, S1}})
+      .legalFor({{S16, S8}})
       .widenScalarToNextPow2(0)
       .clampScalar(0, S16, S16)
-      .minScalar(1, S1);
+      .minScalar(1, S8);
 
   getActionDefinitionsBuilder(G_UADDE)
-      .legalFor({{S16, S1}})
+      .legalFor({{S16, S8}})
       .clampScalar(0, S16, S16)
-      .minScalar(2, S1);
+      .minScalar(1, S8);
 
   // G_SADDE: lower to add + XOR-based overflow detection.
   // Unlike G_UADDE which uses hardware carry, signed overflow needs arithmetic.
-  getActionDefinitionsBuilder(G_SADDE).lower();
+  getActionDefinitionsBuilder(G_SADDE).minScalar(1, S8).lower();
 
   getActionDefinitionsBuilder({G_USUBO, G_SSUBO})
-      .legalFor({{S16, S1}})
+      .legalFor({{S16, S8}})
       .widenScalarToNextPow2(0)
       .clampScalar(0, S16, S16)
-      .minScalar(1, S1);
+      .minScalar(1, S8);
 
   getActionDefinitionsBuilder(G_USUBE)
-      .legalFor({{S16, S1}})
+      .legalFor({{S16, S8}})
       .clampScalar(0, S16, S16)
-      .minScalar(2, S1);
+      .minScalar(1, S8);
 
   // G_SSUBE: lower to sub + XOR-based overflow detection.
-  getActionDefinitionsBuilder(G_SSUBE).lower();
+  getActionDefinitionsBuilder(G_SSUBE).minScalar(1, S8).lower();
 
   getActionDefinitionsBuilder({G_AND, G_OR, G_XOR})
       .legalFor({S8})
@@ -280,7 +269,8 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Multiply with overflow detection
   // G_UMULO: lower to G_MUL + G_UMULH, overflow = (umulh != 0)
   // G_SMULO: lower to G_MUL + G_SMULH, overflow = (smulh != sign_ext(result))
-  getActionDefinitionsBuilder({G_UMULO, G_SMULO}).lower();
+  getActionDefinitionsBuilder(G_UMULO).widenScalarToNextPow2(0).lower();
+  getActionDefinitionsBuilder(G_SMULO).lower();
 
   // Division - Z80 has no hardware divide
   // i8: legal (inline DJNZ loop in instruction selector)
@@ -419,14 +409,15 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
       .widenScalarToNextPow2(0)
       .clampScalar(0, S8, S16);
 
-  // Merge/unmerge for extracting/combining values
-  // S8 from S16, S16 from S32
+  // Leave merges and unmerges wider than a register pair for the legalizer to
+  // fold away.
   getActionDefinitionsBuilder(G_UNMERGE_VALUES)
-      .legalFor({{S8, S16}, {S16, S32}});
+      .legalFor({{S8, S16}})
+      .unsupported();
 
   getActionDefinitionsBuilder(G_MERGE_VALUES)
-      .legalFor({{S16, S8}, {S32, S16}})
-      .lower();
+      .legalFor({{S16, S8}})
+      .unsupported();
 
   // Build vector (for creating 16-bit from two 8-bit values)
   getActionDefinitionsBuilder(G_BUILD_VECTOR).legalFor({{S16, S8}});
@@ -445,9 +436,12 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // G_BSWAP: custom lowering using UNMERGE+MERGE to avoid CSE conflict
   // when generic lowerBswap constant-folds and creates duplicate constants
   getActionDefinitionsBuilder(G_BSWAP).customFor({S16}).lower();
-  getActionDefinitionsBuilder({G_BITREVERSE, G_CTPOP}).lower();
-  getActionDefinitionsBuilder(
-      {G_CTLZ, G_CTLZ_ZERO_POISON, G_CTTZ, G_CTTZ_ZERO_POISON})
+  getActionDefinitionsBuilder(G_BITREVERSE)
+      .widenScalarToNextMultipleOf(0, 8)
+      .lower();
+  getActionDefinitionsBuilder({G_CTPOP, G_CTLZ, G_CTLZ_ZERO_POISON, G_CTTZ,
+                               G_CTTZ_ZERO_POISON})
+      .widenScalarToNextMultipleOf(1, 8)
       .lower();
 
   // Extending loads - custom lower to load + extend.
@@ -535,9 +529,10 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // Comparison: f32 → custom (returns i16 tri-state)
   // f64 → libcall (__gedf2, __ledf2, etc.) — unimplemented
   getActionDefinitionsBuilder(G_FCMP)
-      .customForCartesianProduct({S1}, {S32})
+      .customForCartesianProduct({S8}, {S32})
       .scalarize(0)
-      .libcallForCartesianProduct({S1}, {S64})
+      .libcallForCartesianProduct({S8}, {S64})
+      .minScalar(0, S8)
       .minScalar(1, S32);
 
   // modf decomposition → libcall (modff/modf), same reference-compiles
@@ -829,12 +824,19 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   }
 
   case TargetOpcode::G_DYN_STACKALLOC: {
-    // SM83 has no frame pointer register (no IX/IY), so dynamic stack
-    // allocation is not supported — SP-relative offsets break when SP moves.
-    if (MIRBuilder.getMF().getSubtarget<Z80Subtarget>().hasSM83())
-      report_fatal_error(
-          "SM83 does not support dynamic stack allocation "
-          "(alloca/VLA) because it has no frame pointer register");
+    // SM83 has no frame pointer register, so the frame is reached relative to
+    // SP and cannot survive SP moving by an amount known only at run time.
+    if (MIRBuilder.getMF().getSubtarget<Z80Subtarget>().hasSM83()) {
+      const Function &F = MIRBuilder.getMF().getFunction();
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F,
+          "dynamic stack allocation (alloca/VLA) is not supported on SM83, "
+          "which has no frame pointer register",
+          MI.getDebugLoc()));
+      MIRBuilder.buildUndef(MI.getOperand(0).getReg());
+      MI.eraseFromParent();
+      return true;
+    }
 
     // Custom lowering for dynamic stack allocation (alloca/VLA).
     // The generic lowering creates a COPY chain:
@@ -1278,7 +1280,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     Type *F32Ty = Type::getFloatTy(Ctx);
     Type *I16Ty = Type::getInt16Ty(Ctx);
     LLT S16 = LLT::scalar(16);
-    LLT S1 = LLT::scalar(1);
+    LLT BoolTy = MRI.getType(Dst);
 
     bool Fast = hasAllFastFlags(MI, MIRBuilder);
 
@@ -1368,10 +1370,10 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
         return false;
 
       auto Zero = MIRBuilder.buildConstant(S16, 0);
-      Register CmpBool = MRI.createGenericVirtualRegister(S1);
+      Register CmpBool = MRI.createGenericVirtualRegister(BoolTy);
       MIRBuilder.buildICmp(ICmpPred, CmpBool, CmpResult, Zero);
 
-      Register NaNBool = MRI.createGenericVirtualRegister(S1);
+      Register NaNBool = MRI.createGenericVirtualRegister(BoolTy);
       if (IsONE) {
         // ONE: (cmp != 0) AND NOT unordered
         MIRBuilder.buildICmp(CmpInst::ICMP_EQ, NaNBool, UnordResult, Zero);

@@ -236,7 +236,7 @@ MachineBasicBlock::iterator Z80FrameLowering::eliminateCallFramePseudoInstr(
   if (STI.hasSM83() && Amount <= 127) {
     // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
     assert(callFrameDestroyScratch(STI, Amount) == Register());
-    BuildMI(MBB, MI, DL, TII.get(Z80::ADD_SP_e)).addImm(Amount & 0xFF);
+    BuildMI(MBB, MI, DL, TII.get(Z80::ADD_SP_e)).addImm(Amount);
   } else if (Amount <= 16) {
     // Small amounts: use POP AF (each pops 2 bytes, clobbers A but not HL).
     // More compact than INC SP (1 byte per 2 bytes vs 1 byte per 1 byte).
@@ -335,7 +335,7 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
     if (STI.hasSM83() && LocalSize <= 128) {
       // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
       BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_SP_e))
-          .addImm(-(int64_t)LocalSize & 0xFF);
+          .addImm(-(int64_t)LocalSize);
     } else {
       unsigned PushCount = LocalSize / 2;
       // Check if HL might hold an incoming argument (live-in to entry block).
@@ -405,49 +405,8 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
         break;
     }
 
-    const auto &STI = MF.getSubtarget<Z80Subtarget>();
-    if (STI.hasSM83() && LocalSize <= 127) {
-      // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
-      BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_SP_e)).addImm(LocalSize & 0xFF);
-    } else if (LocalSize <= 4) {
-      // Small: INC SP loop (1 byte each, no clobber).
-      for (unsigned i = 0; i < LocalSize; ++i)
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::INC_SP));
-    } else {
-      // Check which registers are live at return to pick the best strategy.
-      // Return instruction adds implicit uses for return value registers.
-      auto RetIt = MBB.getLastNonDebugInstr();
-      bool HLLive = false, ALive = false;
-      if (RetIt != MBB.end()) {
-        for (const auto &MO : RetIt->operands()) {
-          if (!MO.isReg() || !MO.isUse())
-            continue;
-          Register Reg = MO.getReg();
-          if (Reg == Z80::HL || Reg == Z80::H || Reg == Z80::L)
-            HLLive = true;
-          if (Reg == Z80::A || Reg == Z80::AF)
-            ALive = true;
-        }
-      }
-
-      if (!HLLive) {
-        // HL free: LD HL,LocalSize; ADD HL,SP; LD SP,HL (5 bytes total).
-        Z80::buildLD16n(MBB, MBBI, DL, TII, Z80::HL).addImm(LocalSize & 0xFFFF);
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_HL_SP));
-        BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_SP_HL));
-      } else if (!ALive) {
-        // A free: POP AF loop (1 byte per 2 bytes).
-        unsigned PopCount = LocalSize / 2;
-        for (unsigned i = 0; i < PopCount; ++i)
-          BuildMI(MBB, MBBI, DL, TII.get(Z80::POP_AF));
-        if (LocalSize % 2)
-          BuildMI(MBB, MBBI, DL, TII.get(Z80::INC_SP));
-      } else {
-        // Both A and HL live (i32 return): INC SP loop as last resort.
-        for (unsigned i = 0; i < LocalSize; ++i)
-          BuildMI(MBB, MBBI, DL, TII.get(Z80::INC_SP));
-      }
-    }
+    MF.getSubtarget<Z80Subtarget>().getInstrInfo()->releaseStack(MBB, MBBI, DL,
+                                                                 LocalSize);
   }
 }
 

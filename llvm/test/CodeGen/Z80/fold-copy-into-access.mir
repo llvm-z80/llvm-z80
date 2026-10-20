@@ -9,6 +9,9 @@
   define void @const_then_store() { ret void }
   define void @via_hl() { ret void }
   define void @hl_is_the_address() { ret void }
+  define void @volatile_stays_in_order() { ret void }
+  define void @load_stays_before_out() { ret void }
+  define void @volatile_stays_before_volatile_store() { ret void }
 ...
 ---
 name:            reload_then_copy
@@ -16,7 +19,7 @@ tracksRegLiveness: true
 body:             |
   bb.0:
     liveins: $ix
-    $c = LD_r_IXd -4
+    $c = LD_r_IXd -4, implicit $ix
     $a = LD_r_r killed $c
     RET implicit $a
 
@@ -32,7 +35,7 @@ body:             |
   bb.0:
     liveins: $ix
     $c = LD_r_n 7
-    LD_IXd_r -4, killed $c
+    LD_IXd_r -4, killed $c, implicit $ix
     RET
 
 # CHECK-LABEL: name: const_then_store
@@ -71,5 +74,67 @@ body:             |
 # CHECK-LABEL: name: hl_is_the_address
 # CHECK:      $c = LD_r_HLind
 # CHECK-NEXT: $l = LD_r_r killed $c
+
+...
+---
+name:            volatile_stays_in_order
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $de, $hl
+    $c = LD_r_HLind implicit $hl :: (volatile load (s8))
+    LD_A_DEind implicit-def $a, implicit $de :: (volatile load (s8))
+    $b = LD_r_r killed $c
+    RET implicit $a, implicit $b
+
+# Moving the first volatile load down to the copy would put it after the
+# second one.
+
+# CHECK-LABEL: name: volatile_stays_in_order
+# CHECK:      $c = LD_r_HLind
+# CHECK-NEXT: LD_A_DEind
+# CHECK-NEXT: $b = LD_r_r killed $c
+
+...
+---
+name:            load_stays_before_out
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $c, $hl
+    $e = LD_r_HLind implicit $hl :: (load (s8))
+    OUT8_C $a, implicit $c
+    $d = LD_r_r killed $e
+    RET implicit $d
+
+# An instruction with side effects, such as an OUT that switches a memory
+# bank, can change what the load reads.
+
+# CHECK-LABEL: name: load_stays_before_out
+# CHECK:      $e = LD_r_HLind
+# CHECK-NEXT: OUT8_C
+# CHECK-NEXT: $d = LD_r_r killed $e
+
+...
+---
+name:            volatile_stays_before_volatile_store
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 1, alignment: 1 }
+  - { id: 1, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $d, $ix
+    $c = LD_r_IXd -4, implicit $ix :: (volatile load (s8) from %stack.0)
+    LD_IXd_r -5, $d, implicit $ix :: (volatile store (s8) into %stack.1)
+    $a = LD_r_r killed $c
+    RET implicit $a
+
+# The volatile load stays before the volatile store to another slot.
+
+# CHECK-LABEL: name: volatile_stays_before_volatile_store
+# CHECK:      $c = LD_r_IXd -4
+# CHECK-NEXT: LD_IXd_r -5
+# CHECK-NEXT: $a = LD_r_r killed $c
 
 ...
