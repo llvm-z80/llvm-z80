@@ -239,11 +239,8 @@ bool Z80StaticFrameAlloc::runOnModule(Module &M) {
       Type *I16 = Type::getInt16Ty(M.getContext());
       Constant *Aliasee = Frames;
       if (Offset)
-        Aliasee = ConstantExpr::getGetElementPtr(
-            BlockTy, Frames,
-            SmallVector<Constant *>{ConstantInt::get(I16, 0),
-                                    ConstantInt::get(I16, Offset)},
-            /*InBounds=*/true);
+        Aliasee = ConstantExpr::getInBoundsPtrAdd(
+            Frames, ConstantInt::get(I16, Offset));
       auto *Alias = GlobalAlias::create(
           ArrayType::get(Type::getInt8Ty(M.getContext()), Size),
           Frames->getAddressSpace(), GlobalValue::PrivateLinkage,

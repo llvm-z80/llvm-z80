@@ -18,10 +18,6 @@
 
 using namespace llvm;
 
-void Z80TargetObjectFile::Initialize(MCContext &Ctx, const TargetMachine &TM) {
-  TargetLoweringObjectFileELF::Initialize(Ctx, TM);
-}
-
 MCSection *Z80TargetObjectFile::getExplicitSectionGlobal(
     const GlobalObject *GO, SectionKind SK, const TargetMachine &TM) const {
   StringRef SectionName = GO->getSection();

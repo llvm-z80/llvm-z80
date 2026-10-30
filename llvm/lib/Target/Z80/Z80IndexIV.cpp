@@ -222,7 +222,7 @@ PreservedAnalyses Z80IndexIV::run(Loop &L, LoopAnalysisManager &AM,
       // Emit an "uglygep" to avoid having to find a real GEP calculation that
       // leads to the SCEV. This always works, and still preserves at least
       // some aliasing information.
-      IRBuilder<> Builder(B, I);
+      IRBuilder<> Builder(I);
       Value *V = Builder.CreateBitCast(BaseVal, Ptr);
       V = Builder.CreateGEP(
           I8, V, Builder.CreateZExt(IndexVal, DL.getIndexType(Ptr)), "uglygep");

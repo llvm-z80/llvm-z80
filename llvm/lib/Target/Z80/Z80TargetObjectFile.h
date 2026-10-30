@@ -16,7 +16,6 @@ namespace llvm {
 /// Lowering for an Z80 ELF32 object file.
 class Z80TargetObjectFile : public TargetLoweringObjectFileELF {
 public:
-  void Initialize(MCContext &ctx, const TargetMachine &TM) override;
   MCSection *getExplicitSectionGlobal(const GlobalObject *GO, SectionKind Kind,
                                       const TargetMachine &TM) const override;
   MCSymbol *getTargetSymbol(const GlobalValue *GV,

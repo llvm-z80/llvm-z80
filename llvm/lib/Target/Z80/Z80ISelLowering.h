@@ -32,8 +32,8 @@ public:
   }
 
   // Soft-float comparison libcalls return a C int, which is 16 bits here.
-  MVT::SimpleValueType getCmpLibcallReturnType() const override {
-    return MVT::i16;
+  IntegerType *getCmpLibcallReturnType(LLVMContext &Ctx) const override {
+    return Type::getInt16Ty(Ctx);
   }
 
   // While integer division isn't "cheap", long division is not all that much
