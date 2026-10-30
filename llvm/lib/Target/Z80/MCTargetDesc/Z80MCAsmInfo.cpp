@@ -97,6 +97,7 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
   // sdasz80 dialect (SyntaxVariant 1)
   AssemblerDialect = 1;
   IsSDCC = true;
+  SupportsQuotedNames = false;
 
   // Suppress ELF-specific directives
   HasDotTypeDotSizeDirective = false;
