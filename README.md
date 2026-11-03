@@ -8,17 +8,19 @@
        Created with <a href="https://www.aseprite.org/">Aseprite</a> / <a href="z80-artwork">Source files</a></sub>
 </p>
 
+<div align="center">
+
 <!-- prettier-ignore -->
 LLVM-Z80 is an LLVM fork supporting the Zilog Z80 series of microprocessors.  
 [[Releases]](https://github.com/llvm-z80/llvm-z80/releases) |
+[[Try it Online]](https://godbolt.org/z/9eq1sYT1K) |
 [[Nightly]](https://github.com/llvm-z80/llvm-z80/releases/tag/nightly) |
-[[Backend Code]](https://github.com/llvm-z80/llvm-z80/tree/main/llvm/lib/Target/Z80) |
-[[Tests]](https://github.com/llvm-z80/llvm-z80/tree/main/z80-test) |
-[[Utilities]](https://github.com/llvm-z80/llvm-z80/tree/main/z80-utils) |
 [[Wiki]](https://github.com/llvm-z80/llvm-z80/wiki) |
 [[FAQ]](https://github.com/llvm-z80/llvm-z80/wiki/FAQ) |
 [[AUTHORS]](https://github.com/llvm-z80/llvm-z80/blob/main/AUTHORS) |
 [[NOTICE]](https://github.com/llvm-z80/llvm-z80/blob/main/NOTICE)
+
+</div>
 
 ## Notice
 
@@ -240,3 +242,35 @@ LLVM-Z80 stands on the shoulders of the following projects.
   allows you to disable strict IEEE 754 compliance. While this improves code
   efficiency, it may cause floating-point operations to behave unexpectedly in
   certain edge cases.
+
+
+
+## Thanks to
+
+<p align="center">
+  <a href="https://fossforall.org/">
+    <picture>
+      <source media="(prefers-color-scheme: light)" srcset="z80-artwork/third-party/fossforall-black-text.svg">
+      <img width="520" alt="FOSS for All" src="z80-artwork/third-party/fossforall-white-text.svg">
+    </picture>
+  </a>
+  <br/>
+  <sub>LLVM-Z80 is supported by the <a href="https://fossforall.org/docs/microgrants/">FOSS for All Microgrants</a> program.</sub>
+</p>
+
+<br/>
+
+<p align="center">
+  <a href="https://godbolt.org/">
+    <img width="200" alt="Compiler Explorer" src="z80-artwork/third-party/compiler-explorer.svg">
+  </a>
+  <br/>
+  <sub><a href="https://godbolt.org/">Compiler Explorer</a> hosts LLVM-Z80 online.</sub>
+</p>
+
+<br/>
+
+<p align="center">
+  And of course, thanks to the <a href="https://llvm.org/">LLVM</a> and <a href="https://llvm-mos.org/">LLVM-MOS</a> communities,<br/>
+  and to everyone who has <a href="https://github.com/llvm-z80/llvm-z80/blob/main/AUTHORS">contributed</a> to LLVM-Z80!
+</p>
