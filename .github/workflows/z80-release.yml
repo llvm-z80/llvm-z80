@@ -84,7 +84,7 @@ jobs:
             cache: ccache
             cmake-flags: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DLLVM_USE_LINKER=lld
           - platform: macOS-ARM64
-            os: macos-14
+            os: macos-15
             cache: ccache
             cmake-flags: -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           - platform: Windows-X64
