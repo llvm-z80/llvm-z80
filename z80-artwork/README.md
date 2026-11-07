@@ -37,3 +37,16 @@ artwork, include a copy of that license ([LICENSE-LLVM](LICENSE-LLVM)).
 
 Neither license grants permission to use trademarks. For the LLVM name, see the
 notice in the top-level [README](../README.md#notice).
+
+## Third-party logos
+
+The `third-party/` directory holds unmodified copies of other projects' logos
+used in this repository, such as in the "Thanks to" section of the top-level
+README. They are not covered by the licenses above and belong to their
+respective owners.
+
+| File                                    | Source                                                                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `third-party/fossforall-black-text.svg` | `gradient/logo-black-text.svg` in [foss-for-all/logo-artworks](https://github.com/foss-for-all/logo-artworks)                    |
+| `third-party/fossforall-white-text.svg` | `gradient/logo-white-text.svg` in [foss-for-all/logo-artworks](https://github.com/foss-for-all/logo-artworks)                    |
+| `third-party/compiler-explorer.svg`     | `views/resources/site-logo.svg` in [compiler-explorer/compiler-explorer](https://github.com/compiler-explorer/compiler-explorer) |

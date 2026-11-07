@@ -46,14 +46,36 @@ static void encodeDottedName(SmallVectorImpl<char> &Name) {
   Name.assign(Encoded.begin(), Encoded.end());
 }
 
+// sdas accepts only letters, digits, `.`, `_`, and `$` in symbol names.
+// Write every other byte as `$` plus two hex digits, so `(` becomes `$28`.
+// `$` itself becomes `$24`, which keeps distinct names distinct.
+static void escapeSDCCName(SmallVectorImpl<char> &Name, const MCAsmInfo &MAI) {
+  SmallString<128> Escaped;
+  raw_svector_ostream OS(Escaped);
+  for (char C : Name)
+    if (C != '$' && MAI.isAcceptableChar(C))
+      OS << C;
+    else
+      OS << '$' << format_hex_no_prefix((unsigned char)C, 2);
+  Name.assign(Escaped.begin(), Escaped.end());
+}
+
+static void encodeName(SmallVectorImpl<char> &Name, const MCAsmInfo &MAI) {
+  if (MAI.isZ88DK())
+    encodeDottedName(Name);
+  else if (MAI.isSDCC())
+    escapeSDCCName(Name, MAI);
+}
+
 MCSymbol *Z80TargetObjectFile::getTargetSymbol(const GlobalValue *GV,
                                                const TargetMachine &TM) const {
-  if (!TM.getMCAsmInfo().isZ88DK())
+  const MCAsmInfo &MAI = TM.getMCAsmInfo();
+  if (!MAI.isZ88DK() && !MAI.isSDCC())
     return nullptr;
 
   SmallString<128> NameStr;
   TM.getNameWithPrefix(NameStr, GV, getMangler(), /*MayAlwaysUsePrivate=*/true);
-  encodeDottedName(NameStr);
+  encodeName(NameStr, MAI);
   return getContext().getOrCreateSymbol(NameStr);
 }
 
@@ -61,6 +83,5 @@ void Z80TargetObjectFile::getNameWithPrefix(SmallVectorImpl<char> &OutName,
                                             const GlobalValue *GV,
                                             const TargetMachine &TM) const {
   TargetLoweringObjectFileELF::getNameWithPrefix(OutName, GV, TM);
-  if (TM.getMCAsmInfo().isZ88DK())
-    encodeDottedName(OutName);
+  encodeName(OutName, TM.getMCAsmInfo());
 }

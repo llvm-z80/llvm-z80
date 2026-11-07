@@ -171,10 +171,19 @@ jobs:
             echo '```'
           } > notes.md
 
+          # We make an annotated tag so that the nightly is listed first among the releases.
+          tag=$(gh api "repos/$repo/git/tags" \
+                  -f tag=nightly -f object="$GITHUB_SHA" -f type=commit -f message="LLVM-Z80 Nightly" \
+                  -f 'tagger[name]=github-actions[bot]' \
+                  -f 'tagger[email]=41898282+github-actions[bot]@users.noreply.github.com' \
+                  -f "tagger[date]=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                  --jq .sha)
+
           if ! gh release view nightly --repo "$repo" > /dev/null 2>&1; then
+            gh api "repos/$repo/git/refs" -f ref=refs/tags/nightly -f sha="$tag" > /dev/null
             gh release create nightly "$PKG.tar.xz" "$PKG.tar.xz.jsonl" \
               --repo "$repo" \
-              --target "$GITHUB_SHA" \
+              --verify-tag \
               --prerelease \
               --title "LLVM-Z80 Nightly" \
               --notes-file notes.md
@@ -183,5 +192,5 @@ jobs:
 
           # prepare reads the built commit from the body, so it goes last.
           gh release upload nightly "$PKG.tar.xz" "$PKG.tar.xz.jsonl" --repo "$repo" --clobber
-          gh api -X PATCH "repos/$repo/git/refs/tags/nightly" -f sha="$GITHUB_SHA" > /dev/null
+          gh api -X PATCH "repos/$repo/git/refs/tags/nightly" -f sha="$tag" -F force=true > /dev/null
           gh release edit nightly --repo "$repo" --notes-file notes.md
