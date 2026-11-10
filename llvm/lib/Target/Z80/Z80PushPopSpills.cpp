@@ -243,6 +243,15 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
       if (En.Slot >= 0)
         Failed.insert(En.Slot);
   };
+  // Fails the slots above the next Bytes bytes of other instructions. A failed
+  // slot stays in the frame. Slots below these bytes stay candidates.
+  auto FailAbove = [&](int Bytes) {
+    for (auto It = Stack.rbegin(); It != Stack.rend() && Bytes > 0; ++It)
+      if (It->Slot >= 0)
+        Failed.insert(It->Slot);
+      else
+        Bytes -= It->Bytes;
+  };
   auto AdjustOther = [&](int Delta) {
     if (Delta > 0) {
       if (!Stack.empty() && Stack.back().Slot < 0)
@@ -256,7 +265,7 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
         return;
       Entry &Top = Stack.back();
       if (Top.Slot >= 0) {
-        FailAll();
+        FailAbove(Need);
         return;
       }
       int Take = std::min(Need, Top.Bytes);
