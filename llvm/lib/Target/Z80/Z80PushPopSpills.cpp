@@ -370,6 +370,11 @@ bool Z80PushPopSpills::runOnMachineFunction(MachineFunction &MF) {
   if (!EnablePushPopSpills || skipFunction(MF.getFunction()))
     return false;
 
+  // longjmp restores SP but not the bytes popped since setjmp.
+  // TODO: Check MF.exposesReturnsTwice() once GlobalISel sets this flag.
+  if (MF.getFunction().callsFunctionThatReturnsTwice())
+    return false;
+
   TII = MF.getSubtarget().getInstrInfo();
   TRI = MF.getSubtarget().getRegisterInfo();
   MFI = &MF.getFrameInfo();
