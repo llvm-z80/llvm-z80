@@ -659,9 +659,9 @@ def RELOAD_ANY16 : Z80Pseudo<(outs Any16:$dst), (ins i32imm:$fi, i32imm:$offset)
 }
 
 // SPILL_PUSH and SPILL_POP are the PUSH and POP of a spill slot replaced by
-// Z80PushPopSpills. PEI does not count the SP movement of this pair in SPAdj
-// outside call sequences. So Z80InstrInfo::getSpillPushDepth counts this pair
-// instead. expandPostRAPseudo lowers this pair to PUSH and POP.
+// Z80PushPopSpills. getSPAdjust returns 0 for this pair.
+// Z80InstrInfo::getSpillPushDepth counts this pair for PEI instead.
+// expandPostRAPseudo lowers this pair to PUSH and POP.
 def SPILL_PUSH : Z80Pseudo<(outs), (ins Any16:$src)> {
   let mayStore = true;
   let mayLoad = false;

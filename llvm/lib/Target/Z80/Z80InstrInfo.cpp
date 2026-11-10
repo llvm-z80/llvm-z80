@@ -516,6 +516,10 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
     return 0;
   }
 
+  // getSpillPushDepth counts SPILL_PUSH and SPILL_POP for PEI.
+  if (Opc == Z80::SPILL_PUSH || Opc == Z80::SPILL_POP)
+    return 0;
+
   // Positive when SP goes down.
   switch (Opc) {
   case Z80::PUSH_BC:
@@ -524,7 +528,6 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   case Z80::PUSH_AF:
   case Z80::PUSH_IX:
   case Z80::PUSH_IY:
-  case Z80::SPILL_PUSH:
     return 2;
   case Z80::POP_BC:
   case Z80::POP_DE:
@@ -532,7 +535,6 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   case Z80::POP_AF:
   case Z80::POP_IX:
   case Z80::POP_IY:
-  case Z80::SPILL_POP:
     return -2;
   case Z80::INC_SP:
     return -1; // SP += 1 (pops 1 byte)
@@ -551,8 +553,10 @@ int Z80InstrInfo::getSpillPushDepth(
   int Depth = 0;
   for (MachineBasicBlock::const_iterator I = MI->getParent()->begin(); I != MI;
        ++I)
-    if (I->getOpcode() == Z80::SPILL_PUSH || I->getOpcode() == Z80::SPILL_POP)
-      Depth += getSPAdjust(*I);
+    if (I->getOpcode() == Z80::SPILL_PUSH)
+      Depth += 2;
+    else if (I->getOpcode() == Z80::SPILL_POP)
+      Depth -= 2;
   return Depth;
 }
 

@@ -72,6 +72,44 @@ define i16 @across_call(i16 %a, i16 %b) {
   ret i16 %s
 }
 
+; The reloads after the call are inside the call sequence.
+declare void @put(i8)
+
+define void @call_loop(ptr %p, i16 %n) {
+; Z80-LABEL:  _call_loop:
+; Z80:        push de
+; Z80-NEXT:   ld a,(hl)
+; Z80-NEXT:   inc hl
+; Z80-NEXT:   push hl
+; Z80-NEXT:   call _put
+; Z80-NEXT:   pop hl
+; Z80-NEXT:   pop de
+; SM83-LABEL: _call_loop:
+; SM83:       push bc
+; SM83-NEXT:  ld a,(de)
+; SM83-NEXT:  inc de
+; SM83-NEXT:  push de
+; SM83-NEXT:  call _put
+; SM83-NEXT:  pop de
+; SM83-NEXT:  pop bc
+entry:
+  %z = icmp eq i16 %n, 0
+  br i1 %z, label %done, label %loop
+
+loop:
+  %pp = phi ptr [ %p, %entry ], [ %pn, %loop ]
+  %nn = phi i16 [ %n, %entry ], [ %nd, %loop ]
+  %nd = add i16 %nn, -1
+  %c = load i8, ptr %pp
+  %pn = getelementptr i8, ptr %pp, i16 1
+  call void @put(i8 %c)
+  %e = icmp eq i16 %nd, 0
+  br i1 %e, label %done, label %loop
+
+done:
+  ret void
+}
+
 ; %pos is a stack argument read while a spill is pushed.
 define i16 @stack_args(i16 %val, i16 %bits, i8 %pos, i8 %n) {
 ; Z80-LABEL:  _stack_args:

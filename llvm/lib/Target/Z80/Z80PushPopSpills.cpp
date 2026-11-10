@@ -12,10 +12,6 @@
 // This replacement makes spills smaller and faster. A 16-bit spill and reload
 // through SP or IX take 12 to 14 bytes. PUSH and POP take 2 bytes.
 //
-// PEI counts PUSH and POP in SPAdj only inside call sequences. Spills there
-// are not replaced. Elsewhere, Z80InstrInfo::getSpillPushDepth counts the
-// pseudos.
-//
 //===----------------------------------------------------------------------===//
 
 #include "Z80PushPopSpills.h"
@@ -247,6 +243,15 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
       if (En.Slot >= 0)
         Failed.insert(En.Slot);
   };
+  // Fails the slots above the next Bytes bytes of other instructions. A failed
+  // slot stays in the frame. Slots below these bytes stay candidates.
+  auto FailAbove = [&](int Bytes) {
+    for (auto It = Stack.rbegin(); It != Stack.rend() && Bytes > 0; ++It)
+      if (It->Slot >= 0)
+        Failed.insert(It->Slot);
+      else
+        Bytes -= It->Bytes;
+  };
   auto AdjustOther = [&](int Delta) {
     if (Delta > 0) {
       if (!Stack.empty() && Stack.back().Slot < 0)
@@ -260,7 +265,7 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
         return;
       Entry &Top = Stack.back();
       if (Top.Slot >= 0) {
-        FailAll();
+        FailAbove(Need);
         return;
       }
       int Take = std::min(Need, Top.Bytes);
@@ -273,17 +278,12 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
   auto IsCandidateReload = [&](const MachineInstr &MI) {
     return isReload(MI) && Cands.count(accessSlot(MI));
   };
+  // Bytes of stack arguments in the current call sequence.
+  int ArgBytes = 0;
 
-  bool InCallSeq = false;
   for (auto I = MBB.begin(), E = MBB.end(); I != E && Failed.empty(); ++I) {
     if (I->isDebugInstr())
       continue;
-
-    if ((isSpill(*I) || isReload(*I)) && Cands.count(accessSlot(*I)) &&
-        InCallSeq) {
-      Failed.insert(accessSlot(*I));
-      break;
-    }
 
     if (isSpill(*I) && Cands.count(accessSlot(*I))) {
       Stack.push_back({accessSlot(*I), 0});
@@ -342,7 +342,13 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
     }
 
     if (TII->isFrameInstr(*I))
-      InCallSeq = TII->isFrameSetup(*I);
+      ArgBytes = TII->isFrameSetup(*I) ? TII->getFrameSize(*I) : 0;
+    // The callee reads the stack arguments right above the return address.
+    if (I->isCall()) {
+      AdjustOther(-ArgBytes);
+      AdjustOther(ArgBytes);
+    }
+
     if (int Adj = TII->getSPAdjust(*I)) {
       AdjustOther(Adj);
       continue;
