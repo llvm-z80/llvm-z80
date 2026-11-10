@@ -1297,10 +1297,6 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
     return true;
   }
 
-  // Compute callee-cleanup amount before emitting return value handling.
-  // For callee-cleanup calls, ADJCALLSTACKUP must be emitted BEFORE sret loads
-  // because the callee has already restored SP — PEI's SPAdj must reflect this
-  // before resolving sret frame indices.
   unsigned CalleeCleanupBytes = 0;
   if (StackArgBytes > 0) {
     const auto &STI = MF.getSubtarget<Z80Subtarget>();
@@ -1323,11 +1319,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
       CalleeCleanupBytes = StackArgBytes;
   }
 
-  // For callee-cleanup calls, emit ADJCALLSTACKUP IMMEDIATELY after the CALL,
-  // before any return value handling. The callee has already restored SP, so
-  // PEI's SPAdj must be decremented before any instructions that might use
-  // frame indices (sret loads, or register allocator-inserted spills of return
-  // value registers).
+  // A callee-cleanup call closes the call sequence right after the CALL.
   bool EmittedAdjUp = false;
   if (CalleeCleanupBytes > 0) {
     addCallFrameDestroyClobbers(MIRBuilder.buildInstr(Z80::ADJCALLSTACKUP)

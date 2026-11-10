@@ -492,16 +492,30 @@ bool Z80InstrInfo::reverseBranchCondition(
 int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
 
-  // ADJCALLSTACKDOWN is erased without physical SP change.
-  // The actual SP adjustments come from individual PUSH instructions,
-  // so we report 0 here to avoid double-counting.
+  // ADJCALLSTACKDOWN is erased without code. The argument PUSHes move SP.
   if (Opc == Z80::ADJCALLSTACKDOWN)
     return 0;
 
-  // SPAdj uses the "offset correction" sign convention (StackGrowsDown):
-  //   PUSH (SP decreases) → positive (offsets from SP need to increase)
-  //   POP  (SP increases) → negative (offsets from SP need to decrease)
-  // This matches the base class where ADJCALLSTACKDOWN returns positive.
+  // ADJCALLSTACKUP becomes the caller's cleanup code.
+  // Operand 1 is the number of bytes popped by the callee.
+  if (Opc == Z80::ADJCALLSTACKUP)
+    return -(getFrameSize(MI) - MI.getOperand(1).getImm());
+
+  // A callee-cleanup function pops the stack arguments on return.
+  if (MI.isCall()) {
+    for (auto I = std::next(MachineBasicBlock::const_iterator(MI)),
+              E = MI.getParent()->end();
+         I != E; ++I) {
+      if (I->getOpcode() == Z80::ADJCALLSTACKUP)
+        return -I->getOperand(1).getImm();
+      if (I->isCall())
+        break;
+    }
+    // PEI replaces every ADJCALLSTACKUP with real code.
+    return 0;
+  }
+
+  // Positive when SP goes down.
   switch (Opc) {
   case Z80::PUSH_BC:
   case Z80::PUSH_DE:
