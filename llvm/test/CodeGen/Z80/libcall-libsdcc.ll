@@ -31,6 +31,29 @@ define i64 @mul64(i64 %a, i64 %b) {
   ret i64 %r
 }
 
+; Only the Z80 library multiplies 16-bit operands into 32 bits.
+; Z80-LABEL: _smul32:
+; Z80: call ___mulsint2slong
+; SM83-LABEL: _smul32:
+; SM83: call ___mulhisi3
+define i32 @smul32(i16 %a, i16 %b) {
+  %x = sext i16 %a to i32
+  %y = sext i16 %b to i32
+  %r = mul i32 %x, %y
+  ret i32 %r
+}
+
+; Z80-LABEL: _umul32:
+; Z80: call ___muluint2ulong
+; SM83-LABEL: _umul32:
+; SM83: call ___umulhisi3
+define i32 @umul32(i16 %a, i16 %b) {
+  %x = zext i16 %a to i32
+  %y = zext i16 %b to i32
+  %r = mul i32 %x, %y
+  ret i32 %r
+}
+
 ; CHECK-LABEL: _fadd:
 ; CHECK: call ___fsadd
 define float @fadd(float %a, float %b) {

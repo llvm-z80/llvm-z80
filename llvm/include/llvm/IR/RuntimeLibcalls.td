@@ -3768,11 +3768,11 @@ def isZ80SDCCEnv : RuntimeLibcallAvailability<(all_of IsZ80Family, IsSDCCEnv)>;
 defvar Z80CompilerRtImpls =
   (add Z80MemCalls,
        LibcallsWithCC<(add __udivqi3, __umodqi3), Z80_BUILTIN>,
-       __umulhi3, __mulhisi3, __umulhisi3, __divmodhi4, __udivmodhi4,
-       __divmodsi4, __udivmodsi4);
+       __umulhi3, __divmodhi4, __udivmodhi4, __divmodsi4, __udivmodsi4);
 
 def Z80CompilerRt : LibcallLibrary<"compiler-rt",
   (add Z80CompilerRtImpls,
+       __mulhisi3, __umulhisi3,
        __addsf3_fast, __subsf3_fast, __mulsf3_fast, __divsf3_fast,
        __cmpsf2_fast,
        LibcallImpls<(add _call_iy), isZ80>,
@@ -3819,6 +3819,8 @@ def __fs2slong : RuntimeLibcallImpl<FPTOSINT_F32_I32>;
 def __fs2ulong : RuntimeLibcallImpl<FPTOUINT_F32_I32>;
 def __fs2slonglong : RuntimeLibcallImpl<FPTOSINT_F32_I64>;
 def __fs2ulonglong : RuntimeLibcallImpl<FPTOUINT_F32_I64>;
+def __mulsint2slong : RuntimeLibcallImpl<Z80_SMUL_LOHI_I16>;
+def __muluint2ulong : RuntimeLibcallImpl<Z80_UMUL_LOHI_I16>;
 def __sdcc_call_iy : RuntimeLibcallImpl<Z80_CALL_IY>;
 def __sdcc_call_hl : RuntimeLibcallImpl<Z80_CALL_HL>;
 
@@ -3830,12 +3832,15 @@ def Libsdcc : LibcallLibrary<"libsdcc",
        __fsadd, __fssub, __fsmul, __fsdiv, __fslt, __fseq, __fsneq,
        __slong2fs, __ulong2fs, __slonglong2fs, __ulonglong2fs,
        __fs2slong, __fs2ulong, __fs2slonglong, __fs2ulonglong,
+       // The SM83 library has no 16-bit to 32-bit multiply.
+       LibcallImpls<(add __mulsint2slong, __muluint2ulong), isZ80>,
        LibcallImpls<(add __sdcc_call_iy), isZ80>,
        LibcallImpls<(add __sdcc_call_hl), isSM83>), isZ80SDCCEnv>;
 
 // compiler-rt for what libsdcc lacks.
-def Z80SDCCCompilerRt : LibcallLibrary<"compiler-rt", Z80CompilerRtImpls,
-                                       isZ80SDCCEnv>;
+def Z80SDCCCompilerRt : LibcallLibrary<"compiler-rt",
+  (add Z80CompilerRtImpls,
+       LibcallImpls<(add __mulhisi3, __umulhisi3), isSM83>), isZ80SDCCEnv>;
 
 // The compiler-rt functions libsdcc replaces.
 defvar Z80LibsdccOptOut = [
