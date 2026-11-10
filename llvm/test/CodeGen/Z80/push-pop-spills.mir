@@ -19,6 +19,8 @@
   define void @index_regs() { ret void }
   define void @three_reloads() { ret void }
   define void @sp_read() { ret void }
+  define void @asm_sp() { ret void }
+  define void @reg_flags() { ret void }
   declare void @ext()
   declare i16 @setjmp(ptr) returns_twice
 ...
@@ -272,4 +274,41 @@ body: |
     $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     $sp = COPY killed $bc
     RET implicit $de
+...
+---
+# An inline asm clobbers SP while slot 0 is pushed. Slot 0 stays in the frame.
+# CHECK-LABEL: name: asm_sp
+# CHECK:       SPILL_GR16 $de, %stack.0, 0
+# CHECK-NEXT:  INLINEASM
+# CHECK-NEXT:  $de = RELOAD_GR16 %stack.0, 0
+name: asm_sp
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+body: |
+  bb.0:
+    liveins: $de
+    SPILL_GR16 $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    INLINEASM &nop, sideeffect attdialect, clobber, implicit-def dead early-clobber $sp
+    $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    RET implicit $de
+...
+---
+# The undef flag of the spill and the dead flag of the last reload stay on the
+# pseudos. The kept reload pushes BC again, so the first pop of BC is not dead.
+# CHECK-LABEL: name: reg_flags
+# CHECK:       SPILL_PUSH undef $hl
+# CHECK-NEXT:  $bc = SPILL_POP
+# CHECK-NEXT:  SPILL_PUSH $bc
+# CHECK-NEXT:  dead $de = SPILL_POP
+name: reg_flags
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+body: |
+  bb.0:
+    SPILL_GR16 undef $hl, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    dead $bc = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    dead $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    RET
 ...

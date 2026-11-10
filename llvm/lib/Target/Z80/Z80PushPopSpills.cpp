@@ -327,8 +327,8 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
       AdjustOther(Adj);
       continue;
     }
-    // getSPAdjust counts calls and frame pseudos. Inline asm must restore SP.
-    if (!TII->isFrameInstr(*I) && !I->isCall() && !I->isInlineAsm() &&
+    // getSPAdjust counts calls and frame pseudos.
+    if (!TII->isFrameInstr(*I) && !I->isCall() &&
         (I->readsRegister(Z80::SP, TRI) || I->modifiesRegister(Z80::SP, TRI)))
       FailAll();
   }
@@ -345,14 +345,20 @@ void Z80PushPopSpills::rewrite(MachineBasicBlock &MBB, const SlotSet &Cands) {
   for (MachineInstr &MI : llvm::make_early_inc_range(MBB)) {
     if (!(isSpill(MI) || isReload(MI)) || !Cands.count(accessSlot(MI)))
       continue;
-    Register Reg = accessReg(MI);
+    const MachineOperand &RegOp = MI.getOperand(0);
+    Register Reg = RegOp.getReg();
     const DebugLoc &DL = MI.getDebugLoc();
     if (isSpill(MI)) {
       BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_PUSH))
-          .addReg(Reg, getKillRegState(MI.getOperand(0).isKill()));
+          .addReg(Reg, getKillRegState(RegOp.isKill()) |
+                           getUndefRegState(RegOp.isUndef()));
     } else {
-      BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_POP), Reg);
-      if (--Remaining[accessSlot(MI)] != 0) {
+      bool Last = --Remaining[accessSlot(MI)] == 0;
+      // A reload before the last reload pushes the register again.
+      BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_POP))
+          .addReg(Reg,
+                  RegState::Define | getDeadRegState(Last && RegOp.isDead()));
+      if (!Last) {
         BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_PUSH)).addReg(Reg);
         ++NumKeptReloads;
       }
