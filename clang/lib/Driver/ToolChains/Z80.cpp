@@ -134,14 +134,31 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
   const char *RtLibName = IsSM83 ? "sm83_sdcc_rt.lib" : "z80_sdcc_rt.lib";
   const char *RtLibBase = IsSM83 ? "sm83_sdcc_rt" : "z80_sdcc_rt";
   const char *LinkerName = IsSM83 ? "sdldgb" : "sdldz80";
+  std::string Linker = TC.GetProgramPath(LinkerName);
+  bool StartFiles =
+      !Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles);
+  bool DefaultLibs =
+      !Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs);
 
-  // Link crt0 first so startup code is at address 0x0000.
-  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
-    SmallString<256> Crt0Path(TC.getDriver().Dir);
-    llvm::sys::path::append(Crt0Path, "..", "lib", SubDir,
-                            IsSM83 ? "sm83_crt0.rel" : "z80_crt0.rel");
-    if (llvm::sys::fs::exists(Crt0Path))
-      CmdArgs.push_back(Args.MakeArgString(Crt0Path));
+  // SDCC's crt0 and library are in one directory.
+  std::optional<std::string> SDCCLibDir;
+  if (StartFiles || DefaultLibs) {
+    SDCCLibDir = findSDCCLibDir(SubDir, Linker, TC.getDriver().SysRoot);
+    if (!SDCCLibDir)
+      TC.getDriver().Diag(diag::err_drv_z80_sdcc_lib_not_found) << SubDir;
+  }
+
+  // Code starts past the vectors of SDCC's crt0, and data at sdcc's default.
+  CmdArgs.push_back("-b");
+  CmdArgs.push_back("_CODE=0x0200");
+  CmdArgs.push_back("-b");
+  CmdArgs.push_back(IsSM83 ? "_DATA=0xc000" : "_DATA=0x8000");
+
+  // Link SDCC's crt0 before the inputs.
+  if (StartFiles && SDCCLibDir) {
+    SmallString<256> Crt0Path(*SDCCLibDir);
+    llvm::sys::path::append(Crt0Path, "crt0.rel");
+    CmdArgs.push_back(Args.MakeArgString(Crt0Path));
   }
 
   // Add input object files.
@@ -150,18 +167,13 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(II.getFilename());
   }
 
-  std::string Linker = TC.GetProgramPath(LinkerName);
-
-  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
+  if (DefaultLibs) {
     // Link SDCC's library.
-    if (std::optional<std::string> Dir =
-            findSDCCLibDir(SubDir, Linker, TC.getDriver().SysRoot)) {
+    if (SDCCLibDir) {
       CmdArgs.push_back("-k");
-      CmdArgs.push_back(Args.MakeArgString(*Dir));
+      CmdArgs.push_back(Args.MakeArgString(*SDCCLibDir));
       CmdArgs.push_back("-l");
       CmdArgs.push_back(SubDir);
-    } else {
-      TC.getDriver().Diag(diag::err_drv_z80_sdcc_lib_not_found) << SubDir;
     }
 
     // Then the supplementary runtime. -k <dir> -l <name> links only the

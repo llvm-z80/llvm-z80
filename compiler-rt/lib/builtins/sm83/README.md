@@ -14,13 +14,13 @@ rely on.
 |---|---|
 | `<name>.asm` | one function family per file, named after its entry point |
 | `crt0.asm` | startup for the ELF toolchain (`ld.lld` + `sm83.ld`) |
-| `crt0_sdcc.asm` | startup for the SDCC toolchain (`sdldgb`) |
 | `sm83.ld` | default linker script, flat 64 KB image from 0x0000 |
 | `LICENSE` | Zlib OR Apache-2.0 WITH LLVM-exception OR MIT |
 
 `llvm/lib/Target/Z80/CMakeLists.txt` builds `lib/sm83/sm83_rt.a` with
 `llvm-mc` + `llvm-ar`, and `lib/sm83/sm83_rt.lib` with `sdasgb` + `sdar` when
 those tools are installed.
+In the sdcc environment, programs start with SDCC's `crt0.rel`.
 
 ## Calling convention
 

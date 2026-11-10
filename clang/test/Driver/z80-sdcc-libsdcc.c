@@ -1,5 +1,5 @@
-// The sdcc environment links SDCC's own library, found as sdcc finds it, and
-// then <target>_sdcc_rt.lib.
+// The sdcc environment links SDCC's crt0 and library, and then
+// <target>_sdcc_rt.lib.
 // UNSUPPORTED: system-windows
 
 // RUN: rm -rf %t && mkdir -p %t/bin %t/lib/z80 %t/lib/sm83 %t/share/sdcc/lib/z80 %t/share/sdcc/lib/sm83 %t/env/z80
@@ -18,10 +18,17 @@
 // $SDCC_LIB comes first.
 // RUN: env SDCC_LIB=%t/env PATH=%t/bin %clang --target=z80-unknown-none-sdcc -ccc-install-dir %t/bin -### %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=ENV
-// ENV: "-k" "{{.*}}/env/z80" "-l" "z80" "-k" "{{.*}}/lib/z80" "-l" "z80_sdcc_rt"
+// ENV: "{{.*}}/env/z80/crt0.rel" {{.*}} "-k" "{{.*}}/env/z80" "-l" "z80" "-k" "{{.*}}/lib/z80" "-l" "z80_sdcc_rt"
+
+// -nodefaultlibs keeps SDCC's crt0.
+// RUN: env SDCC_LIB=%t/env PATH=%t/bin %clang --target=z80-unknown-none-sdcc -ccc-install-dir %t/bin -nodefaultlibs -### %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NODEFAULTLIBS
+// NODEFAULTLIBS: "{{.*}}/env/z80/crt0.rel"
+// NODEFAULTLIBS-NOT: "-l"
 
 // RUN: env SDCC_LIB=%t/env PATH=%t/bin %clang --target=z80-unknown-none-sdcc -ccc-install-dir %t/bin -nostdlib -### %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=NOSTDLIB
+// NOSTDLIB-NOT: crt0.rel
 // NOSTDLIB-NOT: "-l"
 
 // Without SDCC's library, linking is an error.

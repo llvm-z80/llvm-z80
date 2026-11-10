@@ -10,7 +10,6 @@ startup code, and the default linker script.
 |---|---|
 | `<name>.asm` | one function family per file, named after its entry point |
 | `crt0.asm` | startup for the ELF toolchain (`ld.lld` + `z80.ld`) |
-| `crt0_sdcc.asm` | startup for the SDCC toolchain (`sdldz80`) |
 | `z80.ld` | default linker script, flat 64 KB image from 0x0000 |
 | `LICENSE` | Zlib OR Apache-2.0 WITH LLVM-exception OR MIT |
 
@@ -18,6 +17,7 @@ startup code, and the default linker script.
 `llvm-mc` + `llvm-ar` produce `lib/z80/z80_rt.a` for the ELF path, and
 `sdasz80` + `sdar` produce `lib/z80/z80_rt.lib` for the SDCC path (only when
 those tools are installed).
+In the sdcc environment, programs start with SDCC's `crt0.rel`.
 
 ## Calling convention
 
