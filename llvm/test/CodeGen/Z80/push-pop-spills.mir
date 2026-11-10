@@ -18,6 +18,7 @@
   define void @swap_then_fail() { ret void }
   define void @index_regs() { ret void }
   define void @three_reloads() { ret void }
+  define void @sp_read() { ret void }
   declare void @ext()
   declare i16 @setjmp(ptr) returns_twice
 ...
@@ -250,4 +251,25 @@ body: |
     $hl = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     RET implicit $bc, implicit $hl, implicit $de
+...
+---
+# A stack save reads SP while slot 0 is pushed. The stack restore would leave
+# the pushed bytes on the stack. Slot 0 stays in the frame.
+# CHECK-LABEL: name: sp_read
+# CHECK:       SPILL_GR16 $de, %stack.0, 0
+# CHECK-NEXT:  $bc = COPY $sp
+# CHECK-NEXT:  $de = RELOAD_GR16 %stack.0, 0
+# CHECK-NEXT:  $sp = COPY killed $bc
+name: sp_read
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+body: |
+  bb.0:
+    liveins: $de
+    SPILL_GR16 $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    $bc = COPY $sp
+    $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    $sp = COPY killed $bc
+    RET implicit $de
 ...

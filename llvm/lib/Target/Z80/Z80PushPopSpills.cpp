@@ -327,10 +327,9 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
       AdjustOther(Adj);
       continue;
     }
-    // getSPAdjust covers calls and call frame pseudos. Inline assembly is
-    // assumed to restore SP.
+    // getSPAdjust counts calls and frame pseudos. Inline asm must restore SP.
     if (!TII->isFrameInstr(*I) && !I->isCall() && !I->isInlineAsm() &&
-        I->modifiesRegister(Z80::SP, TRI))
+        (I->readsRegister(Z80::SP, TRI) || I->modifiesRegister(Z80::SP, TRI)))
       FailAll();
   }
 
