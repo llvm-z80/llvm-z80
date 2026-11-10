@@ -10,6 +10,7 @@
   define void @kill_moves() { ret void }
   define void @in_call_seq() { ret void }
   define void @under_call_args() { ret void }
+  define void @above_call_args() { ret void }
   define void @other_block() { ret void }
   define void @not_top() { ret void }
   define void @returns_twice(ptr %buf) {
@@ -155,6 +156,27 @@ body: |
     $bc = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     ADJCALLSTACKUP 2, 0, implicit-def $sp, implicit $sp, implicit-def $a
     RET implicit $bc
+...
+---
+# The callee reads the argument right above the return address. A slot pushed
+# after the argument stays in place.
+# CHECK-LABEL: name: above_call_args
+# CHECK:       SPILL_GR16 killed $de, %stack.0, 0
+# CHECK:       $de = RELOAD_GR16 %stack.0, 0
+name: above_call_args
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+body: |
+  bb.0:
+    liveins: $de, $hl
+    ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
+    PUSH_HL implicit killed $hl
+    SPILL_GR16 killed $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags
+    $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    ADJCALLSTACKUP 2, 0, implicit-def $sp, implicit $sp, implicit-def $a
+    RET implicit $de
 ...
 ---
 # CHECK-LABEL: name: other_block

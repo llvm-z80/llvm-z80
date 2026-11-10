@@ -269,6 +269,8 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
   auto IsCandidateReload = [&](const MachineInstr &MI) {
     return isReload(MI) && Cands.count(accessSlot(MI));
   };
+  // Bytes of stack arguments in the current call sequence.
+  int ArgBytes = 0;
 
   for (auto I = MBB.begin(), E = MBB.end(); I != E && Failed.empty(); ++I) {
     if (I->isDebugInstr())
@@ -328,6 +330,14 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
       if (--Remaining[FI] == 0)
         Stack.pop_back();
       continue;
+    }
+
+    if (TII->isFrameInstr(*I))
+      ArgBytes = TII->isFrameSetup(*I) ? TII->getFrameSize(*I) : 0;
+    // The callee reads the stack arguments right above the return address.
+    if (I->isCall()) {
+      AdjustOther(-ArgBytes);
+      AdjustOther(ArgBytes);
     }
 
     if (int Adj = TII->getSPAdjust(*I)) {
