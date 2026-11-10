@@ -13,6 +13,7 @@
 #include "Z80InstrInfo.h"
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
+#include "Z80MachineFunctionInfo.h"
 #include "Z80OpcodeUtils.h"
 #include "Z80RegisterInfo.h"
 #include "Z80Subtarget.h"
@@ -492,16 +493,30 @@ bool Z80InstrInfo::reverseBranchCondition(
 int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
 
-  // ADJCALLSTACKDOWN is erased without physical SP change.
-  // The actual SP adjustments come from individual PUSH instructions,
-  // so we report 0 here to avoid double-counting.
+  // ADJCALLSTACKDOWN is erased without code. The argument PUSHes move SP.
   if (Opc == Z80::ADJCALLSTACKDOWN)
     return 0;
 
-  // SPAdj uses the "offset correction" sign convention (StackGrowsDown):
-  //   PUSH (SP decreases) → positive (offsets from SP need to increase)
-  //   POP  (SP increases) → negative (offsets from SP need to decrease)
-  // This matches the base class where ADJCALLSTACKDOWN returns positive.
+  // ADJCALLSTACKUP becomes the caller's cleanup code.
+  // Operand 1 is the number of bytes popped by the callee.
+  if (Opc == Z80::ADJCALLSTACKUP)
+    return -(getFrameSize(MI) - MI.getOperand(1).getImm());
+
+  // A callee-cleanup function pops the stack arguments on return.
+  if (MI.isCall()) {
+    for (auto I = std::next(MachineBasicBlock::const_iterator(MI)),
+              E = MI.getParent()->end();
+         I != E; ++I) {
+      if (I->getOpcode() == Z80::ADJCALLSTACKUP)
+        return -I->getOperand(1).getImm();
+      if (I->isCall())
+        break;
+    }
+    // PEI replaces every ADJCALLSTACKUP with real code.
+    return 0;
+  }
+
+  // Positive when SP goes down.
   switch (Opc) {
   case Z80::PUSH_BC:
   case Z80::PUSH_DE:
@@ -509,6 +524,7 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   case Z80::PUSH_AF:
   case Z80::PUSH_IX:
   case Z80::PUSH_IY:
+  case Z80::SPILL_PUSH:
     return 2;
   case Z80::POP_BC:
   case Z80::POP_DE:
@@ -516,6 +532,7 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   case Z80::POP_AF:
   case Z80::POP_IX:
   case Z80::POP_IY:
+  case Z80::SPILL_POP:
     return -2;
   case Z80::INC_SP:
     return -1; // SP += 1 (pops 1 byte)
@@ -524,6 +541,19 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   default:
     return TargetInstrInfo::getSPAdjust(MI);
   }
+}
+
+int Z80InstrInfo::getSpillPushDepth(
+    MachineBasicBlock::const_iterator MI) const {
+  if (!MI->getMF()->getInfo<Z80FunctionInfo>()->HasSpillPush)
+    return 0;
+
+  int Depth = 0;
+  for (MachineBasicBlock::const_iterator I = MI->getParent()->begin(); I != MI;
+       ++I)
+    if (I->getOpcode() == Z80::SPILL_PUSH || I->getOpcode() == Z80::SPILL_POP)
+      Depth += getSPAdjust(*I);
+  return Depth;
 }
 
 using InstrSeq = SmallVector<MachineInstr *, 8>;
@@ -980,6 +1010,24 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     // marked undef.
     lowerCopy(&MI);
     return true;
+
+  case Z80::SPILL_PUSH: {
+    Register Reg = MI.getOperand(0).getReg();
+    MachineInstr *Push = BuildMI(MBB, MI, DL, get(Z80::getPushOpcode(Reg)));
+    if (MI.getOperand(0).isKill())
+      Push->addRegisterKilled(Reg, TRI);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case Z80::SPILL_POP: {
+    Register Reg = MI.getOperand(0).getReg();
+    MachineInstr *Pop = BuildMI(MBB, MI, DL, get(Z80::getPopOpcode(Reg)));
+    if (MI.getOperand(0).isDead())
+      Pop->addRegisterDead(Reg, TRI);
+    MI.eraseFromParent();
+    return true;
+  }
 
   case Z80::LOAD8_IND: {
     // Expand to LD A,(BC), LD A,(DE), or LD A,(HL) based on allocated register.

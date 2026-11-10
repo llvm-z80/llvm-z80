@@ -1,0 +1,34 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=post-ra-pseudos %s -o - \
+# RUN:   | FileCheck %s
+#
+# SPILL_PUSH and SPILL_POP lower to the PUSH and POP of the same register.
+
+--- |
+  define void @lower() { ret void }
+...
+---
+# The kill and dead flags stay on the lowered PUSH and POP.
+# CHECK-LABEL: name: lower
+# CHECK:       PUSH_BC implicit killed $bc
+# CHECK-NEXT:  PUSH_DE implicit $de
+# CHECK-NEXT:  PUSH_IX implicit killed $ix
+# CHECK-NEXT:  PUSH_IY implicit killed $iy
+# CHECK-NEXT:  POP_HL implicit-def $hl
+# CHECK-NEXT:  POP_IX implicit-def $ix
+# CHECK-NEXT:  POP_IY implicit-def dead $iy
+# CHECK-NEXT:  POP_BC implicit-def $bc
+name: lower
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $bc, $de, $ix, $iy
+    SPILL_PUSH killed $bc
+    SPILL_PUSH $de
+    SPILL_PUSH killed $ix
+    SPILL_PUSH killed $iy
+    $hl = SPILL_POP
+    $ix = SPILL_POP
+    dead $iy = SPILL_POP
+    $bc = SPILL_POP
+    RET implicit $hl, implicit $ix, implicit $bc, implicit $de
+...

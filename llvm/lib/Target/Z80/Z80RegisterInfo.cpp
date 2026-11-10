@@ -1237,43 +1237,19 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
   if (UseFP) {
     Offset += 2; // Skip saved IX
   } else {
-    // For callee-cleanup calls, if regalloc inserted this frame-index
-    // instruction between CALL and ADJCALLSTACKUP, PEI's SPAdj still
-    // includes the arg PUSHes even though the callee already popped them.
-    // Detect this by scanning forward: if we hit ADJCALLSTACKUP before
-    // any CALL, we're in the post-CALL region and must subtract the
-    // callee-cleanup amount.
-    int AdjustedSPAdj = SPAdj;
-    if (SPAdj > 0) {
-      auto It = std::next(MI->getIterator());
-      auto End = MI->getParent()->end();
-      for (; It != End; ++It) {
-        if (It->getOpcode() == Z80::ADJCALLSTACKUP) {
-          int CalleeAmount = It->getOperand(1).getImm();
-          if (CalleeAmount > 0) {
-            LLVM_DEBUG(dbgs() << "  CalleeSPAdj: SPAdj " << SPAdj << " -> "
-                              << (SPAdj - CalleeAmount) << " (callee cleanup "
-                              << CalleeAmount << ") for FI#" << Idx << "\n");
-          }
-          AdjustedSPAdj -= CalleeAmount;
-          break;
-        }
-        if (It->isCall()) {
-          LLVM_DEBUG(dbgs() << "  PreCALL region: SPAdj " << SPAdj
-                            << " kept for FI#" << Idx << "\n");
-          break; // Pre-CALL region, SPAdj is correct
-        }
-      }
-    }
-    Offset += MFI.getStackSize() + AdjustedSPAdj;
+    Offset += MFI.getStackSize() + SPAdj;
+    // SPAdj does not count SPILL_PUSH and SPILL_POP. Z80PushPopSpills keeps
+    // this pair outside call sequences and balanced within each block.
+    Offset +=
+        MF.getSubtarget<Z80Subtarget>().getInstrInfo()->getSpillPushDepth(MI);
     // PEI's StackSize excludes LocalAreaOffset (return address size), but
     // regular objects' offsets include that bias. Compensate for non-fixed
     // objects. Fixed objects (negative Idx, e.g. stack args) use raw
     // SP-entry-relative offsets and don't need this adjustment.
     if (Idx >= 0)
       Offset -= TFI->getOffsetOfLocalArea(); // -(-2) = +2 for Z80
-    LLVM_DEBUG(dbgs() << "  FI#" << Idx << " SPAdj=" << SPAdj << " AdjSPAdj="
-                      << AdjustedSPAdj << " StackSize=" << MFI.getStackSize()
+    LLVM_DEBUG(dbgs() << "  FI#" << Idx << " SPAdj=" << SPAdj
+                      << " StackSize=" << MFI.getStackSize()
                       << " ObjOff=" << MFI.getObjectOffset(Idx)
                       << " FinalOffset=" << Offset << " in " << MF.getName()
                       << " bb." << MI->getParent()->getNumber() << "\n");

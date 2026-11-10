@@ -48,6 +48,7 @@ add_llvm_target(Z80CodeGen
   Z80NarrowMemAccess.cpp
   Z80NonReentrant.cpp
   Z80PreEmitPeephole.cpp
+  Z80PushPopSpills.cpp
   Z80RegisterBankInfo.cpp
   Z80RegisterInfo.cpp
   Z80ShiftRotateChain.cpp

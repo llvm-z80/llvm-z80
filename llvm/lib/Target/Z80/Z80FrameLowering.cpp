@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -196,6 +197,48 @@ void Z80FrameLowering::processFunctionBeforeFrameFinalized(
             "aligned data",
         F.getSubprogram()));
   }
+}
+
+void Z80FrameLowering::processFunctionBeforeFrameIndicesReplaced(
+    MachineFunction &MF, RegScavenger *RS) const {
+  auto *FuncInfo = MF.getInfo<Z80FunctionInfo>();
+  FuncInfo->HasSpillPush = llvm::any_of(MF, [](const MachineBasicBlock &MBB) {
+    return llvm::any_of(MBB, [](const MachineInstr &MI) {
+      return MI.getOpcode() == Z80::SPILL_PUSH;
+    });
+  });
+
+  // IX does not move with SPILL_PUSH.
+  if (!FuncInfo->HasSpillPush || hasFP(MF))
+    return;
+
+  const Z80InstrInfo &TII = *MF.getSubtarget<Z80Subtarget>().getInstrInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  for (MachineBasicBlock &MBB : MF)
+    for (MachineInstr &MI : MBB) {
+      if (!MI.isDebugValue())
+        continue;
+      for (MachineOperand &MO : MI.debug_operands()) {
+        if (!MO.isFI() ||
+            MFI.getStackID(MO.getIndex()) != TargetStackID::Default)
+          continue;
+        int Depth = TII.getSpillPushDepth(MI);
+        if (Depth == 0)
+          continue;
+        // PEI only prepends SP and the frame offset to the indirect form.
+        // PEI rewrites the other forms further. Those forms lose the location
+        // instead.
+        if (MI.isNonListDebugValue() && MI.getDebugOffset().isImm() &&
+            !MI.getDebugExpression()->isImplicit()) {
+          MI.getDebugExpressionOp().setMetadata(DIExpression::prepend(
+              MI.getDebugExpression(), DIExpression::ApplyOffset, Depth));
+          continue;
+        }
+        MO.ChangeToRegister(Register(), /*isDef=*/false);
+        if (MI.isNonListDebugValue())
+          MI.getDebugOffset().ChangeToRegister(Register(), /*isDef=*/false);
+      }
+    }
 }
 
 bool Z80FrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
