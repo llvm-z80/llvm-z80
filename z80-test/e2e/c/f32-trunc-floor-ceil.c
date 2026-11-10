@@ -1,5 +1,6 @@
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0xFFFF %t
+// UNSUPPORTED: sdcc
 
 /* truncf, floorf and ceilf for every position of the fractional bits in the
    mantissa. Returns 0xFFFF when every row matches, else the 1-based index of

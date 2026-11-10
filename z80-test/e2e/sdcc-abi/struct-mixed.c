@@ -1,6 +1,6 @@
 // RUN: rm -rf %t && split-file %s %t
 // RUN: %{sdcc} -c %t/sdcc.c -o %t/sdcc.rel
-// RUN: %cc %t/clang.c %t/sdcc.rel -Wl,-l,%{sdcc-lib} -o %t/prog
+// RUN: %cc %t/clang.c %t/sdcc.rel -o %t/prog
 // RUN: %run --expect-result=0x00FF %t/prog
 
 //--- clang.c

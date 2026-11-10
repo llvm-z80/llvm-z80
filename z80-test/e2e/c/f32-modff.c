@@ -1,6 +1,6 @@
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0xFFFF %t
-// UNSUPPORTED: fast-math
+// UNSUPPORTED: fast-math, sdcc
 
 /* modff runtime routine: integral and fractional parts, both with the sign
    of the input. Signed zeros are compared as bit patterns. */

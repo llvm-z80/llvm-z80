@@ -26,8 +26,9 @@ and `lld/`.
 | z80-torture | `vendor/gcc-torture`, once per configuration |
 
 SDCC is optional. With `sdasz80` and `sdldz80` (`sdasgb` and `sdldgb` for the
-SM83) on `PATH`, the SDCC-format configurations run, and with `sdcc` itself the
-`sdcc-abi` tests run too. Without them those tests are reported as unsupported.
+SM83) on `PATH` and SDCC's library where Clang finds it, the SDCC-format
+configurations run, and with `sdcc` itself the `sdcc-abi` tests run too. Without
+them those tests are reported as unsupported.
 
 One configuration or one test can be run on its own:
 
@@ -121,7 +122,6 @@ expected result:
 | `%llc` | `llc` for the configuration's CPU and optimization level |
 | `%run` | `z80-run` for the configuration's CPU |
 | `%{sdcc}` | `sdcc` for the configuration's CPU |
-| `%{sdcc-lib}` | SDCC's library for the configuration's CPU |
 
 The features for `UNSUPPORTED:` and `REQUIRES:` are the CPU (`z80`, `sm83`),
 the optimization level (`O0` to `Oz`), the variants, the format (`elf`, `sdcc`)
@@ -138,7 +138,7 @@ The two halves of an `sdcc-abi` test are in one file, split with `split-file`:
 ```c
 // RUN: rm -rf %t && split-file %s %t
 // RUN: %{sdcc} -c %t/sdcc.c -o %t/sdcc.rel
-// RUN: %cc %t/clang.c %t/sdcc.rel -Wl,-l,%{sdcc-lib} -o %t/prog
+// RUN: %cc %t/clang.c %t/sdcc.rel -o %t/prog
 // RUN: %run --expect-result=0x000F %t/prog
 
 //--- clang.c
