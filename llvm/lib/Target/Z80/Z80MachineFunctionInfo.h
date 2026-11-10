@@ -34,6 +34,9 @@ struct Z80FunctionInfo : public MachineFunctionInfo {
   unsigned CalleeSavedFrameSize = 0;
   unsigned getCalleeSavedFrameSize() const { return CalleeSavedFrameSize; }
   void setCalleeSavedFrameSize(unsigned S) { CalleeSavedFrameSize = S; }
+
+  /// Whether PEI found a SPILL_PUSH before replacing frame indices.
+  bool HasSpillPush = false;
 };
 
 } // namespace llvm

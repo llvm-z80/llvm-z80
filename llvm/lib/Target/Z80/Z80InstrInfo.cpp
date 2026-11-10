@@ -13,6 +13,7 @@
 #include "Z80InstrInfo.h"
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
+#include "Z80MachineFunctionInfo.h"
 #include "Z80OpcodeUtils.h"
 #include "Z80RegisterInfo.h"
 #include "Z80Subtarget.h"
@@ -544,6 +545,9 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
 
 int Z80InstrInfo::getSpillPushDepth(
     MachineBasicBlock::const_iterator MI) const {
+  if (!MI->getMF()->getInfo<Z80FunctionInfo>()->HasSpillPush)
+    return 0;
+
   int Depth = 0;
   for (MachineBasicBlock::const_iterator I = MI->getParent()->begin(); I != MI;
        ++I)

@@ -628,7 +628,7 @@ public:
   int getSPAdjust(const MachineInstr &MI) const override;
 
   /// Bytes pushed by SPILL_PUSH and not yet popped by SPILL_POP before \p MI
-  /// in the block.
+  /// in the block. Returns 0 until PEI sets Z80FunctionInfo::HasSpillPush.
   int getSpillPushDepth(MachineBasicBlock::const_iterator MI) const;
 
   /// Raise SP by \p Amount in front of \p I with the cheapest sequence that

@@ -201,8 +201,15 @@ void Z80FrameLowering::processFunctionBeforeFrameFinalized(
 
 void Z80FrameLowering::processFunctionBeforeFrameIndicesReplaced(
     MachineFunction &MF, RegScavenger *RS) const {
+  auto *FuncInfo = MF.getInfo<Z80FunctionInfo>();
+  FuncInfo->HasSpillPush = llvm::any_of(MF, [](const MachineBasicBlock &MBB) {
+    return llvm::any_of(MBB, [](const MachineInstr &MI) {
+      return MI.getOpcode() == Z80::SPILL_PUSH;
+    });
+  });
+
   // IX does not move with SPILL_PUSH.
-  if (hasFP(MF))
+  if (!FuncInfo->HasSpillPush || hasFP(MF))
     return;
 
   const Z80InstrInfo &TII = *MF.getSubtarget<Z80Subtarget>().getInstrInfo();

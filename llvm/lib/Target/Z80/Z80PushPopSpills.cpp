@@ -76,7 +76,7 @@ private:
 
 char Z80PushPopSpills::ID = 0;
 
-INITIALIZE_PASS(Z80PushPopSpills, DEBUG_TYPE, "Z80 PUSH/POP spills", false,
+INITIALIZE_PASS(Z80PushPopSpills, DEBUG_TYPE, "Z80 PUSH/POP Spills", false,
                 false)
 
 MachineFunctionPass *llvm::createZ80PushPopSpillsPass() {

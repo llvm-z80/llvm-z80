@@ -15,6 +15,9 @@
     %r = call i16 @setjmp(ptr %buf)
     ret void
   }
+  define void @swap_then_fail() { ret void }
+  define void @index_regs() { ret void }
+  define void @three_reloads() { ret void }
   declare void @ext()
   declare i16 @setjmp(ptr) returns_twice
 ...
@@ -171,4 +174,80 @@ body: |
     ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
     $hl = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     RET implicit $hl
+...
+---
+# The reloads are swapped first. Slot 0 then fails under another PUSH. Slot 1
+# still becomes a push. The swapped order stays.
+# CHECK-LABEL: name: swap_then_fail
+# CHECK:       SPILL_GR16 $hl, %stack.0, 0
+# CHECK-NEXT:  SPILL_PUSH $de
+# CHECK-NEXT:  $bc = SPILL_POP
+# CHECK-NEXT:  $hl = RELOAD_GR16 %stack.0, 0
+# CHECK-NEXT:  PUSH_BC
+# CHECK-NEXT:  $de = RELOAD_GR16 %stack.0, 0
+name: swap_then_fail
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+  - { id: 1, type: spill-slot, size: 2, alignment: 1 }
+body: |
+  bb.0:
+    liveins: $de, $hl
+    SPILL_GR16 $hl, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    SPILL_GR16 $de, %stack.1, 0 :: (store (s16) into %stack.1, align 1)
+    $hl = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    $bc = RELOAD_GR16 %stack.1, 0 :: (load (s16) from %stack.1, align 1)
+    PUSH_BC implicit $bc
+    $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    POP_BC implicit-def $bc
+    RET implicit $hl, implicit $bc, implicit $de
+...
+---
+# IX and IY spill through Any16 like the other pairs.
+# CHECK-LABEL: name: index_regs
+# CHECK:       SPILL_PUSH $ix
+# CHECK-NEXT:  SPILL_PUSH $bc
+# CHECK-NEXT:  $iy = SPILL_POP
+# CHECK-NEXT:  $hl = SPILL_POP
+name: index_regs
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+  - { id: 1, type: spill-slot, size: 2, alignment: 1 }
+body: |
+  bb.0:
+    liveins: $bc, $ix
+    SPILL_ANY16 $ix, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    SPILL_ANY16 $bc, %stack.1, 0 :: (store (s16) into %stack.1, align 1)
+    $iy = RELOAD_ANY16 %stack.1, 0 :: (load (s16) from %stack.1, align 1)
+    $hl = RELOAD_ANY16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    RET implicit $iy, implicit $hl
+...
+---
+# Each reload of slot 0 but the last pops slot 0 and pushes slot 0 again.
+# Slot 1 is pushed and popped between the reloads.
+# CHECK-LABEL: name: three_reloads
+# CHECK:       SPILL_PUSH $de
+# CHECK-NEXT:  $hl = SPILL_POP
+# CHECK-NEXT:  SPILL_PUSH $hl
+# CHECK-NEXT:  SPILL_PUSH killed $hl
+# CHECK-NEXT:  $bc = SPILL_POP
+# CHECK-NEXT:  $hl = SPILL_POP
+# CHECK-NEXT:  SPILL_PUSH $hl
+# CHECK-NEXT:  $de = SPILL_POP
+name: three_reloads
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+  - { id: 1, type: spill-slot, size: 2, alignment: 1 }
+body: |
+  bb.0:
+    liveins: $de
+    SPILL_GR16 $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    $hl = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    SPILL_GR16 killed $hl, %stack.1, 0 :: (store (s16) into %stack.1, align 1)
+    $bc = RELOAD_GR16 %stack.1, 0 :: (load (s16) from %stack.1, align 1)
+    $hl = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    RET implicit $bc, implicit $hl, implicit $de
 ...
