@@ -193,7 +193,16 @@ void Z80PushPopSpills::orderSpills(MachineBasicBlock &MBB,
           Src.setIsKill(false);
         }
       }
+      // A debug value in the run may name the slot of a later spill. The debug
+      // values go after the spills.
+      SmallVector<MachineInstr *, 4> Debug;
+      for (MachineInstr &MI :
+           make_range(MachineBasicBlock::iterator(Run.front()), InsertPt))
+        if (MI.isDebugInstr())
+          Debug.push_back(&MI);
       for (MachineInstr *MI : Sorted)
+        MBB.splice(InsertPt, &MBB, MI->getIterator());
+      for (MachineInstr *MI : Debug)
         MBB.splice(InsertPt, &MBB, MI->getIterator());
       for (Register Reg : Killed)
         for (MachineInstr *MI : llvm::reverse(Sorted))
@@ -306,6 +315,17 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
             Disjoint =
                 !TRI->regsOverlap(accessReg(*Run[A]), accessReg(*Run[B]));
         if (Top && Disjoint) {
+          // A debug value that Top moves past would describe the reloaded
+          // register. This debug value becomes undef.
+          Register Def = accessReg(*Top);
+          for (MachineInstr &DV :
+               make_range(I, MachineBasicBlock::iterator(Top)))
+            if (DV.isDebugValue() &&
+                any_of(DV.debug_operands(), [&](const MachineOperand &MO) {
+                  return MO.isReg() && MO.getReg().isValid() &&
+                         TRI->regsOverlap(MO.getReg(), Def);
+                }))
+              DV.setDebugValueUndef();
           MBB.splice(I, &MBB, Top->getIterator());
           I = Top->getIterator();
         }
