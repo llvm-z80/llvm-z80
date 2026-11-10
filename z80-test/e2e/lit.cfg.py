@@ -68,6 +68,8 @@ if not os.path.exists(os.path.join(tools, "z80-run")):
     config.unsupported = True
 
 if fmt == "sdcc":
+    # The driver finds SDCC's library through SDCC_HOME and SDCC_LIB.
+    llvm_config.with_system_environment(["SDCC_HOME", "SDCC_LIB"])
     asm, link = ("sdasz80", "sdldz80") if cpu == "z80" else ("sdasgb", "sdldgb")
     if not shutil.which(asm) or not shutil.which(link):
         config.unsupported = True
