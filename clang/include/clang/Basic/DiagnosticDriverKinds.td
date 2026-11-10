@@ -59,6 +59,12 @@ def warn_drv_avr_stdlib_not_linked: Warning<
 def err_drv_z80_sdcc_lib_not_found : Error<
   "cannot find SDCC's library '%0.lib'; is SDCC installed? Provide its location "
   "via 'SDCC_LIB' or 'SDCC_HOME', or pass '-nostdlib' to link without it">;
+def err_drv_z80_sdcc_lib_too_old : Error<
+  "the SDCC library in '%0' is from SDCC before 4.2, which passes arguments in "
+  "a different way; install SDCC 4.2 or later">;
+def err_drv_z80_sdcc_rt_not_found : Error<
+  "cannot find the runtime library '%0'; LLVM builds it only when SDCC's "
+  "assembler and 'sdar' are found while it is configured">;
 def err_drv_cuda_bad_gpu_arch : Error<"unsupported CUDA gpu architecture: %0">;
 def err_drv_offload_bad_gpu_arch : Error<"unsupported %0 gpu architecture: %1">;
 def err_drv_offload_missing_gpu_arch : Error<
