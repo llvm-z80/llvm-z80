@@ -2,12 +2,15 @@
 #
 # SPAdj does not count SPILL_PUSH and SPILL_POP. eliminateFrameIndex and the
 # debug value fixup count the pseudos before an SP-relative access in the same
-# block.
+# block, inside call sequences too.
 
 --- |
   define void @under_push() { ret void }
   define void @call_under_push() { ret void }
   define void @debug_under_push() !dbg !3 { ret void }
+  define void @pop_in_call_seq() { ret void }
+  define void @push_in_call_seq() { ret void }
+  define void @debug_in_call_seq() !dbg !9 { ret void }
   declare void @f(i8)
 
   !llvm.dbg.cu = !{!0}
@@ -21,6 +24,9 @@
   !6 = !DILocalVariable(name: "a", arg: 1, scope: !3, file: !1, line: 1, type: !7)
   !7 = !DIBasicType(name: "int", size: 16, encoding: DW_ATE_signed)
   !8 = !DILocation(line: 0, scope: !3)
+  !9 = distinct !DISubprogram(name: "debug_in_call_seq", scope: !1, file: !1, line: 1, type: !4, scopeLine: 1, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0)
+  !10 = !DILocalVariable(name: "a", arg: 1, scope: !9, file: !1, line: 1, type: !7)
+  !11 = !DILocation(line: 0, scope: !9)
 ...
 ---
 # The stack argument is at SP+2 on entry, SP+4 under the push, and SP+2 again
@@ -78,10 +84,10 @@ body:             |
 # A debug value in a spill slot gets the pushed bytes added under the push.
 # The direct form under the push loses the location.
 # CHECK-LABEL: name: debug_under_push
-# CHECK:       DBG_VALUE $sp, 0, !6, !DIExpression(),
+# CHECK:       DBG_VALUE $sp, 0, !{{[0-9]+}}, !DIExpression(),
 # CHECK-NEXT:  SPILL_PUSH killed $de
-# CHECK-NEXT:  DBG_VALUE $sp, 0, !6, !DIExpression(DW_OP_plus_uconst, 2),
-# CHECK-NEXT:  DBG_VALUE $noreg, $noreg, !6, !DIExpression(),
+# CHECK-NEXT:  DBG_VALUE $sp, 0, !{{[0-9]+}}, !DIExpression(DW_OP_plus_uconst, 2),
+# CHECK-NEXT:  DBG_VALUE $noreg, $noreg, !{{[0-9]+}}, !DIExpression(),
 name:            debug_under_push
 tracksRegLiveness: true
 stack:
@@ -95,5 +101,99 @@ body:             |
     DBG_VALUE %stack.0, 0, !6, !DIExpression(), debug-location !8
     DBG_VALUE %stack.0, $noreg, !6, !DIExpression(), debug-location !8
     $de = SPILL_POP
+    RET implicit $de
+...
+---
+# A pop inside a call sequence. The stack argument is at SP+4 under the push
+# and SP+2 after the pop.
+# CHECK-LABEL: name: pop_in_call_seq
+# CHECK:       $hl = LD_rr_nn 4
+# CHECK-NEXT:  ADD_HL_SP
+# CHECK-NEXT:  $c = LD_r_HLind
+# CHECK:       $de = SPILL_POP
+# CHECK-NEXT:  $hl = LD_rr_nn 2
+# CHECK-NEXT:  ADD_HL_SP
+# CHECK-NEXT:  $b = LD_r_HLind
+# CHECK-NEXT:  $hl = LD_rr_nn 2
+# CHECK-NEXT:  ADD_HL_SP
+# CHECK-NEXT:  $a = LD_r_HLind
+name:            pop_in_call_seq
+tracksRegLiveness: true
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+fixedStack:
+  - { id: 0, offset: 2, size: 1, alignment: 1, isImmutable: true }
+body:             |
+  bb.0:
+    liveins: $de
+    SPILL_PUSH killed $de
+    ADJCALLSTACKDOWN 0, 0, implicit-def $sp, implicit $sp
+    $c = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $c
+    $de = SPILL_POP
+    $b = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
+    ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
+    $a = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
+    RET implicit $a, implicit $b, implicit $de
+...
+---
+# A push inside a call sequence. The stack argument is at SP+6 under the push
+# and the argument, SP+4 under the push, and SP+2 after the pop.
+# CHECK-LABEL: name: push_in_call_seq
+# CHECK:       PUSH_HL implicit killed $hl
+# CHECK-NEXT:  $hl = LD_rr_nn 6
+# CHECK-NEXT:  ADD_HL_SP
+# CHECK-NEXT:  $c = LD_r_HLind
+# CHECK:       $hl = LD_rr_nn 4
+# CHECK-NEXT:  ADD_HL_SP
+# CHECK-NEXT:  $b = LD_r_HLind
+# CHECK-NEXT:  $de = SPILL_POP
+# CHECK-NEXT:  $hl = LD_rr_nn 2
+# CHECK-NEXT:  ADD_HL_SP
+# CHECK-NEXT:  $a = LD_r_HLind
+name:            push_in_call_seq
+tracksRegLiveness: true
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+fixedStack:
+  - { id: 0, offset: 2, size: 1, alignment: 1, isImmutable: true }
+body:             |
+  bb.0:
+    liveins: $de, $hl
+    ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
+    SPILL_PUSH killed $de
+    PUSH_HL implicit killed $hl
+    $c = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $c
+    ADJCALLSTACKUP 2, 2, implicit-def $sp, implicit $sp
+    $b = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
+    $de = SPILL_POP
+    $a = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
+    RET implicit $a, implicit $b, implicit $de
+...
+---
+# A debug value after a push inside the call sequence gets the pushed bytes.
+# CHECK-LABEL: name: debug_in_call_seq
+# CHECK:       SPILL_PUSH killed $de
+# CHECK-NEXT:  DBG_VALUE $sp, 0, !{{[0-9]+}}, !DIExpression(DW_OP_plus_uconst, 2),
+name:            debug_in_call_seq
+tracksRegLiveness: true
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $de, $hl
+    SPILL_GR16 killed $hl, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    ADJCALLSTACKDOWN 0, 0, implicit-def $sp, implicit $sp
+    SPILL_PUSH killed $de
+    DBG_VALUE %stack.0, 0, !10, !DIExpression(), debug-location !11
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags
+    $de = SPILL_POP
+    ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
     RET implicit $de
 ...

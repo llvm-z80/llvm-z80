@@ -12,10 +12,6 @@
 // This replacement makes spills smaller and faster. A 16-bit spill and reload
 // through SP or IX take 12 to 14 bytes. PUSH and POP take 2 bytes.
 //
-// PEI counts PUSH and POP in SPAdj only inside call sequences. Spills there
-// are not replaced. Elsewhere, Z80InstrInfo::getSpillPushDepth counts the
-// pseudos.
-//
 //===----------------------------------------------------------------------===//
 
 #include "Z80PushPopSpills.h"
@@ -274,16 +270,9 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
     return isReload(MI) && Cands.count(accessSlot(MI));
   };
 
-  bool InCallSeq = false;
   for (auto I = MBB.begin(), E = MBB.end(); I != E && Failed.empty(); ++I) {
     if (I->isDebugInstr())
       continue;
-
-    if ((isSpill(*I) || isReload(*I)) && Cands.count(accessSlot(*I)) &&
-        InCallSeq) {
-      Failed.insert(accessSlot(*I));
-      break;
-    }
 
     if (isSpill(*I) && Cands.count(accessSlot(*I))) {
       Stack.push_back({accessSlot(*I), 0});
@@ -341,8 +330,6 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
       continue;
     }
 
-    if (TII->isFrameInstr(*I))
-      InCallSeq = TII->isFrameSetup(*I);
     if (int Adj = TII->getSPAdjust(*I)) {
       AdjustOther(Adj);
       continue;

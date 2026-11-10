@@ -83,5 +83,5 @@ entry:
 ; SM83-LABEL: _f4:
 ; SM83-NOT:   call _OUTLINED
 ; SM83-LABEL: _OUTLINED_FUNCTION_0:
-; SM83:       ldhl sp,#4
+; SM83:       ldhl sp,#6
 ; SM83:       ret
