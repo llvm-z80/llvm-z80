@@ -658,6 +658,19 @@ def RELOAD_ANY16 : Z80Pseudo<(outs Any16:$dst), (ins i32imm:$fi, i32imm:$offset)
   let isReMaterializable = true;
 }
 
+// SPILL_PUSH and SPILL_POP are the PUSH and POP of a spill slot replaced by
+// Z80PushPopSpills. PEI does not count the SP movement of this pair in SPAdj
+// outside call sequences. So Z80InstrInfo::getSpillPushDepth counts this pair
+// instead. expandPostRAPseudo lowers this pair to PUSH and POP.
+def SPILL_PUSH : Z80Pseudo<(outs), (ins Any16:$src)> {
+  let mayStore = true;
+  let mayLoad = false;
+}
+def SPILL_POP : Z80Pseudo<(outs Any16:$dst), (ins)> {
+  let mayLoad = true;
+  let mayStore = false;
+}
+
 // 16-bit add/sub from frame slot via 8-bit IX-indexed ALU.
 // ADD_HL_FI expands to: LD A,L; ADD A,(IX+d); LD L,A; LD A,H; ADC A,(IX+d+1); LD H,A
 // SUB_HL_FI expands to: LD A,L; SUB (IX+d); LD L,A; LD A,H; SBC A,(IX+d+1); LD H,A

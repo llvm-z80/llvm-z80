@@ -1238,6 +1238,10 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
     Offset += 2; // Skip saved IX
   } else {
     Offset += MFI.getStackSize() + SPAdj;
+    // SPAdj does not count SPILL_PUSH and SPILL_POP. Z80PushPopSpills keeps
+    // this pair outside call sequences and balanced within each block.
+    Offset +=
+        MF.getSubtarget<Z80Subtarget>().getInstrInfo()->getSpillPushDepth(MI);
     // PEI's StackSize excludes LocalAreaOffset (return address size), but
     // regular objects' offsets include that bias. Compensate for non-fixed
     // objects. Fixed objects (negative Idx, e.g. stack args) use raw

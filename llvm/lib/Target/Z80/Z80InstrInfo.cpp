@@ -523,6 +523,7 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   case Z80::PUSH_AF:
   case Z80::PUSH_IX:
   case Z80::PUSH_IY:
+  case Z80::SPILL_PUSH:
     return 2;
   case Z80::POP_BC:
   case Z80::POP_DE:
@@ -530,6 +531,7 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   case Z80::POP_AF:
   case Z80::POP_IX:
   case Z80::POP_IY:
+  case Z80::SPILL_POP:
     return -2;
   case Z80::INC_SP:
     return -1; // SP += 1 (pops 1 byte)
@@ -538,6 +540,16 @@ int Z80InstrInfo::getSPAdjust(const MachineInstr &MI) const {
   default:
     return TargetInstrInfo::getSPAdjust(MI);
   }
+}
+
+int Z80InstrInfo::getSpillPushDepth(
+    MachineBasicBlock::const_iterator MI) const {
+  int Depth = 0;
+  for (MachineBasicBlock::const_iterator I = MI->getParent()->begin(); I != MI;
+       ++I)
+    if (I->getOpcode() == Z80::SPILL_PUSH || I->getOpcode() == Z80::SPILL_POP)
+      Depth += getSPAdjust(*I);
+  return Depth;
 }
 
 using InstrSeq = SmallVector<MachineInstr *, 8>;
@@ -994,6 +1006,24 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     // marked undef.
     lowerCopy(&MI);
     return true;
+
+  case Z80::SPILL_PUSH: {
+    Register Reg = MI.getOperand(0).getReg();
+    MachineInstr *Push = BuildMI(MBB, MI, DL, get(Z80::getPushOpcode(Reg)));
+    if (MI.getOperand(0).isKill())
+      Push->addRegisterKilled(Reg, TRI);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case Z80::SPILL_POP: {
+    Register Reg = MI.getOperand(0).getReg();
+    MachineInstr *Pop = BuildMI(MBB, MI, DL, get(Z80::getPopOpcode(Reg)));
+    if (MI.getOperand(0).isDead())
+      Pop->addRegisterDead(Reg, TRI);
+    MI.eraseFromParent();
+    return true;
+  }
 
   case Z80::LOAD8_IND: {
     // Expand to LD A,(BC), LD A,(DE), or LD A,(HL) based on allocated register.

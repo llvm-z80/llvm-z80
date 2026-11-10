@@ -52,6 +52,7 @@
 #include "Z80NarrowMemAccess.h"
 #include "Z80NonReentrant.h"
 #include "Z80PreEmitPeephole.h"
+#include "Z80PushPopSpills.h"
 #include "Z80ShiftRotateChain.h"
 #include "Z80StaticFrameAlloc.h"
 #include "Z80TargetObjectFile.h"
@@ -74,6 +75,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80PostLegalizerCombinerPass(PR);
   initializeZ80FixupImplicitDefsPass(PR);
   initializeZ80PreEmitPeepholePass(PR);
+  initializeZ80PushPopSpillsPass(PR);
   initializeZ80LowerSelectPass(PR);
   initializeZ80LowerThreadLocalPass(PR);
   initializeZ80NarrowMemAccessPass(PR);
@@ -218,6 +220,7 @@ public:
   void addOptimizedRegAlloc() override;
 
   void addPostRewrite() override;
+  void addPostRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
 };
@@ -317,6 +320,11 @@ void Z80PassConfig::addPostRewrite() {
   // Must run before MachineCopyPropagation to prevent incorrect dead-copy
   // elimination.  See Z80FixupImplicitDefs.cpp for full explanation.
   addPass(createZ80FixupImplicitDefsPass());
+}
+
+void Z80PassConfig::addPostRegAlloc() {
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createZ80PushPopSpillsPass());
 }
 
 void Z80PassConfig::addPreSched2() {

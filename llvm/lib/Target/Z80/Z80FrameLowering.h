@@ -57,6 +57,11 @@ public:
   // hardware-facing code like an OAM DMA source buffer.
   void processFunctionBeforeFrameFinalized(MachineFunction &MF,
                                            RegScavenger *RS) const override;
+  // PEI resolves debug values without SPAdj. A debug value under a SPILL_PUSH
+  // gets the pushed bytes added to this debug expression here.
+  void
+  processFunctionBeforeFrameIndicesReplaced(MachineFunction &MF,
+                                            RegScavenger *RS) const override;
   // Ensure replaceFrameIndices runs even when there are no stack objects,
   // so that ADJCALLSTACKDOWN/UP pseudos are always eliminated.
   bool needsFrameIndexResolution(const MachineFunction &MF) const override {
