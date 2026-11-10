@@ -14,7 +14,9 @@
 #include "clang/Options/Options.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 
 using namespace clang::driver;
 using namespace clang::driver::toolchains;
@@ -74,6 +76,58 @@ void z80::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 // SDCC Linker (sdldz80 / sdldgb) — used with -fno-integrated-as
 //===----------------------------------------------------------------------===//
 
+// The directory of SDCC's library for \p Port: under $SDCC_LIB, under
+// $SDCC_HOME, then next to the installation of \p Linker.
+static std::optional<std::string>
+findSDCCLibDir(StringRef Port, StringRef Linker, StringRef SysRoot) {
+  SmallVector<SmallString<256>, 8> Dirs;
+  auto AddDir = [&](const Twine &Base, const Twine &Sub) {
+    SmallString<256> Dir;
+    llvm::sys::path::append(Dir, Base, Sub);
+    Dirs.push_back(Dir);
+  };
+  // SDCC built for Windows keeps the library in lib, not share/sdcc/lib.
+  auto AddPrefix = [&](const Twine &Prefix) {
+    AddDir(Prefix, "share/sdcc/lib/" + Port);
+    AddDir(Prefix, "lib/" + Port);
+  };
+  if (std::optional<std::string> Lib = llvm::sys::Process::GetEnv("SDCC_LIB")) {
+    AddDir(*Lib, Port);
+    AddDir(*Lib, "");
+  }
+  if (std::optional<std::string> Home = llvm::sys::Process::GetEnv("SDCC_HOME"))
+    AddPrefix(*Home);
+  if (llvm::sys::path::is_absolute(Linker))
+    AddPrefix(
+        llvm::sys::path::parent_path(llvm::sys::path::parent_path(Linker)));
+  AddDir(SysRoot + "/usr/local", "share/sdcc/lib/" + Port);
+  AddDir(SysRoot + "/usr", "share/sdcc/lib/" + Port);
+
+  for (const SmallString<256> &Dir : Dirs) {
+    SmallString<256> Lib(Dir);
+    llvm::sys::path::append(Lib, Port + ".lib");
+    if (llvm::sys::fs::exists(Lib))
+      return std::string(Dir);
+  }
+  return std::nullopt;
+}
+
+// Whether SDCC's library in \p Dir is from SDCC 4.2 or later. Earlier
+// libraries take arguments on the stack instead of in registers.
+static bool isCurrentSDCCLib(StringRef Dir, StringRef Port) {
+  // Before 4.2 the SM83 library was in gbz80.
+  if (Port != "z80")
+    return true;
+  SmallString<256> Lib(Dir);
+  llvm::sys::path::append(Lib, Port + ".lib");
+  auto Buf = llvm::MemoryBuffer::getFile(Lib, /*IsText=*/false,
+                                         /*RequiresNullTerminator=*/false);
+  if (!Buf)
+    return true;
+  // __mulsint2slong came with the register convention in 4.2.
+  return (*Buf)->getBuffer().contains("S ___mulsint2slong Def");
+}
+
 void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
                                    const InputInfo &Output,
                                    const InputInfoList &Inputs,
@@ -97,17 +151,36 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
   // Select target-specific tools and runtime paths.
   bool IsSM83 = TC.getTriple().isSM83();
   const char *SubDir = IsSM83 ? "sm83" : "z80";
-  const char *RtLibName = IsSM83 ? "sm83_rt.lib" : "z80_rt.lib";
-  const char *RtLibBase = IsSM83 ? "sm83_rt" : "z80_rt";
+  const char *RtLibName = IsSM83 ? "sm83_sdcc_rt.lib" : "z80_sdcc_rt.lib";
+  const char *RtLibBase = IsSM83 ? "sm83_sdcc_rt" : "z80_sdcc_rt";
   const char *LinkerName = IsSM83 ? "sdldgb" : "sdldz80";
+  std::string Linker = TC.GetProgramPath(LinkerName);
+  bool StartFiles =
+      !Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles);
+  bool DefaultLibs =
+      !Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs);
 
-  // Link crt0 first so startup code is at address 0x0000.
-  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
-    SmallString<256> Crt0Path(TC.getDriver().Dir);
-    llvm::sys::path::append(Crt0Path, "..", "lib", SubDir,
-                            IsSM83 ? "sm83_crt0.rel" : "z80_crt0.rel");
-    if (llvm::sys::fs::exists(Crt0Path))
-      CmdArgs.push_back(Args.MakeArgString(Crt0Path));
+  // SDCC's crt0 and library are in one directory.
+  std::optional<std::string> SDCCLibDir;
+  if (StartFiles || DefaultLibs) {
+    SDCCLibDir = findSDCCLibDir(SubDir, Linker, TC.getDriver().SysRoot);
+    if (!SDCCLibDir)
+      TC.getDriver().Diag(diag::err_drv_z80_sdcc_lib_not_found) << SubDir;
+    else if (!isCurrentSDCCLib(*SDCCLibDir, SubDir))
+      TC.getDriver().Diag(diag::err_drv_z80_sdcc_lib_too_old) << *SDCCLibDir;
+  }
+
+  // Code starts past the vectors of SDCC's crt0, and data at sdcc's default.
+  CmdArgs.push_back("-b");
+  CmdArgs.push_back("_CODE=0x0200");
+  CmdArgs.push_back("-b");
+  CmdArgs.push_back(IsSM83 ? "_DATA=0xc000" : "_DATA=0x8000");
+
+  // Link SDCC's crt0 before the inputs.
+  if (StartFiles && SDCCLibDir) {
+    SmallString<256> Crt0Path(*SDCCLibDir);
+    llvm::sys::path::append(Crt0Path, "crt0.rel");
+    CmdArgs.push_back(Args.MakeArgString(Crt0Path));
   }
 
   // Add input object files.
@@ -116,9 +189,20 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(II.getFilename());
   }
 
-  // Auto-link runtime library archive if found.
-  // Use -k <dir> -l <name> for selective linking (only referenced modules).
-  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
+  // SDCC's crt0 calls __sdcc_external_startup from SDCC's library. Name the
+  // library directory even under -nodefaultlibs, for -Wl,-l,<port>.
+  if (SDCCLibDir) {
+    CmdArgs.push_back("-k");
+    CmdArgs.push_back(Args.MakeArgString(*SDCCLibDir));
+    if (DefaultLibs) {
+      CmdArgs.push_back("-l");
+      CmdArgs.push_back(SubDir);
+    }
+  }
+
+  if (DefaultLibs) {
+    // Then the supplementary runtime. -k <dir> -l <name> links only the
+    // modules referenced.
     SmallString<256> LibDir(TC.getDriver().Dir);
     llvm::sys::path::append(LibDir, "..", "lib", SubDir);
     SmallString<256> LibFile(LibDir);
@@ -128,13 +212,15 @@ void z80::SDCCLinker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(Args.MakeArgString(LibDir));
       CmdArgs.push_back("-l");
       CmdArgs.push_back(RtLibBase);
+    } else {
+      TC.getDriver().Diag(diag::err_drv_z80_sdcc_rt_not_found) << RtLibName;
     }
   }
 
   // Forward user linker flags (-Wl, -Xlinker).
   Args.AddAllArgValues(CmdArgs, options::OPT_Wl_COMMA, options::OPT_Xlinker);
 
-  const char *Exec = Args.MakeArgString(TC.GetProgramPath(LinkerName));
+  const char *Exec = Args.MakeArgString(Linker);
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
                                          Exec, CmdArgs, Inputs, Output));
 

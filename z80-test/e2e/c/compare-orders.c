@@ -1,4 +1,5 @@
-// RUN: %cc %s -o %t
+// At -O0 the code of this test reaches 0x8000, the default start of sdcc data.
+// RUN: %cc %s -o %t %if sdcc %{-Wl,-b,_DATA=0xc000%}
 // RUN: %run --expect-result=0x07FF %t
 
 /* Ordered comparisons of 8, 16 and 32-bit values against constants and

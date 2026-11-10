@@ -85,3 +85,13 @@ define i8 @fcmp_ugt(float %a, float %b) {
   %r = zext i1 %c to i8
   ret i8 %r
 }
+
+; nnan alone drops the NaN test.
+define i8 @fcmp_ult_nnan(float %a, float %b) {
+; CHECK-LABEL: fcmp_ult_nnan:
+; CHECK:       call ___ltsf2
+; CHECK-NOT:   call ___unordsf2
+  %c = fcmp nnan ult float %a, %b
+  %r = zext i1 %c to i8
+  ret i8 %r
+}

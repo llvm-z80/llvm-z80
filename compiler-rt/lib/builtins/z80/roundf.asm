@@ -1,37 +1,88 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
-	.area _CODE
-	.globl _roundf
-
+    .area   _CODE
+    .globl  _roundf
 ;===------------------------------------------------------------------------===;
-; _roundf - Round to nearest, ties away from zero
-;
-; Input:  HLDE = float
-; Output: HLDE = round(x)
-;
-; Algorithm:
-;   round(x) = floor(x + 0.5)  if x >= 0
-;   round(x) = ceil(x - 0.5)   if x < 0
-;
-; Simplified: round(x) = trunc(x + copysign(0.5, x))
-;   Add 0.5 with the same sign as x, then truncate.
-;
-; __addsf3 convention: arg1=HLDE, arg2=stack (callee-cleanup), returns HLDE.
+;@ float roundf(float x)
+;@     ensures
+;@         same(result, roundf(x));
+;@     tests
+;@         samples 1500000000;
 ;===------------------------------------------------------------------------===;
 _roundf:
-	; Extract sign for ±0.5
-	ld	a, h
-	and	#0x80		; A = sign bit (0x00 or 0x80)
-	or	#0x3F		; A = 0x3F (positive) or 0xBF (negative)
-	ld	b, a		; B = H byte of ±0.5f
-
-	; Push ±0.5f as arg2 on stack (H2:L2 first, then D2:E2)
-	ld	c, #0x00	; C = L byte of 0.5f = 0x00
-	push	bc		; H2:L2
-	ld	bc, #0x0000	; D2:E2
-	push	bc
-
-	; HLDE still = x (arg1). Call __addsf3(x, ±0.5)
-	call	___addsf3	; callee-cleanup, result in HLDE
-
-	; Truncate the result
-	jp	_truncf
+    ld      a, l
+    rlca
+    ld      a, h
+    rla                         ; A = exponent
+    cp      #150
+    ret     nc                  ; |x| >= 2^23, infinity or NaN
+    sub     #126
+    jr      c, __roundf_zero    ; |x| < 0.5
+    jr      z, __roundf_one     ; 0.5 <= |x| < 1
+    cpl
+    add     a, #24              ; A = number of fraction bits - 1
+    ; Move whole fraction bytes out of E.
+__roundf_byte:
+    cp      #8
+    jr      c, __roundf_bit
+    ld      e, d
+    ld      d, l
+    ld      l, h
+    ld      h, #0
+    sub     #8
+    jr      __roundf_byte
+__roundf_bit:
+    ld      c, #1
+    or      a
+    jr      z, __roundf_round
+__roundf_shift:
+    sla     c
+    dec     a
+    jr      nz, __roundf_shift
+__roundf_round:
+    ; C = the one-half bit of E.
+    ld      a, c
+    add     a, a
+    dec     a
+    ld      b, a                ; B = the fraction bits of E
+    ld      a, e
+    and     c
+    jr      z, __roundf_down    ; below one half
+    ld      a, e
+    or      b
+    inc     a                   ; clear the fraction and add one
+    ld      e, a
+    jr      nz, __roundf_back
+    inc     d
+    jr      nz, __roundf_back
+    inc     l
+    jr      nz, __roundf_back
+    inc     h
+    jr      __roundf_back
+__roundf_down:
+    ld      a, b
+    cpl
+    and     e
+    ld      e, a
+__roundf_back:
+    ; Move the bytes back, filling the fraction bytes with zero.
+    ld      a, h
+    or      a
+    ret     nz
+    ld      h, l
+    ld      l, d
+    ld      d, e
+    ld      e, a
+    jr      __roundf_back
+__roundf_one:
+    ld      l, #0x80        ; H is already right for 1.0
+    ld      de, #0
+    ret
+__roundf_zero:
+    ld      a, h
+    and     #0x80
+    ld      h, a
+    xor     a
+    ld      l, a
+    ld      d, a
+    ld      e, a
+    ret

@@ -68,9 +68,17 @@ if not os.path.exists(os.path.join(tools, "z80-run")):
     config.unsupported = True
 
 if fmt == "sdcc":
+    # The driver finds SDCC's library through SDCC_HOME and SDCC_LIB.
+    llvm_config.with_system_environment(["SDCC_HOME", "SDCC_LIB"])
     asm, link = ("sdasz80", "sdldz80") if cpu == "z80" else ("sdasgb", "sdldgb")
     if not shutil.which(asm) or not shutil.which(link):
         config.unsupported = True
+    elif os.path.exists(os.path.join(tools, "clang")):
+        # Each link in these tests needs the driver to find SDCC's library.
+        cmd = [os.path.join(tools, "clang"), "--target=" + triple, "-###", "-x", "c"]
+        jobs = subprocess.run(cmd + [os.devnull], capture_output=True, text=True)
+        if jobs.returncode != 0 or '"-l" "%s"' % cpu not in jobs.stderr:
+            config.unsupported = True
     sdcc = shutil.which("sdcc")
     if sdcc:
         dirs = subprocess.run(
@@ -83,4 +91,3 @@ if fmt == "sdcc":
                 config.substitutions.append(
                     ("%{sdcc}", sdcc + " -m" + cpu + " --std-c11")
                 )
-                config.substitutions.append(("%{sdcc-lib}", lib))
