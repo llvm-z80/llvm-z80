@@ -172,12 +172,23 @@ void Z80AsmPrinter::emitStartOfAsmFile(Module &M) {
                                             " format");
 }
 
+// Whether \p GV has no explicit section, or a section that becomes _DATA or
+// _BSS.
+static bool hasDefaultDataSection(const GlobalVariable *GV) {
+  if (!GV->hasSection())
+    return true;
+  StringRef Name = GV->getSection();
+  return Name == ".data" || Name.starts_with(".data.") || Name == ".bss" ||
+         Name.starts_with(".bss.");
+}
+
 void Z80AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
+  // SDCC's crt0 clears _DATA and fills _INITIALIZED, but leaves _BSS alone.
   if (MAI.isSDCC() && TM.getTargetTriple().getEnvironment() == Triple::SDCC &&
       GV->hasInitializer() && !GV->isConstant() &&
       (GV->hasExternalLinkage() || GV->hasLocalLinkage() ||
        GV->hasWeakLinkage() || GV->hasLinkOnceLinkage()) &&
-      !GV->isThreadLocal() && !GV->hasSection() && !GV->hasComdat() &&
+      !GV->isThreadLocal() && hasDefaultDataSection(GV) &&
       GV->getAddressSpace() == 0) {
     const DataLayout &DL = GV->getDataLayout();
     MCSymbol *GVSym = getSymbol(GV);
