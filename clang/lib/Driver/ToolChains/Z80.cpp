@@ -79,23 +79,26 @@ void z80::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 // $SDCC_HOME, then next to the installation of \p Linker.
 static std::optional<std::string>
 findSDCCLibDir(StringRef Port, StringRef Linker, StringRef SysRoot) {
-  SmallVector<SmallString<256>, 6> Dirs;
+  SmallVector<SmallString<256>, 8> Dirs;
   auto AddDir = [&](const Twine &Base, const Twine &Sub) {
     SmallString<256> Dir;
     llvm::sys::path::append(Dir, Base, Sub);
     Dirs.push_back(Dir);
+  };
+  // SDCC built for Windows keeps the library in lib, not share/sdcc/lib.
+  auto AddPrefix = [&](const Twine &Prefix) {
+    AddDir(Prefix, "share/sdcc/lib/" + Port);
+    AddDir(Prefix, "lib/" + Port);
   };
   if (std::optional<std::string> Lib = llvm::sys::Process::GetEnv("SDCC_LIB")) {
     AddDir(*Lib, Port);
     AddDir(*Lib, "");
   }
   if (std::optional<std::string> Home = llvm::sys::Process::GetEnv("SDCC_HOME"))
-    AddDir(*Home, "share/sdcc/lib/" + Port);
-  if (llvm::sys::path::is_absolute(Linker)) {
-    StringRef Prefix =
-        llvm::sys::path::parent_path(llvm::sys::path::parent_path(Linker));
-    AddDir(Prefix, "share/sdcc/lib/" + Port);
-  }
+    AddPrefix(*Home);
+  if (llvm::sys::path::is_absolute(Linker))
+    AddPrefix(
+        llvm::sys::path::parent_path(llvm::sys::path::parent_path(Linker)));
   AddDir(SysRoot + "/usr/local", "share/sdcc/lib/" + Port);
   AddDir(SysRoot + "/usr", "share/sdcc/lib/" + Port);
 

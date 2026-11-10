@@ -15,6 +15,15 @@
 // INSTALL-Z80: "-k" "{{.*}}/share/sdcc/lib/z80" "-l" "z80" "-k" "{{.*}}/lib/z80" "-l" "z80_sdcc_rt"
 // INSTALL-SM83: "-k" "{{.*}}/share/sdcc/lib/sm83" "-l" "sm83" "-k" "{{.*}}/lib/sm83" "-l" "sm83_sdcc_rt"
 
+// SDCC built for Windows keeps the library in lib.
+// RUN: mkdir -p %t/clang/bin %t/win/bin %t/win/lib/z80
+// RUN: touch %t/win/bin/sdldz80 %t/win/lib/z80/z80.lib && chmod +x %t/win/bin/sdldz80
+// RUN: env -u SDCC_LIB -u SDCC_HOME PATH=%t/win/bin %clang --target=z80-unknown-none-sdcc -ccc-install-dir %t/clang/bin -### %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WIN
+// RUN: env -u SDCC_LIB SDCC_HOME=%t/win PATH=%t/bin %clang --target=z80-unknown-none-sdcc -ccc-install-dir %t/clang/bin -### %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WIN
+// WIN: "{{.*}}/win/lib/z80/crt0.rel" {{.*}} "-k" "{{.*}}/win/lib/z80" "-l" "z80"
+
 // $SDCC_LIB comes first.
 // RUN: env SDCC_LIB=%t/env PATH=%t/bin %clang --target=z80-unknown-none-sdcc -ccc-install-dir %t/bin -### %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=ENV
