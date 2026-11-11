@@ -51,6 +51,8 @@ public:
     return !Fn->getFnAttribute("no-jump-tables").getValueAsBool();
   }
 
+  bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
+
   /// The wide compares this target legalizes to produce a zero-or-one
   /// boolean, which nothing else can know about a target opcode.
   void computeKnownBitsForTargetInstr(GISelValueTracking &Analysis, Register R,

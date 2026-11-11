@@ -25,6 +25,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/KnownBits.h"
 
@@ -82,6 +83,12 @@ const char *Z80TargetLowering::getRequiredLibcallName(RTLIB::Libcall LC,
   if (Impl == RTLIB::Unsupported)
     reportFatalUsageError("no available implementation of " + What);
   return getLibcallImplName(Impl).data();
+}
+
+bool Z80TargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
+  const Function *F = CI->getFunction();
+  return CI->isTailCall() && !F->hasFnAttribute("interrupt") &&
+         !F->getFnAttribute("disable-tail-calls").getValueAsBool();
 }
 
 // Values wider than a 16-bit register pair are passed and returned as
