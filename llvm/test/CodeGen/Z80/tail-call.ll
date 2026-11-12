@@ -13,6 +13,7 @@ declare cc128 i16 @cc0()
 declare cc128 void @cc0v()
 declare void @f(...)
 declare void @llvm.memcpy.p0.p0.i16(ptr, ptr, i16, i1)
+@flag = external global i8
 
 ; CHECK-LABEL: _direct:
 ; CHECK:       %bb.0:
@@ -28,6 +29,84 @@ define void @direct() {
 define i16 @args(i16 %a, i16 %b) {
   %r = tail call i16 @g(i16 %b, i16 %a)
   ret i16 %r
+}
+
+; The return is copied into the block with the call.
+; CHECK-LABEL: _cond:
+; CHECK-NOT:   call
+; CHECK:       jp _v
+define void @cond(i16 %a) {
+entry:
+  %c = icmp eq i16 %a, 0
+  br i1 %c, label %end, label %then
+then:
+  tail call void @v()
+  br label %end
+end:
+  ret void
+}
+
+; The result reaches the return through a phi.
+; CHECK-LABEL: _cond_value:
+; CHECK-NOT:   call
+; CHECK:       jp _g
+define i16 @cond_value(i16 %a, i16 %b) {
+entry:
+  %c = icmp eq i16 %a, 0
+  br i1 %c, label %end, label %then
+then:
+  %r = tail call i16 @g(i16 %b, i16 %a)
+  br label %end
+end:
+  %p = phi i16 [ %r, %then ], [ 0, %entry ]
+  ret i16 %p
+}
+
+; The third argument goes on the stack.
+; CHECK-LABEL: _cond_stack_arg:
+; CHECK:       call _g3
+; CHECK-NEXT:  ret
+define i16 @cond_stack_arg(i16 %a, i16 %b) {
+entry:
+  %c = icmp eq i16 %a, 0
+  br i1 %c, label %end, label %then
+then:
+  %r = tail call i16 @g3(i16 %b, i16 %a, i16 3)
+  br label %end
+end:
+  %p = phi i16 [ %r, %then ], [ 0, %entry ]
+  ret i16 %p
+}
+
+; CHECK-LABEL: _cond_isr:
+; CHECK:       call _v
+; CHECK:       reti
+; CHECK-NOT:   reti
+define void @cond_isr() "interrupt" {
+entry:
+  %f = load volatile i8, ptr @flag
+  %c = icmp eq i8 %f, 0
+  br i1 %c, label %end, label %then
+then:
+  tail call void @v()
+  br label %end
+end:
+  ret void
+}
+
+; CHECK-LABEL: _cond_disabled:
+; CHECK:       call _v
+; CHECK:       ret
+; CHECK-NOT:   ret
+define void @cond_disabled(i16 %a) "disable-tail-calls"="true" {
+entry:
+  %c = icmp eq i16 %a, 0
+  br i1 %c, label %end, label %then
+then:
+  tail call void @v()
+  br label %end
+end:
+  ret void
 }
 
 ; The epilogue goes in front of the jump and leaves HL alone, since HL holds
