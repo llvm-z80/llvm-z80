@@ -162,6 +162,7 @@ TRIPLE_ENV(LLVM, "llvm", "")
 TRIPLE_ENV(Mlibc, "mlibc", "")
 TRIPLE_ENV(MTIA, "mtia", "")
 TRIPLE_ENV(SDCC, "sdcc", "")
+TRIPLE_ENV(Z88DK, "z88dk", "")
 
 #undef TRIPLE_ENV
 

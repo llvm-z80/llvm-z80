@@ -1,6 +1,6 @@
 ; RUN: llc -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 ;
-; __z88dk_fastcall (cc 130 = CallingConv::Z80_Z88dkFastCall).  z88dk's classic
+; __z88dk_fastcall (cc 243 = CallingConv::Z80_Z88dkFastCall).  z88dk's classic
 ; clib passes a SINGLE argument in a fixed register chosen by width, and
 ; returns in that same register, always a subset of DEHL:
 ;
@@ -19,8 +19,8 @@
 ; (a) exact pattern, caller loads the single argument into the fixed register
 ; ============================================================================
 
-declare cc 130 void @sink8(i8)
-declare cc 130 void @sink32(i32)
+declare cc 243 void @sink8(i8)
+declare cc 243 void @sink32(i32)
 
 ; i8 argument in L (never A).
 define void @call_i8() {
@@ -28,7 +28,7 @@ define void @call_i8() {
 ; CHECK-NOT:  ld a,#17
 ; CHECK:      ld l,#17
 ; CHECK-NEXT: call _sink8
-  call cc 130 void @sink8(i8 17)
+  call cc 243 void @sink8(i8 17)
   ret void
 }
 
@@ -38,7 +38,7 @@ define void @call_i32() {
 ; CHECK-LABEL: _call_i32:
 ; CHECK-DAG:  ld de,#4386
 ; CHECK-DAG:  ld hl,#13124
-  call cc 130 void @sink32(i32 287454020)
+  call cc 243 void @sink32(i32 287454020)
   ret void
 }
 
@@ -47,7 +47,7 @@ define void @call_i32() {
 ; ============================================================================
 
 ; i8 return in L (not A).
-define cc 130 i8 @ret_i8() {
+define cc 243 i8 @ret_i8() {
 ; CHECK-LABEL: _ret_i8:
 ; CHECK:      ld l,#42
 ; CHECK-NEXT: ret
@@ -55,7 +55,7 @@ define cc 130 i8 @ret_i8() {
 }
 
 ; i16 return in HL (not DE).
-define cc 130 i16 @ret_i16() {
+define cc 243 i16 @ret_i16() {
 ; CHECK-LABEL: _ret_i16:
 ; CHECK:      ld hl,#4386
 ; CHECK-NEXT: ret
@@ -63,7 +63,7 @@ define cc 130 i16 @ret_i16() {
 }
 
 ; i32 return in DEHL: DE = high 0x1122 (4386), HL = low 0x3344 (13124).
-define cc 130 i32 @ret_i32() {
+define cc 243 i32 @ret_i32() {
 ; CHECK-LABEL: _ret_i32:
 ; CHECK-DAG:  ld de,#4386
 ; CHECK-DAG:  ld hl,#13124
@@ -75,7 +75,7 @@ define cc 130 i32 @ret_i32() {
 ; (c) boundary, a void fastcall function is just a plain call/ret
 ; ============================================================================
 
-define cc 130 void @ret_void() {
+define cc 243 void @ret_void() {
 ; CHECK-LABEL: _ret_void:
 ; CHECK-NOT:  pop
 ; CHECK-NOT:  inc sp

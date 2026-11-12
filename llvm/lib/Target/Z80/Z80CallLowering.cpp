@@ -125,8 +125,7 @@ static Register vectorToInt(MachineIRBuilder &MIRBuilder,
 ///        (return float AND first arg float)).
 ///   SM83: callee cleanup when non-variadic (always).
 static bool isCalleeCleanup(bool IsVarArg, Type *RetTy, Type *FirstArgTy,
-                            bool IsSM83, CallingConv::ID CC,
-                            const DataLayout &DL) {
+                            bool IsSM83, Z80CC CC, const DataLayout &DL) {
   Z80CCAxes Axes = decodeZ80CC(CC);
   if (IsVarArg)
     return false;
@@ -247,7 +246,7 @@ static ArgAssignment classifyArgFastCall(const CallingConvRegs &Regs,
 /// Uses CallingConvRegs to look up the correct physical registers.
 ArgAssignment classifyArg(const CallingConvRegs &Regs, unsigned &RegParamCount,
                           FirstArgKind &FirstKind, unsigned BitWidth,
-                          bool IsVarArg, CallingConv::ID CC = CallingConv::C) {
+                          bool IsVarArg, Z80CC CC) {
   ArgAssignment Result;
 
   Z80CCAxes Axes = decodeZ80CC(CC);
@@ -358,6 +357,10 @@ Z80CallLowering::Z80CallLowering(const TargetLowering *TL)
 // Z80CallLoweringCommon — shared implementation
 //===----------------------------------------------------------------------===//
 
+static bool isMain(const Function *F) {
+  return F && F->getName() == "main" && F->hasExternalLinkage();
+}
+
 bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
                                         const Value *Val,
                                         ArrayRef<Register> VRegs,
@@ -402,7 +405,9 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
   }
 
   // Select register config based on calling convention.
-  CallingConv::ID CC = MF.getFunction().getCallingConv();
+  const Function &F = MF.getFunction();
+  Z80CC CC = getZ80CC(F.getCallingConv(), MF.getTarget().getTargetTriple(),
+                      F.isVarArg(), isMain(&F));
   const CallingConvRegs &Regs = getRegsForCC(CC);
 
   // Return value conventions: i8->Ret_I8, i16->Ret_I16,
@@ -639,8 +644,7 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
 /// table leaves its argument registers invalid.  Reject the convention rather
 /// than lower a call through them; the frontend already warns on the attribute,
 /// so this only catches hand-written IR.
-static bool isUnsupportedCCForSubtarget(const MachineFunction &MF,
-                                        CallingConv::ID CC) {
+static bool isUnsupportedCCForSubtarget(const MachineFunction &MF, Z80CC CC) {
   return MF.getSubtarget<Z80Subtarget>().hasSM83() &&
          decodeZ80CC(CC).isFastCall();
 }
@@ -653,7 +657,8 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   MachineFrameInfo &MFI = MF.getFrameInfo();
 
   bool IsVarArg = F.isVarArg();
-  CallingConv::ID CC = F.getCallingConv();
+  Z80CC CC = getZ80CC(F.getCallingConv(), MF.getTarget().getTargetTriple(),
+                      F.isVarArg(), isMain(&F));
 
   if (isUnsupportedCCForSubtarget(MF, CC))
     return false;
@@ -970,8 +975,12 @@ bool Z80CallLoweringCommon::isEligibleForTailCallOptimization(
   if (!Caller.getReturnType()->isVoidTy()) {
     if (Info.OrigRet.Ty != Caller.getReturnType())
       return false;
-    const CallingConvRegs &CallerRegs = getRegsForCC(Caller.getCallingConv());
-    const CallingConvRegs &CalleeRegs = getRegsForCC(Info.CallConv);
+    const Triple &TT = MF.getTarget().getTargetTriple();
+    const Function *Callee = Info.CB ? Info.CB->getCalledFunction() : nullptr;
+    const CallingConvRegs &CallerRegs = getRegsForCC(getZ80CC(
+        Caller.getCallingConv(), TT, Caller.isVarArg(), isMain(&Caller)));
+    const CallingConvRegs &CalleeRegs = getRegsForCC(
+        getZ80CC(Info.CallConv, TT, Info.IsVarArg, isMain(Callee)));
     if (CallerRegs.Ret_I8 != CalleeRegs.Ret_I8 ||
         CallerRegs.Ret_I16 != CalleeRegs.Ret_I16 ||
         CallerRegs.Ret_I32_Hi != CalleeRegs.Ret_I32_Hi ||
@@ -986,7 +995,9 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                       CallLoweringInfo &Info) const {
   MachineFunction &MF = MIRBuilder.getMF();
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  CallingConv::ID CC = Info.CallConv;
+  const Function *Callee = Info.CB ? Info.CB->getCalledFunction() : nullptr;
+  Z80CC CC = getZ80CC(Info.CallConv, MF.getTarget().getTargetTriple(),
+                      Info.IsVarArg, isMain(Callee));
 
   if (isUnsupportedCCForSubtarget(MF, CC))
     return false;
