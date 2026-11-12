@@ -1014,12 +1014,14 @@ bool Z80CallLoweringCommon::isEligibleForTailCallOptimization(
     return false;
 
   // Check that the callee pops the bytes this function pops.
+  // TODO: Move the return address when the pop sizes differ.
   unsigned CalleePopBytes =
       StackArgBytes > 0 && isCallCalleeCleanup(MF, Info) ? StackArgBytes : 0;
   if (CalleePopBytes != MF.getInfo<Z80FunctionInfo>()->StackParamBytes)
     return false;
 
   // Check that each stack argument is the incoming argument from the same slot.
+  // TODO: Store new stack arguments into the incoming slots.
   if (StackArgBytes > 0) {
     Z80CCAxes Axes = decodeZ80CC(Info.CallConv);
     SmallVector<unsigned, 4> Order(StackArgIndices);
