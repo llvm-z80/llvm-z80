@@ -26,7 +26,8 @@ t:
   call void @foo()
   ret i16 %v
 f:
-  ret i16 %v
+  %w = add i16 %v, 1
+  ret i16 %w
 }
 
 ; CHECK-LABEL: _addr_lo:

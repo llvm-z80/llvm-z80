@@ -6,9 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Shared utility functions for mapping Z80 registers to opcode table indices,
-// PUSH/POP opcodes, and LD r,r' opcodes. Used by Z80InstrInfo, Z80RegisterInfo,
-// and Z80FrameLowering to avoid duplicating the same switch statements.
+// Utility functions for Z80 registers and opcodes.
 //
 //===----------------------------------------------------------------------===//
 
@@ -91,6 +89,55 @@ inline bool isEncodableGR8(Register Reg) { return gr8RegToIndex(Reg) >= 0; }
 /// must be ones the opcode's three-bit register fields can name.
 inline bool canLD8(Register Dst, Register Src) {
   return isEncodableGR8(Dst) && isEncodableGR8(Src);
+}
+
+/// The RET cc with the condition of the conditional JR or JP \p BrOpc, or 0.
+inline unsigned getCondRetOpcode(unsigned BrOpc) {
+  switch (BrOpc) {
+  case Z80::JR_NZ_e:
+  case Z80::JP_NZ_nn:
+    return Z80::RET_NZ;
+  case Z80::JR_Z_e:
+  case Z80::JP_Z_nn:
+    return Z80::RET_Z;
+  case Z80::JR_NC_e:
+  case Z80::JP_NC_nn:
+    return Z80::RET_NC;
+  case Z80::JR_C_e:
+  case Z80::JP_C_nn:
+    return Z80::RET_C;
+  case Z80::JP_PO_nn:
+    return Z80::RET_PO;
+  case Z80::JP_PE_nn:
+    return Z80::RET_PE;
+  case Z80::JP_P_nn:
+    return Z80::RET_P;
+  case Z80::JP_M_nn:
+    return Z80::RET_M;
+  default:
+    return 0;
+  }
+}
+
+/// The conditional tail call with the condition of the conditional JR or JP
+/// \p BrOpc, or 0.
+inline unsigned getCondTailCallOpcode(unsigned BrOpc) {
+  switch (BrOpc) {
+  case Z80::JR_NZ_e:
+  case Z80::JP_NZ_nn:
+    return Z80::TCRETURN_NZ_nn;
+  case Z80::JR_Z_e:
+  case Z80::JP_Z_nn:
+    return Z80::TCRETURN_Z_nn;
+  case Z80::JR_NC_e:
+  case Z80::JP_NC_nn:
+    return Z80::TCRETURN_NC_nn;
+  case Z80::JR_C_e:
+  case Z80::JP_C_nn:
+    return Z80::TCRETURN_C_nn;
+  default:
+    return 0;
+  }
 }
 
 } // namespace Z80

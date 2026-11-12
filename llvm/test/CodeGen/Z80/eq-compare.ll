@@ -34,7 +34,7 @@ define i8 @byte_const(i8 %x) {
 define void @byte_branch(i8 %x) {
 ; CHECK-LABEL: byte_branch:
 ; CHECK:         cp 7
-; CHECK-NEXT:    jr nz,
+; CHECK-NEXT:    ret nz
   %c = icmp eq i8 %x, 7
   br i1 %c, label %t, label %f
 t:
@@ -81,7 +81,7 @@ define void @pair_high_const(i16 %x) {
 ; CHECK-NEXT:    xor 5
 ; Z80-NEXT:      or l
 ; SM83-NEXT:     or e
-; CHECK-NEXT:    jr nz,
+; CHECK-NEXT:    ret nz
   %c = icmp eq i16 %x, 1280
   br i1 %c, label %t, label %f
 t:

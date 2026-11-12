@@ -111,9 +111,9 @@ define void @test_memmove_known_direction_runtime_size(i16 %n) {
 ; SM83:       call ___z80_memmove_builtin
 ; CHECK:       ld a,b
 ; CHECK-NEXT:  or c
-; CHECK-NEXT:  jr z,[[SKIP:\.L[A-Za-z0-9_]+]]
+; CHECK-NEXT:  ret z
 ; CHECK:       ldir
-; CHECK-NEXT: [[SKIP]]:
+; CHECK:       ret
 ; CHECK-NOT:   lddr
 ; CHECK-NOT:   call
   %dst = getelementptr i8, ptr @memmove_buf, i16 8

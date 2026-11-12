@@ -13,7 +13,7 @@ declare void @g()
 define void @sign_branch(i8 %x) {
 ; CHECK-LABEL: sign_branch:
 ; CHECK:         add a,a
-; CHECK-NEXT:    jr c,
+; CHECK-NEXT:    ret nc
   %c = icmp slt i8 %x, 0
   br i1 %c, label %t, label %f
 t:
@@ -87,7 +87,7 @@ define i8 @signed_const_gt(i8 %x) {
 define void @unsigned_gt_branch(i8 %x) {
 ; CHECK-LABEL: unsigned_gt_branch:
 ; CHECK:         cp 6
-; CHECK-NEXT:    jr c,
+; CHECK-NEXT:    ret c
   %c = icmp ugt i8 %x, 5
   br i1 %c, label %t, label %f
 t:
@@ -114,7 +114,7 @@ define void @pair_sign_branch(i16 %x) {
 ; Z80:           ld a,h
 ; SM83:          ld a,d
 ; CHECK-NEXT:    add a,a
-; CHECK-NEXT:    jr c,
+; CHECK-NEXT:    ret nc
   %c = icmp slt i16 %x, 0
   br i1 %c, label %t, label %f
 t:
@@ -133,7 +133,7 @@ define void @pair_signed_const(i16 %x) {
 ; CHECK:         sub 6
 ; CHECK-NEXT:    ld a,{{[hd]}}
 ; CHECK-NEXT:    sbc a,128
-; CHECK-NEXT:    jr c,
+; CHECK-NEXT:    ret c
   %c = icmp sgt i16 %x, 5
   br i1 %c, label %t, label %f
 t:
@@ -181,7 +181,7 @@ define void @wide_sign_branch(i32 %x) {
 ; Z80:           ld a,h
 ; SM83:          ld a,d
 ; CHECK-NEXT:    add a,a
-; CHECK-NEXT:    jr c,
+; CHECK-NEXT:    ret nc
   %c = icmp slt i32 %x, 0
   br i1 %c, label %t, label %f
 t:

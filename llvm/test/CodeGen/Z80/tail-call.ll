@@ -13,6 +13,7 @@ declare cc128 i16 @cc0()
 declare cc128 void @cc0v()
 declare void @f(...)
 declare void @llvm.memcpy.p0.p0.i16(ptr, ptr, i16, i1)
+declare void @u(i8)
 @flag = external global i8
 
 ; CHECK-LABEL: _direct:
@@ -34,7 +35,7 @@ define i16 @args(i16 %a, i16 %b) {
 ; The return is copied into the block with the call.
 ; CHECK-LABEL: _cond:
 ; CHECK-NOT:   call
-; CHECK:       jp _v
+; CHECK:       jp nz,_v
 define void @cond(i16 %a) {
 entry:
   %c = icmp eq i16 %a, 0
@@ -43,6 +44,24 @@ then:
   tail call void @v()
   br label %end
 end:
+  ret void
+}
+
+; The branch over the first tail call takes it under the opposite condition.
+; CHECK-LABEL: _either:
+; CHECK:       cp 3
+; CHECK-NEXT:  jp z,_v
+; CHECK-NEXT:  {{.*}}:
+; CHECK-NEXT:  jp _u
+define void @either(i8 %a) {
+entry:
+  %c = icmp eq i8 %a, 3
+  br i1 %c, label %t, label %e
+t:
+  tail call void @v()
+  ret void
+e:
+  tail call void @u(i8 %a)
   ret void
 }
 

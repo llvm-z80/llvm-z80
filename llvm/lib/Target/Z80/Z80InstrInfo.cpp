@@ -863,6 +863,8 @@ static bool isAnsweredBy(const MachineInstr &MI, ResultFlags Kind) {
   case Z80::CALL_NZ_nn:
   case Z80::RET_Z:
   case Z80::RET_NZ:
+  case Z80::TCRETURN_Z_nn:
+  case Z80::TCRETURN_NZ_nn:
   case Z80::JP_M_nn:
   case Z80::JP_P_nn:
     return true;
@@ -874,6 +876,8 @@ static bool isAnsweredBy(const MachineInstr &MI, ResultFlags Kind) {
   case Z80::CALL_NC_nn:
   case Z80::RET_C:
   case Z80::RET_NC:
+  case Z80::TCRETURN_C_nn:
+  case Z80::TCRETURN_NC_nn:
     return Kind >= ResultFlags::Logic;
   default:
     return Kind == ResultFlags::Same;
@@ -1810,6 +1814,24 @@ unsigned Z80InstrInfo::insertBranch(MachineBasicBlock &MBB,
   return Count;
 }
 
+MachineInstr *Z80InstrInfo::insertCondForm(MachineBasicBlock &MBB,
+                                           MachineBasicBlock::iterator I,
+                                           unsigned Opc, const MachineInstr &MI,
+                                           const DebugLoc &DL) const {
+  MachineInstrBuilder MIB = BuildMI(MBB, I, DL, get(Opc));
+  // Operand 0 is the callee of a tail call or the target of a JP. RET has no
+  // explicit operand.
+  for (const MachineOperand &MO : MI.explicit_operands())
+    MIB.add(MO);
+  // The return value and argument registers stay live on the path that falls
+  // through. The copies carry no kill flag.
+  for (const MachineOperand &MO : MI.implicit_operands())
+    if (MO.isReg() && MO.isUse() && !MIB->readsRegister(MO.getReg(), nullptr))
+      MIB.addReg(MO.getReg(),
+                 RegState::Implicit | getUndefRegState(MO.isUndef()));
+  return MIB;
+}
+
 unsigned Z80InstrInfo::removeBranch(MachineBasicBlock &MBB,
                                     int *BytesRemoved) const {
   MachineBasicBlock::iterator I = MBB.end();
@@ -1935,8 +1957,12 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::ASHR16_VAR: return IsSM83 ? 11 : 10;
     // LD A,B; OR C; JR Z,e; LDIR
     case Z80::LDIR_GUARDED: return 6;
-    // Tail calls: JP nn, JP (IY), JP (HL).
-    case Z80::TCRETURN_nn: return 3;
+    // Tail calls: JP nn, JP cc,nn, JP (IY), JP (HL).
+    case Z80::TCRETURN_nn:
+    case Z80::TCRETURN_NZ_nn:
+    case Z80::TCRETURN_Z_nn:
+    case Z80::TCRETURN_NC_nn:
+    case Z80::TCRETURN_C_nn: return 3;
     case Z80::TCRETURN_IY: return 2;
     case Z80::TCRETURN_HL: return 1;
     // Callee-cleanup return.  The sequences are in expandPostRAPseudoImpl;

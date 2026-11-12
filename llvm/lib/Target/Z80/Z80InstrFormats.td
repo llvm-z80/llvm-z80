@@ -773,8 +773,9 @@ class CALLcond<Z80CondCode cc> : Inst24<"call " # cc.Name # ",",
 /// RET cc - Conditional return
 /// Opcode: 0b11ccc000 where ccc is condition
 class RETcond<Z80CondCode cc> : Inst8<"ret " # cc.Name,
-                                      !or(0xC0, !shl(cc.cc, 3))>,
-                                InstConditionalBranch {
+                                      !or(0xC0, !shl(cc.cc, 3))> {
+  let isReturn = true;
+  let isTerminator = true;
   let Uses = [FLAGS];
 }
 
