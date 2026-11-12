@@ -1886,15 +1886,17 @@ bool Z80InstrInfo::canMakeTailCallConditional(
   if (any_of(TailMBB.predecessors(),
              [](const MachineBasicBlock *Pred) { return isInCycle(*Pred); }))
     return false;
-  // Each 2-byte JR cc becomes a 3-byte JP cc. The 3-byte block with the tail
-  // call goes away only when every predecessor branches to it this way.
-  unsigned Preds = countCondBranchPreds(*this, TailCall);
-  if (!Preds || Preds > 3)
-    return false;
-  if (TailCall.getMF()->getFunction().hasOptSize())
-    return true;
-  // A JP cc that falls through is slower than a JR cc. A taken one saves the
-  // JP. This is a gain when the call is taken a quarter of the time or more.
+  if (TailCall.getMF()->getFunction().hasOptSize()) {
+    // Each 2-byte JR cc becomes a 3-byte JP cc. The 3-byte block with the tail
+    // call goes away only when every predecessor branches to it this way.
+    unsigned Preds = countCondBranchPreds(*this, TailCall);
+    if (!Preds || Preds > 3)
+      return false;
+    if (Preds < 3)
+      return true;
+  }
+  // A JP cc that is not taken is slower than a JR cc. The change pays off when
+  // the call is taken a quarter of the time or more.
   return none_of(TailMBB.predecessors(), [&](const MachineBasicBlock *Pred) {
     return Pred->getSuccProbability(find(Pred->successors(), &TailMBB)) <
            BranchProbability(1, 4);

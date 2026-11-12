@@ -95,9 +95,25 @@ def:
   ret void
 }
 
-; Another path reaches the tail call. JP cc would add a byte.
-; CHECK-LABEL: _shared:
+; Another path reaches the tail call. JP cc adds a byte, which only optsize
+; refuses.
+; CHECK-LABEL: _shared_os:
 ; CHECK:       jr z,
+; CHECK:       jp _v
+define void @shared_os(i8 %x, i8 %y) optsize {
+entry:
+  %c = icmp eq i8 %x, 0
+  br i1 %c, label %call, label %mid
+mid:
+  store volatile i8 %y, ptr @flag
+  br label %call
+call:
+  tail call void @v()
+  ret void
+}
+
+; CHECK-LABEL: _shared:
+; CHECK:       jp z,_v
 ; CHECK:       jp _v
 define void @shared(i8 %x, i8 %y) {
 entry:
@@ -124,6 +140,51 @@ call:
   ret void
 other:
   store volatile i8 %x, ptr @flag
+  ret void
+}
+
+; Three branches to the tail call leave the size unchanged. The call must then
+; be likely even at optsize.
+; CHECK-LABEL: _three:
+; CHECK-COUNT-3: jp z,_v
+define void @three(i8 %x, i8 %y) optsize {
+entry:
+  %a = icmp eq i8 %x, 0
+  br i1 %a, label %call, label %b
+b:
+  %c = icmp eq i8 %y, 0
+  br i1 %c, label %call, label %d
+d:
+  %z = load volatile i8, ptr @flag
+  %e = icmp eq i8 %z, 0
+  br i1 %e, label %call, label %done
+call:
+  tail call void @v()
+  ret void
+done:
+  store volatile i8 0, ptr @flag
+  ret void
+}
+
+; CHECK-LABEL: _three_rare:
+; CHECK-COUNT-3: jr z,
+; CHECK:       jp _v
+define void @three_rare(i8 %x, i8 %y) optsize {
+entry:
+  %a = icmp eq i8 %x, 0
+  br i1 %a, label %call, label %b, !prof !0
+b:
+  %c = icmp eq i8 %y, 0
+  br i1 %c, label %call, label %d, !prof !0
+d:
+  %z = load volatile i8, ptr @flag
+  %e = icmp eq i8 %z, 0
+  br i1 %e, label %call, label %done, !prof !0
+call:
+  tail call void @v()
+  ret void
+done:
+  store volatile i8 0, ptr @flag
   ret void
 }
 
