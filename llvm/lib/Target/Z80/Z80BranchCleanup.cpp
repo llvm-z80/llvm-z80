@@ -1,4 +1,4 @@
-//===-- Z80BranchCleanup.cpp - Z80 Branch Relaxation Cleanup --------------===//
+//===-- Z80BranchCleanup.cpp - Z80 Branch Cleanup -------------------------===//
 //
 // Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,24 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// BranchRelaxation handles out-of-range JR_CC by reversing the condition and
-// inserting a JP trampoline in a new MBB:
+// Cleans up branches after BranchRelaxation and Z80ExpandPseudo.
 //
-//   bb.0:
-//     JR_CC_rev bb.1       ; 2 bytes — reversed condition, near target
-//   bb.trampoline:
-//     JP bb.far             ; 3 bytes — unconditional jump to far target
-//   bb.1:                   ; (total: 5 bytes, 2 branches on cold path)
+// BranchRelaxation turns an out-of-range JR cc into JR !cc around a block with
+// only a JP. The pair becomes JP cc. A conditional branch to a block with only
+// a RET becomes RET cc. A conditional branch around a block with only a tail
+// call becomes a conditional tail call.
 //
-// Since Z80 has JP CC,nn (conditional absolute jump), this pass collapses
-// the trampoline by moving the JP_CC into the predecessor block:
-//
-//   bb.0:
-//     JP_CC bb.far          ; 3 bytes — original condition, direct jump
-//   bb.1:                   ; (total: 3 bytes, 0 branches on hot path)
-//
-// The now-empty trampoline block is removed.
-// Must run after BranchRelaxation.
+// Every change removes bytes. No JR goes out of range afterwards.
 //
 //===----------------------------------------------------------------------===//
 
@@ -31,19 +21,22 @@
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80.h"
+#include "Z80OpcodeUtils.h"
 #include "Z80Subtarget.h"
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "z80-branch-cleanup"
 
 STATISTIC(NumTrampolinesCollapsed,
           "Number of JR_CC/JP trampolines collapsed into JP_CC");
+STATISTIC(NumCondReturns, "Number of branches folded into RET cc");
+STATISTIC(NumCondTailCalls,
+          "Number of branches folded into conditional tail calls");
+STATISTIC(NumJumpsToNext, "Number of jumps to the next block removed");
 
 using namespace llvm;
 
@@ -62,22 +55,120 @@ public:
 
 } // namespace
 
-/// Invert a JR condition code to the corresponding JP condition code.
-/// JR_Z  → JP_NZ, JR_NZ → JP_Z, JR_C  → JP_NC, JR_NC → JP_C.
-/// Returns 0 if the opcode is not a conditional JR.
-static unsigned invertJRtoJP(unsigned JROpc) {
-  switch (JROpc) {
-  case Z80::JR_Z_e:
-    return Z80::JP_NZ_nn;
+/// The JP cc with the condition of the conditional JR \p BrOpc, or 0.
+static unsigned getCondJPOpcode(unsigned BrOpc) {
+  switch (BrOpc) {
   case Z80::JR_NZ_e:
+    return Z80::JP_NZ_nn;
+  case Z80::JR_Z_e:
     return Z80::JP_Z_nn;
-  case Z80::JR_C_e:
-    return Z80::JP_NC_nn;
   case Z80::JR_NC_e:
+    return Z80::JP_NC_nn;
+  case Z80::JR_C_e:
     return Z80::JP_C_nn;
   default:
     return 0;
   }
+}
+
+/// The only instruction of \p MBB besides debug instructions, if its opcode is
+/// \p Opc.
+static MachineInstr *getOnlyInstr(MachineBasicBlock &MBB, unsigned Opc) {
+  auto I = MBB.getFirstNonDebugInstr();
+  if (I == MBB.end() || I->getOpcode() != Opc ||
+      MBB.getLastNonDebugInstr() != I)
+    return nullptr;
+  return &*I;
+}
+
+/// Whether a terminator of \p MBB can go to \p Succ, or \p MBB falls through
+/// to it.
+static bool stillReaches(MachineBasicBlock &MBB, MachineBasicBlock *Succ) {
+  for (MachineInstr &MI : MBB.terminators()) {
+    // The targets of a jump table are not operands of the jump.
+    if (MI.isIndirectBranch())
+      return true;
+    for (const MachineOperand &MO : MI.operands())
+      if (MO.isMBB() && MO.getMBB() == Succ)
+        return true;
+  }
+  auto Last = MBB.getLastNonDebugInstr();
+  return MBB.isLayoutSuccessor(Succ) &&
+         (Last == MBB.end() || !Last->isBarrier());
+}
+
+/// Turn each conditional branch of \p MBB to a block with only a RET into
+/// RET cc.
+static bool foldBranchesToRet(MachineBasicBlock &MBB, const Z80InstrInfo &TII) {
+  bool Changed = false;
+  for (MachineInstr &Br : make_early_inc_range(MBB.terminators())) {
+    unsigned Opc = Z80::getCondRetOpcode(Br.getOpcode());
+    if (!Opc)
+      continue;
+    MachineBasicBlock *RetMBB = Br.getOperand(0).getMBB();
+    MachineInstr *Ret = getOnlyInstr(*RetMBB, Z80::RET);
+    if (!Ret)
+      continue;
+    TII.insertCondForm(MBB, Br, Opc, *Ret, Br.getDebugLoc());
+    Br.eraseFromParent();
+    if (!stillReaches(MBB, RetMBB)) {
+      MBB.removeSuccessor(RetMBB);
+      if (RetMBB->pred_empty() && !RetMBB->hasAddressTaken() &&
+          !RetMBB->isEHPad() && !RetMBB->isEntryBlock())
+        RetMBB->eraseFromParent();
+    }
+    ++NumCondReturns;
+    Changed = true;
+  }
+  return Changed;
+}
+
+/// Turn the conditional branch at the end of \p MBB, when it jumps over a
+/// block with only \p Opc, into that instruction under the opposite condition.
+/// \p GetCondOpc gives the conditional form for a branch opcode.
+static bool foldBranchOver(MachineBasicBlock &MBB, const Z80InstrInfo &TII,
+                           unsigned Opc, unsigned (*GetCondOpc)(unsigned)) {
+  auto Br = MBB.getLastNonDebugInstr();
+  if (Br == MBB.end() || !Br->isConditionalBranch())
+    return false;
+  SmallVector<MachineOperand, 1> Cond = {
+      MachineOperand::CreateImm(Br->getOpcode())};
+  if (TII.reverseBranchCondition(Cond))
+    return false;
+  unsigned CondOpc = GetCondOpc(Cond[0].getImm());
+  if (!CondOpc)
+    return false;
+
+  MachineBasicBlock *Next = MBB.getNextNode();
+  if (!Next || Next->pred_size() != 1 ||
+      !Next->isLayoutSuccessor(Br->getOperand(0).getMBB()))
+    return false;
+  MachineInstr *MI = getOnlyInstr(*Next, Opc);
+  if (!MI)
+    return false;
+
+  TII.insertCondForm(MBB, Br, CondOpc, *MI, Br->getDebugLoc());
+  Br->eraseFromParent();
+  if (MI->isBranch()) {
+    MachineBasicBlock *Target = MI->getOperand(0).getMBB();
+    MBB.replaceSuccessor(Next, Target);
+    Next->removeSuccessor(Target);
+  } else {
+    MBB.removeSuccessor(Next);
+  }
+  Next->eraseFromParent();
+  return true;
+}
+
+static bool removeJumpToNext(MachineBasicBlock &MBB) {
+  auto Last = MBB.getLastNonDebugInstr();
+  if (Last == MBB.end() ||
+      (Last->getOpcode() != Z80::JR_e && Last->getOpcode() != Z80::JP_nn) ||
+      !Last->getOperand(0).isMBB() ||
+      !MBB.isLayoutSuccessor(Last->getOperand(0).getMBB()))
+    return false;
+  Last->eraseFromParent();
+  return true;
 }
 
 bool Z80BranchCleanup::runOnMachineFunction(MachineFunction &MF) {
@@ -85,81 +176,37 @@ bool Z80BranchCleanup::runOnMachineFunction(MachineFunction &MF) {
   const auto *TII = STI.getInstrInfo();
   bool Changed = false;
 
-  // Collect trampoline blocks to remove after iteration.
-  SmallVector<MachineBasicBlock *, 4> ToRemove;
-
-  for (auto MBI = MF.begin(), MBE = MF.end(); MBI != MBE; ++MBI) {
-    // The entry block cannot be a trampoline.
-    if (MBI == MF.begin())
-      continue;
-
-    MachineBasicBlock &TrampolineMBB = *MBI;
-
-    // Look for a trampoline block: contains only a single JP_nn.
-    auto TI = TrampolineMBB.getFirstNonDebugInstr();
-    if (TI == TrampolineMBB.end())
-      continue;
-    if (TI->getOpcode() != Z80::JP_nn)
-      continue;
-    // Must be the only real instruction.
-    if (TrampolineMBB.getLastNonDebugInstr() != TI)
-      continue;
-
-    // Must have exactly one predecessor.
-    if (TrampolineMBB.pred_size() != 1)
-      continue;
-    MachineBasicBlock *PredMBB = *TrampolineMBB.pred_begin();
-
-    // Predecessor must be the layout predecessor.
-    if (&*std::prev(TrampolineMBB.getIterator()) != PredMBB)
-      continue;
-
-    // Predecessor must end with a conditional JR.
-    auto PredLast = PredMBB->getLastNonDebugInstr();
-    if (PredLast == PredMBB->end())
-      continue;
-    unsigned JPCondOpc = invertJRtoJP(PredLast->getOpcode());
-    if (!JPCondOpc)
-      continue;
-
-    // The JR target must be the trampoline's layout successor (the block
-    // that the JR "skips to" when the condition is true).
-    MachineBasicBlock *JRTarget = PredLast->getOperand(0).getMBB();
-    auto AfterTrampoline = std::next(TrampolineMBB.getIterator());
-    if (AfterTrampoline == MF.end() || JRTarget != &*AfterTrampoline)
-      continue;
-
-    MachineBasicBlock *FarTarget = TI->getOperand(0).getMBB();
-
-    LLVM_DEBUG(dbgs() << "Z80BranchCleanup: collapsing trampoline in "
-                      << printMBBReference(TrampolineMBB) << "\n");
-
-    // Replace JR_CC in predecessor with JP_CC to far target.
-    DebugLoc DL = PredLast->getDebugLoc();
-    PredLast->eraseFromParent();
-    BuildMI(*PredMBB, PredMBB->end(), DL, TII->get(JPCondOpc))
-        .addMBB(FarTarget);
-
-    // Update predecessor's successor edges:
-    // Was: PredMBB → {TrampolineMBB, JRTarget}
-    // Now: PredMBB → {FarTarget, JRTarget}  (JRTarget via fallthrough)
-    PredMBB->removeSuccessor(&TrampolineMBB);
-    PredMBB->addSuccessor(FarTarget);
-    // JRTarget is already a successor of PredMBB.
-
-    // Clean up trampoline's successor list before removal.
-    TrampolineMBB.removeSuccessor(FarTarget);
-
-    // Remove the JP instruction and mark trampoline for removal.
-    TI->eraseFromParent();
-    ToRemove.push_back(&TrampolineMBB);
-    ++NumTrampolinesCollapsed;
-    Changed = true;
+  for (MachineBasicBlock &MBB : MF) {
+    if (foldBranchOver(MBB, *TII, Z80::JP_nn, getCondJPOpcode)) {
+      ++NumTrampolinesCollapsed;
+      Changed = true;
+    }
   }
 
-  // Remove empty trampoline blocks.
-  for (MachineBasicBlock *MBB : ToRemove) {
-    MBB->eraseFromParent();
+  // We should fold tail calls first. Folding the RET first gives the less
+  // efficient RET cc / JP f.
+  for (MachineBasicBlock &MBB : MF) {
+    if (foldBranchOver(MBB, *TII, Z80::TCRETURN_nn,
+                       Z80::getCondTailCallOpcode)) {
+      ++NumCondTailCalls;
+      Changed = true;
+    }
+  }
+  for (MachineBasicBlock &MBB : MF)
+    Changed |= foldBranchesToRet(MBB, *TII);
+  // We should fold branches to a RET first. A branch over a RET folds only
+  // when no other branch reaches that RET block.
+  for (MachineBasicBlock &MBB : MF) {
+    if (foldBranchOver(MBB, *TII, Z80::RET, Z80::getCondRetOpcode)) {
+      ++NumCondReturns;
+      Changed = true;
+    }
+  }
+  for (MachineBasicBlock &MBB : MF) {
+    if (removeJumpToNext(MBB)) {
+      ++NumJumpsToNext;
+      Changed = true;
+    }
   }
 
   return Changed;
@@ -168,7 +215,7 @@ bool Z80BranchCleanup::runOnMachineFunction(MachineFunction &MF) {
 char Z80BranchCleanup::ID = 0;
 
 INITIALIZE_PASS(Z80BranchCleanup, DEBUG_TYPE,
-                "Clean up Z80 branch relaxation trampolines", false, false)
+                "Clean up Z80 branches after relaxation", false, false)
 
 MachineFunctionPass *llvm::createZ80BranchCleanupPass() {
   return new Z80BranchCleanup();

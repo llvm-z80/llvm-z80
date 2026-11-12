@@ -24,7 +24,6 @@ define void @asm_loop(ptr %p, i16 %n) {
 ; Z80-NEXT:   pop hl
 ; Z80-NEXT:   inc hl
 ; Z80-NEXT:   dec de
-; Z80:        ret
 ; SM83-LABEL: _asm_loop:
 ; SM83-NOT:   add sp
 ; SM83:       push de

@@ -37,7 +37,7 @@ exit:
 ; Z80:      xor #254
 ; Z80-NEXT: or {{[a-l]}}
 ; Z80-NEXT: or {{[a-l]}}
-; Z80-NEXT: jr nz,
+; Z80-NEXT: ret nz
 
 define void @ne64() {
 entry:

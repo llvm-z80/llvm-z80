@@ -133,7 +133,7 @@ define i8 @spill_fold(i8 %a, i8 %b) "frame-pointer"="all" {
 ; Z80-NEXT:  sbc a,a
 ; Z80-NEXT:  and 1
 ; Z80-NEXT:  xor 1
-; Z80-NEXT:  jr nz,
+; Z80-NEXT:  ret nz
 declare void @use16(i16)
 
 define void @borrow_branch(i16 %a, i16 %b) {

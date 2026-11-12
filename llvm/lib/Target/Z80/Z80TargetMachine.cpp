@@ -355,10 +355,10 @@ void Z80PassConfig::addPreSched2() {
 
 void Z80PassConfig::addPreEmitPass() {
   addPass(&BranchRelaxationPassID);
-  // Collapse JR_CC+JP trampolines from BranchRelaxation into JP_CC.
-  if (getOptLevel() != CodeGenOptLevel::None)
-    addPass(createZ80BranchCleanupPass());
   // Expand pseudos that split MBBs (variable shift loops) after branch
   // relaxation. The generated JR/DJNZ branches are always short-range.
   addPass(createZ80ExpandPseudoPass());
+  // Fold branches into JP cc, RET cc and conditional tail calls.
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createZ80BranchCleanupPass());
 }

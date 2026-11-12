@@ -1047,6 +1047,21 @@ let Uses = [SP, HL], Defs = [A, BC, DE, HL, FLAGS] in
 def TCRETURN_HL : Z80Pseudo<(outs), (ins)>, PseudoInstExpansion<(JP_HLind)>;
 }
 
+// Conditional tail calls. The path that falls through sees no register
+// change.
+let isCall = true, isReturn = true, isTerminator = true,
+    hasSideEffects = true, mayLoad = true, mayStore = true,
+    Uses = [SP, FLAGS] in {
+def TCRETURN_NZ_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                     PseudoInstExpansion<(JP_NZ_nn imm16:$dst)>;
+def TCRETURN_Z_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                    PseudoInstExpansion<(JP_Z_nn imm16:$dst)>;
+def TCRETURN_NC_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                     PseudoInstExpansion<(JP_NC_nn imm16:$dst)>;
+def TCRETURN_C_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                    PseudoInstExpansion<(JP_C_nn imm16:$dst)>;
+}
+
 // SM83-only instructions and pseudos
 include "SM83InstrInfo.td"
 

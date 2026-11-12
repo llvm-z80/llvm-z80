@@ -616,6 +616,20 @@ public:
   bool
   reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;
 
+  bool isUnconditionalTailCall(const MachineInstr &MI) const override;
+  bool canMakeTailCallConditional(SmallVectorImpl<MachineOperand> &Cond,
+                                  const MachineInstr &TailCall) const override;
+  void replaceBranchWithTailCall(MachineBasicBlock &MBB,
+                                 SmallVectorImpl<MachineOperand> &Cond,
+                                 const MachineInstr &TailCall) const override;
+
+  /// Insert at \p I the instruction \p Opc that does what \p MI does when
+  /// its condition holds.
+  MachineInstr *insertCondForm(MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator I, unsigned Opc,
+                               const MachineInstr &MI,
+                               const DebugLoc &DL) const;
+
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
   bool analyzeCompare(const MachineInstr &MI, Register &SrcReg,
