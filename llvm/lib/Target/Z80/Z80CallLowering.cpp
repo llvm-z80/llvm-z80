@@ -796,8 +796,8 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
       unsigned ByValSize = MF.getDataLayout().getTypeAllocSize(ByValTy);
       // An empty aggregate still needs an address, but occupies no stack;
       // give it a one-byte object overlapping the next slot.
-      int FI = MFI.CreateFixedObject(std::max(ByValSize, 1u),
-                                     frameOff(ByValSize), true);
+      int FI = MFI.CreateFixedObject(
+          std::max(ByValSize, 1u), frameOff(ByValSize), /*IsImmutable=*/false);
       MIRBuilder.buildFrameIndex(VReg, FI);
       StackArgOffset += ByValSize;
       HasStackArgs = true;
@@ -948,22 +948,101 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   return true;
 }
 
+/// Whether the callee of \p Info pops the stack arguments.
+static bool isCallCalleeCleanup(const MachineFunction &MF,
+                                const CallLowering::CallLoweringInfo &Info) {
+  const auto &STI = MF.getSubtarget<Z80Subtarget>();
+  const DataLayout &DL = MF.getFunction().getDataLayout();
+  // Use the size of the value the callee originally returns.
+  Type *EffectiveRetTy = Info.OrigRet.Ty;
+  if (EffectiveRetTy->isVoidTy() && Info.CB) {
+    if (Info.CB->hasStructRetAttr()) {
+      Type *SRetTy = Info.CB->getParamStructRetType(0);
+      if (SRetTy)
+        EffectiveRetTy = SRetTy;
+    }
+  }
+  Type *FirstArgTy = Info.OrigArgs.empty() ? nullptr : Info.OrigArgs[0].Ty;
+  return isCalleeCleanup(Info.IsVarArg, EffectiveRetTy, FirstArgTy,
+                         STI.hasSM83(), Info.CallConv, DL);
+}
+
+/// Whether \p Reg is loaded unchanged from the incoming stack argument in the
+/// \p Size byte slot at \p Offset.
+static bool matchingStackOffset(Register Reg, int Offset, unsigned Size,
+                                const MachineRegisterInfo &MRI,
+                                const MachineFrameInfo &MFI) {
+  const MachineInstr *Def = MRI.getVRegDef(Reg);
+  if (!Def)
+    return false;
+  // Check each 16-bit load of an argument wider than 16 bits.
+  if (Def->getOpcode() == TargetOpcode::G_MERGE_VALUES) {
+    int End = Offset + Size;
+    for (const MachineOperand &Part : llvm::drop_begin(Def->operands())) {
+      unsigned PartSize =
+          MRI.getType(Part.getReg()).getSizeInBytes().getFixedValue();
+      if (!matchingStackOffset(Part.getReg(), Offset, PartSize, MRI, MFI))
+        return false;
+      Offset += PartSize;
+    }
+    return Offset == End;
+  }
+  if (Def->getOpcode() != TargetOpcode::G_LOAD)
+    return false;
+  const MachineInstr *Addr = MRI.getVRegDef(Def->getOperand(1).getReg());
+  if (!Addr || Addr->getOpcode() != TargetOpcode::G_FRAME_INDEX)
+    return false;
+  int FI = Addr->getOperand(1).getIndex();
+  return MFI.isFixedObjectIndex(FI) && MFI.isImmutableObjectIndex(FI) &&
+         MFI.getObjectOffset(FI) == Offset &&
+         MFI.getObjectSize(FI) == (int64_t)Size;
+}
+
 bool Z80CallLoweringCommon::isEligibleForTailCallOptimization(
     MachineFunction &MF, const CallLoweringInfo &Info,
-    unsigned StackArgBytes) const {
+    ArrayRef<unsigned> StackArgIndices, unsigned StackArgBytes) const {
   if (!Info.IsTailCall)
     return false;
 
-  // The callee reads stack arguments right after the return address, and our
-  // caller still uses that memory.
-  if (StackArgBytes > 0)
+  // Interrupt handlers do not tail call.
+  const Function &Caller = MF.getFunction();
+  if (Caller.hasFnAttribute("interrupt"))
     return false;
 
-  // Interrupt handlers and callee-cleanup functions do not tail call.
-  const Function &Caller = MF.getFunction();
-  if (Caller.hasFnAttribute("interrupt") ||
-      MF.getInfo<Z80FunctionInfo>()->StackParamBytes > 0)
+  // Reject a call whose result comes back through this frame.
+  if (!Info.CanLowerReturn)
     return false;
+
+  // Check that the callee pops the bytes this function pops.
+  // TODO: Move the return address when the pop sizes differ.
+  unsigned CalleePopBytes =
+      StackArgBytes > 0 && isCallCalleeCleanup(MF, Info) ? StackArgBytes : 0;
+  if (CalleePopBytes != MF.getInfo<Z80FunctionInfo>()->StackParamBytes)
+    return false;
+
+  // Check that each stack argument is the incoming argument from the same slot.
+  // TODO: Store new stack arguments into the incoming slots.
+  if (StackArgBytes > 0) {
+    Z80CCAxes Axes = decodeZ80CC(Info.CallConv);
+    SmallVector<unsigned, 4> Order(StackArgIndices);
+    // Walk __smallc arguments last to first.
+    if (Axes.isLeftToRight())
+      std::reverse(Order.begin(), Order.end());
+    const MachineRegisterInfo &MRI = MF.getRegInfo();
+    const MachineFrameInfo &MFI = MF.getFrameInfo();
+    // Start right above the 2-byte return address.
+    int Offset = 2;
+    for (unsigned Idx : Order) {
+      const ArgInfo &Arg = Info.OrigArgs[Idx];
+      unsigned BitWidth = Arg.Ty->getPrimitiveSizeInBits();
+      unsigned SlotBytes = stackSlotBytes(BitWidth ? BitWidth : 16, Axes);
+      if (Arg.Flags[0].isSRet() || Arg.Flags[0].isByVal() ||
+          Arg.Regs.size() != 1 ||
+          !matchingStackOffset(Arg.Regs[0], Offset, SlotBytes, MRI, MFI))
+        return false;
+      Offset += SlotBytes;
+    }
+  }
 
   // The callee returns straight to our caller, so the callee must return the
   // same type in the same registers.
@@ -1088,7 +1167,8 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   if (SRetPtrReg.isValid())
     StackArgBytes += 2;
 
-  bool IsTailCall = isEligibleForTailCallOptimization(MF, Info, StackArgBytes);
+  bool IsTailCall = isEligibleForTailCallOptimization(MF, Info, StackArgIndices,
+                                                      StackArgBytes);
   if (Info.IsMustTailCall && !IsTailCall) {
     const Function &F = MF.getFunction();
     F.getContext().diagnose(DiagnosticInfoUnsupported(
@@ -1096,6 +1176,10 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
         MIRBuilder.getDebugLoc()));
   }
   Info.IsTailCall = IsTailCall;
+
+  // Skip the stack argument pushes of a tail call.
+  if (IsTailCall)
+    StackArgIndices.clear();
 
   // --- Pass 2: Emit code ---
 
@@ -1298,26 +1382,8 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
   }
 
   unsigned CalleeCleanupBytes = 0;
-  if (StackArgBytes > 0) {
-    const auto &STI = MF.getSubtarget<Z80Subtarget>();
-    const DataLayout &DL = MF.getFunction().getDataLayout();
-    // Use the original return type for cleanup decision per SDCC convention:
-    // i64 return → 64 > 16 bits → caller cleanup (Z80).
-    // For frontend sret (Info.OrigRet.Ty is void, sret on first arg),
-    // recover the original struct type from the sret attribute.
-    Type *EffectiveRetTy = Info.OrigRet.Ty;
-    if (EffectiveRetTy->isVoidTy() && Info.CB) {
-      if (Info.CB->hasStructRetAttr()) {
-        Type *SRetTy = Info.CB->getParamStructRetType(0);
-        if (SRetTy)
-          EffectiveRetTy = SRetTy;
-      }
-    }
-    Type *FirstArgTy = Info.OrigArgs.empty() ? nullptr : Info.OrigArgs[0].Ty;
-    if (isCalleeCleanup(Info.IsVarArg, EffectiveRetTy, FirstArgTy,
-                        STI.hasSM83(), CC, DL))
-      CalleeCleanupBytes = StackArgBytes;
-  }
+  if (StackArgBytes > 0 && isCallCalleeCleanup(MF, Info))
+    CalleeCleanupBytes = StackArgBytes;
 
   // A callee-cleanup call closes the call sequence right after the CALL.
   bool EmittedAdjUp = false;

@@ -129,6 +129,19 @@ static unsigned countWideFrameAccesses(const MachineFunction &MF) {
   return N;
 }
 
+/// Whether an instruction other than debug info accesses a fixed stack object.
+static bool accessesFixedObject(const MachineFunction &MF) {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  return llvm::any_of(MF, [&](const MachineBasicBlock &MBB) {
+    return llvm::any_of(MBB, [&](const MachineInstr &MI) {
+      return !MI.isDebugInstr() &&
+             llvm::any_of(MI.operands(), [&](const MachineOperand &MO) {
+               return MO.isFI() && MFI.isFixedObjectIndex(MO.getIndex());
+             });
+    });
+  });
+}
+
 void Z80FrameLowering::processFunctionBeforeFrameFinalized(
     MachineFunction &MF, RegScavenger *RS) const {
   // Move the locals of a provably non-reentrant function out of the stack: the
@@ -197,6 +210,8 @@ void Z80FrameLowering::processFunctionBeforeFrameFinalized(
             "aligned data",
         F.getSubprogram()));
   }
+
+  MF.getInfo<Z80FunctionInfo>()->AccessesFixedObject = accessesFixedObject(MF);
 }
 
 void Z80FrameLowering::processFunctionBeforeFrameIndicesReplaced(
@@ -322,8 +337,8 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
 
   if (hasFP(MF)) {
     // --- Frame pointer mode (IX = frame pointer) ---
-    bool NeedsFP = MFI.getNumFixedObjects() > 0 || MFI.isFrameAddressTaken() ||
-                   MFI.hasVarSizedObjects();
+    bool NeedsFP = MF.getInfo<Z80FunctionInfo>()->AccessesFixedObject ||
+                   MFI.isFrameAddressTaken() || MFI.hasVarSizedObjects();
 
     if (!StackSize && !NeedsFP)
       return;
@@ -414,8 +429,8 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
   uint64_t StackSize = MFI.getStackSize();
 
   if (hasFP(MF)) {
-    bool NeedsFP = MFI.getNumFixedObjects() > 0 || MFI.isFrameAddressTaken() ||
-                   MFI.hasVarSizedObjects();
+    bool NeedsFP = MF.getInfo<Z80FunctionInfo>()->AccessesFixedObject ||
+                   MFI.isFrameAddressTaken() || MFI.hasVarSizedObjects();
 
     if (!StackSize && !NeedsFP)
       return;
