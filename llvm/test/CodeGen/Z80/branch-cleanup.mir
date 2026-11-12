@@ -40,6 +40,33 @@ body: |
     RET
 ...
 ---
+# The branch over a block with only a tail call takes the call under the
+# opposite condition.
+# CHECK-LABEL: name: over_tail_call
+# CHECK:       bb.0:
+# CHECK-NEXT:    successors: %bb.2(
+# CHECK:         TCRETURN_NZ_nn &g, implicit $sp, implicit $flags, implicit $hl
+# CHECK-NOT:   bb.1:
+# CHECK:       bb.2:
+name: over_tail_call
+tracksRegLiveness: true
+body: |
+  bb.0:
+    successors: %bb.2, %bb.1
+    liveins: $a, $hl
+
+    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
+    JR_Z_e %bb.2, implicit $flags
+
+  bb.1:
+    liveins: $hl
+
+    TCRETURN_nn &g, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $sp, implicit $hl
+
+  bb.2:
+    RET
+...
+---
 # The trampoline collapses into JP Z, which then becomes RET Z.
 # CHECK-LABEL: name: trampoline
 # CHECK:       bb.0:

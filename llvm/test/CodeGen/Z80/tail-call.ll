@@ -14,7 +14,12 @@ declare cc128 void @cc0v()
 declare void @f(...)
 declare void @llvm.memcpy.p0.p0.i16(ptr, ptr, i16, i1)
 declare void @u(i8)
+declare void @fa()
+declare void @fb()
+declare void @fc()
+declare i16 @w()
 @flag = external global i8
+@buf = external global [300 x i8]
 
 ; CHECK-LABEL: _direct:
 ; CHECK:       %bb.0:
@@ -47,12 +52,11 @@ end:
   ret void
 }
 
-; The branch over the first tail call takes it under the opposite condition.
 ; CHECK-LABEL: _either:
 ; CHECK:       cp 3
-; CHECK-NEXT:  jp z,_v
+; CHECK-NEXT:  jp nz,_u
 ; CHECK-NEXT:  {{.*}}:
-; CHECK-NEXT:  jp _u
+; CHECK-NEXT:  jp _v
 define void @either(i8 %a) {
 entry:
   %c = icmp eq i8 %a, 3
@@ -63,6 +67,91 @@ t:
 e:
   tail call void @u(i8 %a)
   ret void
+}
+
+; CHECK-LABEL: _dispatch:
+; CHECK:       cp 7
+; CHECK-NEXT:  jp z,_fc
+; CHECK:       cp 2
+; CHECK-NEXT:  jp z,_fb
+; CHECK:       cp 1
+; CHECK-NEXT:  jp z,_fa
+define void @dispatch(i8 %x) optsize {
+entry:
+  switch i8 %x, label %def [ i8 1, label %a
+                             i8 2, label %b
+                             i8 7, label %c ]
+a:
+  tail call void @fa()
+  ret void
+b:
+  tail call void @fb()
+  ret void
+c:
+  tail call void @fc()
+  ret void
+def:
+  store volatile i8 0, ptr @flag
+  ret void
+}
+
+; Another path reaches the tail call. JP cc would add a byte.
+; CHECK-LABEL: _shared:
+; CHECK:       jr z,
+; CHECK:       jp _v
+define void @shared(i8 %x, i8 %y) {
+entry:
+  %c = icmp eq i8 %x, 0
+  br i1 %c, label %call, label %mid
+mid:
+  store volatile i8 %y, ptr @flag
+  br label %call
+call:
+  tail call void @v()
+  ret void
+}
+
+; The call is rarely taken. JP cc would slow down the common path.
+; CHECK-LABEL: _rare:
+; CHECK:       jr z,
+; CHECK:       jp _v
+define void @rare(i8 %x) {
+entry:
+  %c = icmp eq i8 %x, 0
+  br i1 %c, label %call, label %other, !prof !0
+call:
+  tail call void @v()
+  ret void
+other:
+  store volatile i8 %x, ptr @flag
+  ret void
+}
+
+; The loop also reaches the tail call. A conditional tail call in the loop
+; would stop block placement from rotating the loop.
+; CHECK-LABEL: _loop_exit:
+; CHECK-NOT:   jp {{.*}},_w
+; CHECK:       jp _w
+define i16 @loop_exit(i16 %n) optsize {
+entry:
+  %e = icmp ult i16 %n, 300
+  br i1 %e, label %body, label %end
+cond:
+  %inc = add nuw nsw i16 %i, 1
+  %done = icmp eq i16 %inc, 300
+  br i1 %done, label %end, label %body
+body:
+  %i = phi i16 [ %inc, %cond ], [ %n, %entry ]
+  %a = getelementptr inbounds nuw i8, ptr @buf, i16 %i
+  %x = load i8, ptr %a
+  %z = icmp eq i8 %x, 0
+  br i1 %z, label %cond, label %out
+end:
+  %r = tail call i16 @w()
+  br label %out
+out:
+  %p = phi i16 [ %r, %end ], [ 0, %body ]
+  ret i16 %p
 }
 
 ; The result reaches the return through a phi.
@@ -289,3 +378,5 @@ define void @not_tail() {
   call void @v()
   ret void
 }
+
+!0 = !{!"branch_weights", i32 1, i32 1000}

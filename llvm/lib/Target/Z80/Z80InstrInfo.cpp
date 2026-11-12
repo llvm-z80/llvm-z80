@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -1830,6 +1831,87 @@ MachineInstr *Z80InstrInfo::insertCondForm(MachineBasicBlock &MBB,
       MIB.addReg(MO.getReg(),
                  RegState::Implicit | getUndefRegState(MO.isUndef()));
   return MIB;
+}
+
+// JP (HL) and JP (IY) have no conditional form.
+bool Z80InstrInfo::isUnconditionalTailCall(const MachineInstr &MI) const {
+  return MI.getOpcode() == Z80::TCRETURN_nn;
+}
+
+/// The number of predecessors of the block with \p TailCall, or 0 when one of
+/// them does not reach the block by a conditional branch alone.
+static unsigned countCondBranchPreds(const Z80InstrInfo &TII,
+                                     const MachineInstr &TailCall) {
+  const MachineBasicBlock &TailMBB = *TailCall.getParent();
+  unsigned Count = 0;
+  for (MachineBasicBlock *Pred : TailMBB.predecessors()) {
+    ++Count;
+    // BranchFolder removes the edges of the changed predecessors only after
+    // the loop over them. A conditional tail call is a terminator that calls
+    // and falls through.
+    if (any_of(Pred->terminators(), [&](const MachineInstr &MI) {
+          return MI.isCall() && !MI.isBarrier() &&
+                 MI.getOperand(0).isIdenticalTo(TailCall.getOperand(0));
+        }))
+      continue;
+    MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
+    SmallVector<MachineOperand, 1> Cond;
+    if (TII.analyzeBranch(*Pred, TBB, FBB, Cond) || Cond.empty() ||
+        TBB != &TailMBB || FBB == &TailMBB)
+      return 0;
+  }
+  return Count;
+}
+
+/// Whether a path from \p MBB leads back to \p MBB.
+static bool isInCycle(const MachineBasicBlock &MBB) {
+  SmallPtrSet<const MachineBasicBlock *, 16> Seen;
+  SmallVector<const MachineBasicBlock *, 16> Work(MBB.successors());
+  while (!Work.empty()) {
+    const MachineBasicBlock *Succ = Work.pop_back_val();
+    if (Succ == &MBB)
+      return true;
+    if (Seen.insert(Succ).second)
+      append_range(Work, Succ->successors());
+  }
+  return false;
+}
+
+bool Z80InstrInfo::canMakeTailCallConditional(
+    SmallVectorImpl<MachineOperand> &Cond, const MachineInstr &TailCall) const {
+  // Block placement keeps a block that ends in a conditional tail call next to
+  // the block after it. In a loop this can stop the loop rotation and cost a
+  // JR.
+  const MachineBasicBlock &TailMBB = *TailCall.getParent();
+  if (any_of(TailMBB.predecessors(),
+             [](const MachineBasicBlock *Pred) { return isInCycle(*Pred); }))
+    return false;
+  // Each 2-byte JR cc becomes a 3-byte JP cc. The 3-byte block with the tail
+  // call goes away only when every predecessor branches to it this way.
+  unsigned Preds = countCondBranchPreds(*this, TailCall);
+  if (!Preds || Preds > 3)
+    return false;
+  if (TailCall.getMF()->getFunction().hasOptSize())
+    return true;
+  // A JP cc that falls through is slower than a JR cc. A taken one saves the
+  // JP. This is a gain when the call is taken a quarter of the time or more.
+  return none_of(TailMBB.predecessors(), [&](const MachineBasicBlock *Pred) {
+    return Pred->getSuccProbability(find(Pred->successors(), &TailMBB)) <
+           BranchProbability(1, 4);
+  });
+}
+
+void Z80InstrInfo::replaceBranchWithTailCall(
+    MachineBasicBlock &MBB, SmallVectorImpl<MachineOperand> &Cond,
+    const MachineInstr &TailCall) const {
+  unsigned BrOpc = Cond[0].getImm();
+  auto Br = find_if(MBB.terminators(), [&](const MachineInstr &MI) {
+    return MI.getOpcode() == BrOpc;
+  });
+  assert(Br != MBB.end() && "no branch with this condition");
+  insertCondForm(MBB, Br, Z80::getCondTailCallOpcode(BrOpc), TailCall,
+                 Br->getDebugLoc());
+  Br->eraseFromParent();
 }
 
 unsigned Z80InstrInfo::removeBranch(MachineBasicBlock &MBB,
