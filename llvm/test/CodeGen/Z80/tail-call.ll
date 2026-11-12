@@ -3,12 +3,21 @@
 ; RUN: llc -mtriple=z80 -O1 -filetype=obj < %s -o /dev/null
 ; RUN: llc -mtriple=sm83 -O1 -filetype=obj < %s -o /dev/null
 
-; A call in tail position becomes a jump when the callee takes every argument
-; in registers and the caller returns with a plain RET.
+; A call in tail position becomes a jump when each stack argument of the callee
+; is the incoming argument from the same slot and both functions pop the same
+; bytes off the stack.
 
 declare void @v()
 declare i16 @g(i16, i16)
 declare i16 @g3(i16, i16, i16)
+declare i16 @g4(i16, i16, i16, i16)
+declare i16 @g_i32(i16, i16, i32)
+declare i8 @g_i8(i8, i8, i8)
+declare cc128 i16 @g3_cc0(i16, i16, i16)
+declare cc128 i16 @g2_cc0(i16, i16)
+declare cc129 i16 @g3_smallc(i16, i16, i16)
+declare cc129 i16 @g2_smallc(i16, i16)
+declare cc129 i8 @g_i8_smallc(i8, i8, i8)
 declare cc128 i16 @cc0()
 declare cc128 void @cc0v()
 declare void @f(...)
@@ -394,6 +403,124 @@ define i16 @stack_arg(i16 %a, i16 %b) {
 define i16 @callee_cleanup(i16 %a, i16 %b, i16 %c) {
   %r = tail call i16 @g(i16 %a, i16 %c)
   ret i16 %r
+}
+
+; CHECK-LABEL: _pass_through:
+; CHECK:       %bb.0:
+; CHECK-NEXT:  jp _g3
+define i16 @pass_through(i16 %a, i16 %b, i16 %c) {
+  %r = tail call i16 @g3(i16 %a, i16 %b, i16 %c)
+  ret i16 %r
+}
+
+; CHECK-LABEL: _pass_through_regs:
+; CHECK-NOT:   call
+; CHECK:       jp _g3
+define i16 @pass_through_regs(i16 %a, i16 %b, i16 %c) {
+  %r = tail call i16 @g3(i16 %b, i16 %a, i16 %c)
+  ret i16 %r
+}
+
+; CHECK-LABEL: _pass_through_i32:
+; CHECK:       %bb.0:
+; CHECK-NEXT:  jp _g_i32
+define i16 @pass_through_i32(i16 %a, i16 %b, i32 %c) {
+  %r = tail call i16 @g_i32(i16 %a, i16 %b, i32 %c)
+  ret i16 %r
+}
+
+; CHECK-LABEL: _pass_through_i8:
+; CHECK:       %bb.0:
+; CHECK-NEXT:  jp _g_i8
+define i8 @pass_through_i8(i8 %a, i8 %b, i8 %c) {
+  %r = tail call i8 @g_i8(i8 %a, i8 %b, i8 %c)
+  ret i8 %r
+}
+
+; __sdcccall(0) passes every argument on the stack. The caller pops the
+; arguments.
+; CHECK-LABEL: _pass_through_cc0:
+; CHECK:       %bb.0:
+; CHECK-NEXT:  jp _g3_cc0
+define cc128 i16 @pass_through_cc0(i16 %a, i16 %b, i16 %c) {
+  %r = tail call cc128 i16 @g3_cc0(i16 %a, i16 %b, i16 %c)
+  ret i16 %r
+}
+
+; CHECK-LABEL: _pass_through_cc0_fewer:
+; CHECK:       %bb.0:
+; CHECK-NEXT:  jp _g2_cc0
+define cc128 i16 @pass_through_cc0_fewer(i16 %a, i16 %b, i16 %c) {
+  %r = tail call cc128 i16 @g2_cc0(i16 %a, i16 %b)
+  ret i16 %r
+}
+
+; CHECK-LABEL: _pass_through_smallc:
+; CHECK:       %bb.0:
+; CHECK-NEXT:  jp _g3_smallc
+define cc129 i16 @pass_through_smallc(i16 %a, i16 %b, i16 %c) {
+  %r = tail call cc129 i16 @g3_smallc(i16 %a, i16 %b, i16 %c)
+  ret i16 %r
+}
+
+; __smallc gives each i8 a 2-byte slot.
+; CHECK-LABEL: _pass_through_smallc_i8:
+; CHECK:       %bb.0:
+; CHECK-NEXT:  jp _g_i8_smallc
+define cc129 i8 @pass_through_smallc_i8(i8 %a, i8 %b, i8 %c) {
+  %r = tail call cc129 i8 @g_i8_smallc(i8 %a, i8 %b, i8 %c)
+  ret i8 %r
+}
+
+; __smallc pushes the first argument first. Dropping the first argument keeps
+; the other arguments in place.
+; CHECK-LABEL: _pass_through_smallc_last:
+; CHECK:       %bb.0:
+; CHECK-NEXT:  jp _g2_smallc
+define cc129 i16 @pass_through_smallc_last(i16 %a, i16 %b, i16 %c) {
+  %r = tail call cc129 i16 @g2_smallc(i16 %b, i16 %c)
+  ret i16 %r
+}
+
+; CHECK-LABEL: _swapped_smallc:
+; CHECK:       call _g2_smallc
+define cc129 i16 @swapped_smallc(i16 %a, i16 %b) {
+  %r = tail call cc129 i16 @g2_smallc(i16 %b, i16 %a)
+  ret i16 %r
+}
+
+; CHECK-LABEL: _changed_stack_arg:
+; CHECK:       call _g3
+define i16 @changed_stack_arg(i16 %a, i16 %b, i16 %c) {
+  %c1 = add i16 %c, 1
+  %r = tail call i16 @g3(i16 %a, i16 %b, i16 %c1)
+  ret i16 %r
+}
+
+; CHECK-LABEL: _swapped_stack_args:
+; CHECK:       call _g4
+define i16 @swapped_stack_args(i16 %a, i16 %b, i16 %c, i16 %d) {
+  %r = tail call i16 @g4(i16 %a, i16 %b, i16 %d, i16 %c)
+  ret i16 %r
+}
+
+; The volatile store changes the slot the third argument came from.
+; CHECK-LABEL: _byval_written:
+; CHECK:       call _g3
+define i16 @byval_written(i16 %a, i16 %b, ptr byval(i16) %s) {
+  %c = load i16, ptr %s
+  store volatile i16 7, ptr %s
+  %r = tail call i16 @g3(i16 %a, i16 %b, i16 %c)
+  ret i16 %r
+}
+
+; This function pops the third argument. The variadic callee leaves the
+; argument for the caller to pop.
+; CHECK-LABEL: _pop_mismatch:
+; CHECK:       call _f
+define void @pop_mismatch(i16 %a, i16 %b, i16 %c) {
+  tail call void (...) @f(i16 %c)
+  ret void
 }
 
 ; CHECK-LABEL: _isr:

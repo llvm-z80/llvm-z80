@@ -37,6 +37,10 @@ struct Z80FunctionInfo : public MachineFunctionInfo {
 
   /// Whether PEI found a SPILL_PUSH before replacing frame indices.
   bool HasSpillPush = false;
+
+  /// Whether an instruction accesses a fixed stack object. Set by
+  /// processFunctionBeforeFrameFinalized.
+  bool AccessesFixedObject = false;
 };
 
 } // namespace llvm
