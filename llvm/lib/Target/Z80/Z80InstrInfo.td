@@ -755,6 +755,15 @@ def COMPARE8_IND : Z80Pseudo<(outs), (ins Ac:$lhs, GR16_HL:$addr)> {
   let mayStore = false;
 }
 
+// OR with the byte at HL. The fixed address class keeps the operand choice
+// visible to register allocation until this pseudo expands after RA.
+def OR8_IND : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR16_HL:$addr)> {
+  let Constraints = "$dst = $lhs";
+  let Defs = [FLAGS];
+  let mayLoad = true;
+  let mayStore = false;
+}
+
 // Load A from a compile-time address: 3-byte LD A,(nn).
 // Preferred over loading the address into a pair and using LD A,(BC/DE/HL)
 // (4 bytes total) when the address is a known constant.

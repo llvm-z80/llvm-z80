@@ -1092,6 +1092,15 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
+  case Z80::OR8_IND: {
+    // The constrained address operand guarantees this becomes OR (HL).
+    assert(MI.getOperand(2).getReg() == Z80::HL &&
+           "OR8_IND: address must be in HL");
+    BuildMI(MBB, MI, DL, get(Z80::OR_HLind)).cloneMemRefs(MI);
+    MI.eraseFromParent();
+    return true;
+  }
+
   case Z80::LOAD16_ABS: {
     // Expand to LD HL,(nn), LD BC,(nn), or LD DE,(nn) based on the pair the
     // allocator picked. GR16 holds exactly those three, so one always fits.
@@ -2183,6 +2192,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::LOAD8_IND:    // LD A,(rr) = 1
   case Z80::STORE8_IND:   // LD (rr),A = 1
   case Z80::COMPARE8_IND: // CP (HL) = 1
+  case Z80::OR8_IND:      // OR (HL) = 1
     return 1;
 
   case Z80::IN8_C:  // IN r,(C) = 2

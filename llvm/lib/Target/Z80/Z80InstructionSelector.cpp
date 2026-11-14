@@ -1270,6 +1270,53 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     return true;
   };
 
+  // Fold a single-use ordinary-memory load into OR (HL). The read moves from
+  // the load to this operation, so no memory access or side effect may lie
+  // between them; frame-index loads remain with the dedicated IX-fold path.
+  auto tryORIndirectFold = [&](Register ASrcReg, Register FoldReg,
+                               Register DstReg) -> bool {
+    // A second use needs the loaded byte after the OR as well.
+    if (!FoldReg.isVirtual() || !MRI.hasOneNonDBGUse(FoldReg))
+      return false;
+    MachineInstr *LoadMI = MRI.getVRegDef(FoldReg);
+    if (!LoadMI || LoadMI->getOpcode() != TargetOpcode::G_LOAD ||
+        LoadMI->getParent() != &MBB ||
+        MRI.getType(FoldReg).getSizeInBits() != 8)
+      return false;
+    // Frame slots are handled by the dedicated IX-indexed fold.
+    if (getFILoad(FoldReg).FI >= 0 || !LoadMI->hasOneMemOperand())
+      return false;
+    const MachineMemOperand &MMO = **LoadMI->memoperands_begin();
+    // Address-space 2 models port I/O, not an ordinary (HL) RAM read.
+    if (MMO.getAddrSpace() != 0)
+      return false;
+
+    MachineBasicBlock::iterator UseIt(&MI);
+    auto It = std::next(MachineBasicBlock::iterator(LoadMI));
+    for (; It != MBB.end() && It != UseIt; ++It) {
+      // In or_after_aliasing_store, reading after the store would return 42.
+      if (It->mayLoadOrStore() || It->hasUnmodeledSideEffects() ||
+          It->getOpcode() == TargetOpcode::LIFETIME_START ||
+          It->getOpcode() == TargetOpcode::LIFETIME_END)
+        return false;
+    }
+    if (It != UseIt)
+      return false;
+
+    Register AddrReg = LoadMI->getOperand(1).getReg();
+    if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
+        !RBI.constrainGenericRegister(ASrcReg, Z80::GR8RegClass, MRI) ||
+        !RBI.constrainGenericRegister(AddrReg, Z80::GR16_HLRegClass, MRI))
+      return false;
+
+    buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::OR8_IND, DstReg, ASrcReg, MRI)
+        .addReg(AddrReg)
+        .cloneMemRefs(*LoadMI);
+    LoadMI->eraseFromParent();
+    MI.eraseFromParent();
+    return true;
+  };
+
   // Handle generic opcodes
   switch (Opcode) {
   default:
@@ -2239,6 +2286,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         auto ImmVal = getConst8(Src2Reg);
 
         bool IsOr = Opcode == TargetOpcode::G_OR;
+        if (IsOr && !ImmVal &&
+            (tryORIndirectFold(Src1Reg, Src2Reg, DstReg) ||
+             tryORIndirectFold(Src2Reg, Src1Reg, DstReg)))
+          return true;
+
         // Setting one bit is SET, as clearing one is RES, and flipping all
         // of them is CPL. None of them writes the flags OR and XOR would; a
         // test that wants those turns them back into OR and XOR.
