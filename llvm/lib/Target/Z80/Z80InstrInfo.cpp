@@ -787,6 +787,8 @@ static const AccPseudo AccPseudos[] = {
     {Z80::SM83_LDH_Ac_nind, Z80::SM83_LDH_A_nind, AccPseudo::Operand},
     {Z80::SM83_LD_nnind_Ac, Z80::SM83_LD_nnind_A, AccPseudo::Operand},
     {Z80::SM83_LDH_nind_Ac, Z80::SM83_LDH_nind_A, AccPseudo::Operand},
+    {Z80::LOAD8_ABS, Z80::LD_A_nnind, AccPseudo::Operand},
+    {Z80::STORE8_ABS, Z80::LD_nnind_A, AccPseudo::Operand},
 };
 
 static const AccPseudo *getAccPseudo(unsigned Opc) {
@@ -2168,6 +2170,8 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::LD_rr_nn:
   case Z80::LD_SP_nn:
   case Z80::SUB_HL_rr: // AND A(1) + SBC HL,rr(2) = 3
+  case Z80::LOAD8_ABS:  // LD A,(nn) = 3
+  case Z80::STORE8_ABS: // LD (nn),A = 3
     return 3;
 
   case Z80::CMP16_FLAGS: // LD A,lo(1) + SUB lo(1) + LD A,hi(1) + SBC A,hi(1) =

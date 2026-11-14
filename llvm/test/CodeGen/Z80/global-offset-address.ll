@@ -8,8 +8,9 @@
 
 define void @store_at_offset(i8 %v) {
 ; CHECK-LABEL: store_at_offset:
-; CHECK:         ld bc,_w+5
-; CHECK-NEXT:    ld (bc),a
+; Z80:           ld (_w+5),a
+; SM83:          ld bc,_w+5
+; SM83-NEXT:     ld (bc),a
 ; CHECK-NEXT:    ret
   store i8 %v, ptr getelementptr (i8, ptr @w, i16 5)
   ret void
@@ -17,8 +18,9 @@ define void @store_at_offset(i8 %v) {
 
 define i8 @load_at_offset() {
 ; CHECK-LABEL: load_at_offset:
-; CHECK:         ld bc,_w+3
-; CHECK-NEXT:    ld a,(bc)
+; Z80:           ld a,(_w+3)
+; SM83:          ld bc,_w+3
+; SM83-NEXT:     ld a,(bc)
 ; CHECK-NEXT:    ret
   %v = load i8, ptr getelementptr (i8, ptr @w, i16 3)
   ret i8 %v
@@ -34,8 +36,9 @@ define ptr @address_at_offset() {
 
 define void @store_before(i8 %v) {
 ; CHECK-LABEL: store_before:
-; CHECK:         ld bc,_w-1
-; CHECK-NEXT:    ld (bc),a
+; Z80:           ld (_w-1),a
+; SM83:          ld bc,_w-1
+; SM83-NEXT:     ld (bc),a
   store i8 %v, ptr getelementptr (i8, ptr @w, i16 -1)
   ret void
 }
@@ -45,10 +48,12 @@ define void @store_before(i8 %v) {
 ; that would have to stay live.
 define void @nearby(i8 %v) {
 ; CHECK-LABEL: nearby:
-; CHECK:         ld bc,_w+1
-; CHECK-NEXT:    ld (bc),a
-; CHECK-NEXT:    ld bc,_w+2
-; CHECK-NEXT:    ld (bc),a
+; Z80:           ld (_w+1),a
+; Z80-NEXT:      ld (_w+2),a
+; SM83:          ld bc,_w+1
+; SM83-NEXT:     ld (bc),a
+; SM83-NEXT:     ld bc,_w+2
+; SM83-NEXT:     ld (bc),a
 ; CHECK-NEXT:    ret
   store i8 %v, ptr getelementptr (i8, ptr @w, i16 1)
   store i8 %v, ptr getelementptr (i8, ptr @w, i16 2)
