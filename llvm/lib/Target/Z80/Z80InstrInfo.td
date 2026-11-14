@@ -747,6 +747,13 @@ def STORE8_IND : Z80Pseudo<(outs), (ins Ac:$src, GR16:$addr)> {
   let mayLoad = false;
   let mayStore = true;
 }
+// Compare A with the byte at HL. GR16_HL puts the address in HL for the
+// register allocator, so the expansion is the one-byte CP (HL).
+def COMPARE8_IND : Z80Pseudo<(outs), (ins Ac:$lhs, GR16_HL:$addr)> {
+  let Defs = [FLAGS];
+  let mayLoad = true;
+  let mayStore = false;
+}
 
 // Direct access to an address the linker settles: a global, or a global plus a
 // constant. Z80 reaches one in a single instruction per pair, against putting

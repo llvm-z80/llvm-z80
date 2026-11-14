@@ -774,6 +774,8 @@ static const AccPseudo AccPseudos[] = {
     {Z80::XOR_Ac_n, Z80::XOR_n, AccPseudo::Operand},
     {Z80::CP_Ac_r, Z80::CP_r, AccPseudo::Operand},
     {Z80::CP_Ac_n, Z80::CP_n, AccPseudo::Operand},
+    // The address is in HL, which CP (HL) names implicitly.
+    {Z80::COMPARE8_IND, Z80::CP_HLind, AccPseudo::NoOperand},
     {Z80::TST_Ac, Z80::OR_r, AccPseudo::SelfA},
     {Z80::ADD_Ac_Ac, Z80::ADD_A_r, AccPseudo::SelfA},
     {Z80::SBC_Ac_Ac, Z80::SBC_A_r, AccPseudo::SelfA},
@@ -2174,8 +2176,9 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
                              // A,hi(1) = 4
     return 4;
 
-  case Z80::LOAD8_IND:  // LD A,(rr) = 1
-  case Z80::STORE8_IND: // LD (rr),A = 1
+  case Z80::LOAD8_IND:    // LD A,(rr) = 1
+  case Z80::STORE8_IND:   // LD (rr),A = 1
+  case Z80::COMPARE8_IND: // CP (HL) = 1
     return 1;
 
   case Z80::IN8_C:  // IN r,(C) = 2
