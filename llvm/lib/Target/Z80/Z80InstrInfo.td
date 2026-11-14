@@ -748,6 +748,16 @@ def STORE8_IND : Z80Pseudo<(outs), (ins Ac:$src, GR16:$addr)> {
   let mayStore = true;
 }
 
+// Load A from a compile-time address: 3-byte LD A,(nn).
+// Preferred over loading the address into a pair and using LD A,(BC/DE/HL)
+// (4 bytes total) when the address is a known constant.
+let mayLoad = true, mayStore = false in {
+  def LOAD8_ABS : Z80Pseudo<(outs Ac:$dst), (ins i16imm:$addr)>;
+}
+let mayLoad = false, mayStore = true in {
+  def STORE8_ABS : Z80Pseudo<(outs), (ins Ac:$src, i16imm:$addr)>;
+}
+
 // Direct access to an address the linker settles: a global, or a global plus a
 // constant. Z80 reaches one in a single instruction per pair, against putting
 // the address in a pointer register and reading the two bytes through it. The
