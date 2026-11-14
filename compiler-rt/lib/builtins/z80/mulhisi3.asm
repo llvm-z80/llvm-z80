@@ -1,6 +1,7 @@
 ; SPDX-License-Identifier: Zlib OR Apache-2.0 WITH LLVM-exception OR MIT
     .area   _CODE
     .globl  ___mulhisi3
+    .globl  ___umulhi3
 ;===------------------------------------------------------------------------===;
 ;@ int32_t __mulhisi3(int16_t a, int16_t b)
 ;@     ensures
