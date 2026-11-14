@@ -766,6 +766,14 @@ let Constraints = "$dst = $lhs", Defs = [FLAGS], mayLoad = true,
   def SUB8_IND : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR16_HL:$addr)>;
 }
 
+// INC/DEC of the byte at HL. These do NOT touch A — RA just needs to see
+// the HL constraint on the address so post-RA expansion emits the 1-byte
+// 0x34/0x35 memory-direct forms.
+let mayLoad = true, mayStore = true, Defs = [FLAGS] in {
+  def INC8_IND : Z80Pseudo<(outs), (ins GR16_HL:$addr)>;
+  def DEC8_IND : Z80Pseudo<(outs), (ins GR16_HL:$addr)>;
+}
+
 // Load A from a compile-time address: 3-byte LD A,(nn).
 // Preferred over loading the address into a pair and using LD A,(BC/DE/HL)
 // (4 bytes total) when the address is a known constant.

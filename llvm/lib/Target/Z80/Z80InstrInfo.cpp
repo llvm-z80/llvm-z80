@@ -1115,6 +1115,17 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
+  case Z80::INC8_IND:
+  case Z80::DEC8_IND: {
+    assert(MI.getOperand(0).getReg() == Z80::HL &&
+           "INC/DEC8_IND: address must be in HL");
+    unsigned Real =
+        MI.getOpcode() == Z80::INC8_IND ? Z80::INC_HLind : Z80::DEC_HLind;
+    BuildMI(MBB, MI, DL, get(Real)).cloneMemRefs(MI);
+    MI.eraseFromParent();
+    return true;
+  }
+
   case Z80::LOAD16_ABS: {
     // Expand to LD HL,(nn), LD BC,(nn), or LD DE,(nn) based on the pair the
     // allocator picked. GR16 holds exactly those three, so one always fits.
@@ -2211,6 +2222,8 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::XOR8_IND:     // XOR (HL) = 1
   case Z80::ADD8_IND:     // ADD A,(HL) = 1
   case Z80::SUB8_IND:     // SUB (HL) = 1
+  case Z80::INC8_IND:     // INC (HL) = 1
+  case Z80::DEC8_IND:     // DEC (HL) = 1
     return 1;
 
   case Z80::IN8_C:  // IN r,(C) = 2

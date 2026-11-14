@@ -1657,6 +1657,94 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT SrcTy = MRI.getType(SrcReg);
     const DebugLoc &DL = MI.getDebugLoc();
 
+    // Fold load/+-1/store on the same pointer into INC (HL) or DEC (HL).
+    // G_STORE: [0]=SrcReg, [1]=AddrReg. We check whether SrcReg was produced
+    // by G_ADD or G_SUB where one operand is a single-use load from AddrReg
+    // and the other is constant 1 or -1.
+    if (SrcTy.getSizeInBits() == 8 && MI.hasOneMemOperand()) {
+      const MachineMemOperand &SMMO = **MI.memoperands_begin();
+      MachineInstr *ArithMI = MRI.getVRegDef(SrcReg);
+      if (SMMO.getAddrSpace() == 0 && !SMMO.isVolatile() && ArithMI &&
+          ArithMI->getParent() == &MBB &&
+          (ArithMI->getOpcode() == TargetOpcode::G_ADD ||
+           ArithMI->getOpcode() == TargetOpcode::G_SUB) &&
+          MRI.hasOneNonDBGUse(SrcReg)) {
+        bool IsAdd = ArithMI->getOpcode() == TargetOpcode::G_ADD;
+        Register LhsReg = ArithMI->getOperand(1).getReg();
+        Register RhsReg = ArithMI->getOperand(2).getReg();
+
+        // Helper: matches `load from AddrReg` on one side and a constant
+        // +1 or -1 on the other. Returns {LoadMI, delta} or {nullptr, 0}.
+        auto matchLoadConstPM1 =
+            [&](Register LoadCandidate,
+                Register ConstReg) -> std::pair<MachineInstr *, int> {
+          if (!LoadCandidate.isVirtual() ||
+              !MRI.hasOneNonDBGUse(LoadCandidate))
+            return {nullptr, 0};
+          MachineInstr *LoadMI = MRI.getVRegDef(LoadCandidate);
+          if (!LoadMI || LoadMI->getOpcode() != TargetOpcode::G_LOAD ||
+              LoadMI->getParent() != &MBB ||
+              MRI.getType(LoadCandidate).getSizeInBits() != 8)
+            return {nullptr, 0};
+          if (!LoadMI->hasOneMemOperand())
+            return {nullptr, 0};
+          if (LoadMI->getOperand(1).getReg() != AddrReg)
+            return {nullptr, 0};
+          const MachineMemOperand &LMMO = **LoadMI->memoperands_begin();
+          if (LMMO.getAddrSpace() != 0 || LMMO.isVolatile())
+            return {nullptr, 0};
+          MachineInstr *CDef = MRI.getVRegDef(ConstReg);
+          if (!CDef || CDef->getOpcode() != TargetOpcode::G_CONSTANT)
+            return {nullptr, 0};
+          unsigned V = CDef->getOperand(1).getCImm()->getZExtValue() & 0xFF;
+          if (V == 1)
+            return {LoadMI, +1};
+          if (V == 0xFF)
+            return {LoadMI, -1};
+          return {nullptr, 0};
+        };
+
+        // RHS is the constant for both G_ADD and G_SUB. For G_ADD we also
+        // try the commuted form (constant on the LHS).
+        auto [LoadMI, Delta] = matchLoadConstPM1(LhsReg, RhsReg);
+        if (!LoadMI && IsAdd)
+          std::tie(LoadMI, Delta) = matchLoadConstPM1(RhsReg, LhsReg);
+
+        // G_SUB(load, +-1) flips the sign of the delta.
+        if (LoadMI && !IsAdd)
+          Delta = -Delta;
+
+        if (LoadMI) {
+          // No aliasing or side-effecting ops may lie between the load and
+          // the store. Also forbid lifetime markers (they can hide stack
+          // coloring hazards for frame-indexed addresses).
+          MachineBasicBlock::iterator StoreIt(&MI);
+          auto It = std::next(MachineBasicBlock::iterator(LoadMI));
+          bool Safe = true;
+          for (; It != MBB.end() && It != StoreIt; ++It) {
+            if (It->mayLoadOrStore() || It->hasUnmodeledSideEffects() ||
+                It->getOpcode() == TargetOpcode::LIFETIME_START ||
+                It->getOpcode() == TargetOpcode::LIFETIME_END) {
+              Safe = false;
+              break;
+            }
+          }
+          if (Safe && It == StoreIt &&
+              RBI.constrainGenericRegister(AddrReg, Z80::GR16_HLRegClass,
+                                           MRI)) {
+            unsigned Opc = Delta > 0 ? Z80::INC8_IND : Z80::DEC8_IND;
+            BuildMI(MBB, MI, DL, TII.get(Opc))
+                .addReg(AddrReg)
+                .cloneMergedMemRefs({&MI, LoadMI});
+            LoadMI->eraseFromParent();
+            ArithMI->eraseFromParent();
+            MI.eraseFromParent();
+            return true;
+          }
+        }
+      }
+    }
+
     // See the matching fold in G_LOAD.
     if (SrcTy.getSizeInBits() == 8 && MI.hasOneMemOperand() &&
         MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
