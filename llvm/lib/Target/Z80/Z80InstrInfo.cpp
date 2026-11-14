@@ -1092,11 +1092,25 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
-  case Z80::OR8_IND: {
-    // The constrained address operand guarantees this becomes OR (HL).
+  case Z80::OR8_IND:
+  case Z80::AND8_IND:
+  case Z80::XOR8_IND:
+  case Z80::ADD8_IND:
+  case Z80::SUB8_IND: {
+    // The constrained address operand guarantees HL. Each pseudo expands to
+    // its 1-byte memory-direct form (0xB6 / 0xA6 / 0xAE / 0x86 / 0x96).
     assert(MI.getOperand(2).getReg() == Z80::HL &&
-           "OR8_IND: address must be in HL");
-    BuildMI(MBB, MI, DL, get(Z80::OR_HLind)).cloneMemRefs(MI);
+           "ALU8_IND: address must be in HL");
+    unsigned Real;
+    switch (MI.getOpcode()) {
+    case Z80::OR8_IND:  Real = Z80::OR_HLind;    break;
+    case Z80::AND8_IND: Real = Z80::AND_HLind;   break;
+    case Z80::XOR8_IND: Real = Z80::XOR_HLind;   break;
+    case Z80::ADD8_IND: Real = Z80::ADD_A_HLind; break;
+    case Z80::SUB8_IND: Real = Z80::SUB_HLind;   break;
+    default: llvm_unreachable("unexpected ALU8_IND pseudo");
+    }
+    BuildMI(MBB, MI, DL, get(Real)).cloneMemRefs(MI);
     MI.eraseFromParent();
     return true;
   }
@@ -2193,6 +2207,10 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::STORE8_IND:   // LD (rr),A = 1
   case Z80::COMPARE8_IND: // CP (HL) = 1
   case Z80::OR8_IND:      // OR (HL) = 1
+  case Z80::AND8_IND:     // AND (HL) = 1
+  case Z80::XOR8_IND:     // XOR (HL) = 1
+  case Z80::ADD8_IND:     // ADD A,(HL) = 1
+  case Z80::SUB8_IND:     // SUB (HL) = 1
     return 1;
 
   case Z80::IN8_C:  // IN r,(C) = 2
