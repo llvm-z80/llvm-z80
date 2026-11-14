@@ -17,7 +17,11 @@
 #define LLVM_LIB_TARGET_Z80_Z80TARGETTRANSFORMINFO_H
 
 #include "Z80TargetMachine.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/BranchProbability.h"
 
@@ -133,6 +137,44 @@ public:
 
   BranchProbability getPredictableBranchThreshold() const override {
     return BranchProbability(0, 1);
+  }
+
+  // Z80 has BC, DE, HL as GP pairs (IX/IY reserved by default). LSR's
+  // Cost::RateFormula adds `(NumRegs - TTIRegNum)` to C.Insns when a
+  // formula requires more IVs than registers available — the only
+  // proxy LSR has for spill cost. Reporting 3 here pressures LSR to
+  // choose fewer IVs for loops that would otherwise exceed the file.
+  unsigned getNumberOfRegisters(unsigned ClassID) const override {
+    return 3;
+  }
+
+  // LSR often detects that its own transformed solution is more expensive
+  // than the un-transformed baseline (nested loops with multiple pointer
+  // IVs). On register-rich targets the baseline-check is a safety net; on
+  // Z80 it's load-bearing — opt in so LSR discards its own regression.
+  bool shouldDropLSRSolutionIfLessProfitable() const override { return true; }
+
+  // Z80 has DJNZ: an 8-bit decrement-and-branch-if-nonzero on B.
+  // Reporting profitability here causes LSR::RateRegister to zero the
+  // AddRecCost of a {C,+,-1} i8 ICmpZero IV, so LSR prefers the narrow
+  // down-counter over a stride-matched wide {−C,+,1} IV. We do NOT
+  // register the HardwareLoops IR pass — no llvm.loop.decrement
+  // intrinsics are generated; this hook is purely a cost-model signal
+  // consumed by LSR.
+  bool isHardwareLoopProfitable(Loop *L, ScalarEvolution &SE,
+                                AssumptionCache &AC,
+                                TargetLibraryInfo *LibInfo,
+                                HardwareLoopInfo &HWLoopInfo) const override {
+    const SCEV *EC = SE.getSymbolicMaxBackedgeTakenCount(L);
+    if (isa<SCEVCouldNotCompute>(EC))
+      return false;
+    if (SE.getUnsignedRangeMax(EC).getActiveBits() > 8)
+      return false;
+    HWLoopInfo.CountType = Type::getInt8Ty(L->getHeader()->getContext());
+    HWLoopInfo.LoopDecrement =
+        ConstantInt::get(HWLoopInfo.CountType, 1);
+    HWLoopInfo.CounterInReg = true;
+    return true;
   }
 
   bool isValidAddrSpaceCast(unsigned FromAS, unsigned ToAS) const override {
