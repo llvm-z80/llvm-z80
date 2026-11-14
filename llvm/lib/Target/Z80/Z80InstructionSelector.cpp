@@ -1062,6 +1062,19 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
   // (Base, Off) should be swapped to (Off, Base) so the operand whose value
   // will be in HL is mapped to HL, avoiding unnecessary register copies.
   auto shouldSwapAddOperands = [&](Register Base, Register Off) -> bool {
+    // If an operand cannot be allocated to BC/DE, it must be the primary (Base)
+    // operand in HL, never the secondary (Off) operand.
+    auto cannotBeBCDE = [&](Register R) -> bool {
+      if (!R.isVirtual())
+        return R == Z80::HL;
+      const TargetRegisterClass *RC = MRI.getRegClassOrNull(R);
+      return RC && !TRI.getCommonSubClass(RC, &Z80::GR16_BCDERegClass);
+    };
+    if (cannotBeBCDE(Base))
+      return false;
+    if (cannotBeBCDE(Off))
+      return true;
+
     bool BaseInHL = isProducedInHL(Base);
     bool OffInHL = isProducedInHL(Off);
     if (OffInHL && !BaseInHL)
