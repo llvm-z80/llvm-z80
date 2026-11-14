@@ -42,6 +42,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/LTO/LTO.h"
@@ -137,9 +138,42 @@ bool Z80NonReentrantImpl::run(Module &M) {
   // Any external call may end up calling any externally-callable function,
   // which lets the SCC walk see recursion that passes through code outside
   // the module or through a function pointer.
-  assert(CG.getCallsExternalNode()->empty());
-  CG.getCallsExternalNode()->addCalledFunction(nullptr,
-                                               CG.getExternalCallingNode());
+  // CallGraph maps any call without a direct Function* callee to
+  // CallsExternalNode. This includes inline assembly (e.g. 'ei' or 'in' in an
+  // ISR), which is not an indirect function call and cannot reach external C
+  // code. Temporarily strip inline asm edges so the SCC walk and context
+  // traversal do not treat inline asm as an escape to foreign code.
+  // Example: @isr in static-frames-isr-inline-asm.ll has 'tail call void asm "ei"';
+  // without stripping, @isr calls CallsExternalNode -> ExternalCallingNode -> @main,
+  // falsely marking @main as reachable from multiple contexts.
+  CallGraphNode *CallsExternal = CG.getCallsExternalNode();
+  SmallVector<std::pair<CallGraphNode *, CallBase *>, 8> RemovedAsmEdges;
+  for (auto &P : CG) {
+    CallGraphNode *CGN = P.second.get();
+    for (auto I = CGN->begin(); I != CGN->end();) {
+      // Only inspect edges targeting CallsExternalNode.
+      if (I->second != CallsExternal) {
+        ++I;
+        continue;
+      }
+      // Skip call records without an instruction reference.
+      if (!I->first || !*I->first) {
+        ++I;
+        continue;
+      }
+      auto *CB = dyn_cast<CallBase>(static_cast<Value *>(*I->first));
+      // Only strip genuine inline assembly calls, not function pointers.
+      if (CB && CB->isInlineAsm()) {
+        RemovedAsmEdges.emplace_back(CGN, CB);
+        CGN->removeCallEdge(I);
+        continue;
+      }
+      ++I;
+    }
+  }
+
+  assert(CallsExternal->empty());
+  CallsExternal->addCalledFunction(nullptr, CG.getExternalCallingNode());
 
   // Operations like block copies and wide arithmetic only become calls
   // during instruction selection, so their callees have no edge in the IR
@@ -216,9 +250,12 @@ bool Z80NonReentrantImpl::run(Module &M) {
     FinishContext();
   }
 
-  CallGraphNode *CallsExternal = CG.getCallsExternalNode();
   while (!CallsExternal->empty())
     CallsExternal->removeCallEdge(CallsExternal->begin());
+
+  // Restore the inline asm edges so CallGraph remains intact for downstream.
+  for (auto &P : RemovedAsmEdges)
+    P.first->addCalledFunction(P.second, CallsExternal);
 
   // A function the recursion walk never reached (internal, no callers, its
   // address never taken) keeps its stack frame even when the input IR calls
