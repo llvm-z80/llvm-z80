@@ -21,9 +21,11 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/CodeGen/LiveStacks.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -53,12 +55,23 @@ public:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesCFG();
+    AU.addPreserved<LiveStacksWrapperLegacy>();
+    AU.addPreserved<SlotIndexesWrapperPass>();
+    MachineFunctionPass::getAnalysisUsage(AU);
+  }
+
 private:
   using SlotSet = DenseSet<int>;
 
   const TargetInstrInfo *TII = nullptr;
   const TargetRegisterInfo *TRI = nullptr;
   MachineFrameInfo *MFI = nullptr;
+  SlotIndexes *SI = nullptr;
+
+  void moveBefore(MachineBasicBlock &MBB, MachineBasicBlock::iterator Pt,
+                  MachineInstr &MI);
 
   void collectCandidates(MachineFunction &MF,
                          DenseMap<MachineBasicBlock *, SlotSet> &Cands);
@@ -197,9 +210,9 @@ void Z80PushPopSpills::orderSpills(MachineBasicBlock &MBB,
         if (MI.isDebugInstr())
           Debug.push_back(&MI);
       for (MachineInstr *MI : Sorted)
-        MBB.splice(InsertPt, &MBB, MI->getIterator());
+        moveBefore(MBB, InsertPt, *MI);
       for (MachineInstr *MI : Debug)
-        MBB.splice(InsertPt, &MBB, MI->getIterator());
+        moveBefore(MBB, InsertPt, *MI);
       for (Register Reg : Killed)
         for (MachineInstr *MI : llvm::reverse(Sorted))
           if (accessReg(*MI) == Reg) {
@@ -326,7 +339,7 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
                          TRI->regsOverlap(MO.getReg(), Def);
                 }))
               DV.setDebugValueUndef();
-          MBB.splice(I, &MBB, Top->getIterator());
+          moveBefore(MBB, I, *Top);
           I = Top->getIterator();
         }
       }
@@ -365,6 +378,17 @@ bool Z80PushPopSpills::matchStackOrder(MachineBasicBlock &MBB,
   return Failed.empty();
 }
 
+// Move MI before Pt. The slot indexes follow the move.
+void Z80PushPopSpills::moveBefore(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator Pt,
+                                  MachineInstr &MI) {
+  if (SI && !MI.isDebugInstr())
+    SI->removeMachineInstrFromMaps(MI);
+  MBB.splice(Pt, &MBB, MI.getIterator());
+  if (SI && !MI.isDebugInstr())
+    SI->insertMachineInstrInMaps(MI);
+}
+
 void Z80PushPopSpills::rewrite(MachineBasicBlock &MBB, const SlotSet &Cands) {
   DenseMap<int, unsigned> Remaining = countReloads(MBB, Cands);
 
@@ -374,20 +398,29 @@ void Z80PushPopSpills::rewrite(MachineBasicBlock &MBB, const SlotSet &Cands) {
     const MachineOperand &RegOp = MI.getOperand(0);
     Register Reg = RegOp.getReg();
     const DebugLoc &DL = MI.getDebugLoc();
+    SmallVector<MachineInstr *, 2> Added;
     if (isSpill(MI)) {
-      BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_PUSH))
-          .addReg(Reg, getKillRegState(RegOp.isKill()) |
-                           getUndefRegState(RegOp.isUndef()));
+      Added.push_back(BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_PUSH))
+                          .addReg(Reg, getKillRegState(RegOp.isKill()) |
+                                           getUndefRegState(RegOp.isUndef())));
     } else {
       bool Last = --Remaining[accessSlot(MI)] == 0;
       // A reload before the last reload pushes the register again.
-      BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_POP))
-          .addReg(Reg,
-                  RegState::Define | getDeadRegState(Last && RegOp.isDead()));
+      Added.push_back(
+          BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_POP))
+              .addReg(Reg, RegState::Define |
+                               getDeadRegState(Last && RegOp.isDead())));
       if (!Last) {
-        BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_PUSH)).addReg(Reg);
+        Added.push_back(
+            BuildMI(MBB, MI, DL, TII->get(Z80::SPILL_PUSH)).addReg(Reg));
         ++NumKeptReloads;
       }
+    }
+    // The new instructions take indexes while MI still has one after them.
+    if (SI) {
+      for (MachineInstr *New : Added)
+        SI->insertMachineInstrInMaps(*New);
+      SI->removeMachineInstrFromMaps(MI);
     }
     MI.eraseFromParent();
   }
@@ -409,6 +442,8 @@ bool Z80PushPopSpills::runOnMachineFunction(MachineFunction &MF) {
   TII = MF.getSubtarget().getInstrInfo();
   TRI = MF.getSubtarget().getRegisterInfo();
   MFI = &MF.getFrameInfo();
+  auto *SIWrapper = getAnalysisIfAvailable<SlotIndexesWrapperPass>();
+  SI = SIWrapper ? &SIWrapper->getSI() : nullptr;
 
   DenseMap<MachineBasicBlock *, SlotSet> Cands;
   collectCandidates(MF, Cands);

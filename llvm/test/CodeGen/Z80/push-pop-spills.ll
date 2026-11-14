@@ -8,6 +8,7 @@
 ; shifted by the bytes pushed. Debug information does not change the code.
 
 declare void @ext()
+declare i16 @take(i16)
 
 ; The loop from issue #133. The system call clobbers every register.
 define void @asm_loop(ptr %p, i16 %n) {
@@ -109,17 +110,45 @@ done:
   ret void
 }
 
-; %pos is a stack argument read while a spill is pushed.
+; %a and %b would share one slot after stack slot coloring.
+define i16 @shared_slot(i16 %a) {
+; Z80-LABEL:  _shared_slot:
+; Z80:        push hl
+; Z80-NEXT:   call _ext
+; Z80-NEXT:   pop hl
+; Z80-NEXT:   call _take
+; Z80-NEXT:   push de
+; Z80-NEXT:   call _ext
+; Z80-NEXT:   pop de
+; Z80-NEXT:   ret
+; SM83-LABEL: _shared_slot:
+; SM83:       push de
+; SM83-NEXT:  call _ext
+; SM83-NEXT:  pop de
+; SM83-NEXT:  call _take
+; SM83-NEXT:  push bc
+; SM83-NEXT:  call _ext
+; SM83-NEXT:  pop bc
+; SM83-NEXT:  ret
+  call void @ext()
+  %b = call i16 @take(i16 %a)
+  call void @ext()
+  ret i16 %b
+}
+
+; %pos is a stack argument read while spills are pushed.
 define i16 @stack_args(i16 %val, i16 %bits, i8 %pos, i8 %n) {
 ; Z80-LABEL:  _stack_args:
 ; Z80:        push de
-; Z80-NEXT:   ld hl,4
+; Z80-NEXT:   push hl
+; Z80-NEXT:   ld hl,6
 ; Z80-NEXT:   add hl,sp
 ; Z80-NEXT:   ld c,(hl)
 ; SM83-LABEL: _stack_args:
 ; SM83:       push bc
+; SM83-NEXT:  push de
 ; SM83:       push hl
-; SM83-NEXT:  ldhl sp,6
+; SM83-NEXT:  ldhl sp,8
 ; SM83-NEXT:  ld b,(hl)
 ; SM83-NEXT:  pop hl
   %m0 = shl i16 -1, %bits
