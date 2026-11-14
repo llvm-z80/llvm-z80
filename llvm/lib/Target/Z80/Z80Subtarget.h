@@ -83,6 +83,8 @@ public:
   bool useAA() const override { return true; }
 
   bool hasStaticFrame() const { return StaticFrame; }
+  bool hasNoCallback() const { return NoCallback; }
+  bool assumeNoCallbacks() const { return AssumeNoCallbacks; }
   bool inlineI16Runtime() const { return InlineI16Runtime; }
 
   // Feature queries
@@ -110,6 +112,8 @@ private:
   bool HasSM83 = false;
 
   bool StaticFrame = false;
+  bool NoCallback = false;
+  bool AssumeNoCallbacks = false;
   bool InlineI16Runtime = false;
 
   Z80InstrInfo InstrInfo;

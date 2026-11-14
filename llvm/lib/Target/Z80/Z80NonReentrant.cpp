@@ -143,9 +143,10 @@ bool Z80NonReentrantImpl::run(Module &M) {
   // ISR), which is not an indirect function call and cannot reach external C
   // code. Temporarily strip inline asm edges so the SCC walk and context
   // traversal do not treat inline asm as an escape to foreign code.
-  // Example: @isr in static-frames-isr-inline-asm.ll has 'tail call void asm "ei"';
-  // without stripping, @isr calls CallsExternalNode -> ExternalCallingNode -> @main,
-  // falsely marking @main as reachable from multiple contexts.
+  // Example: @isr in static-frames-isr-inline-asm.ll has 'tail call void asm
+  // "ei"'; without stripping, @isr calls CallsExternalNode ->
+  // ExternalCallingNode -> @main, falsely marking @main as reachable from
+  // multiple contexts.
   CallGraphNode *CallsExternal = CG.getCallsExternalNode();
   SmallVector<std::pair<CallGraphNode *, CallBase *>, 8> RemovedAsmEdges;
   for (auto &P : CG) {
@@ -154,6 +155,15 @@ bool Z80NonReentrantImpl::run(Module &M) {
       // Only inspect edges targeting CallsExternalNode.
       if (I->second != CallsExternal) {
         ++I;
+        continue;
+      }
+      // If this node is an external declaration carrying +no-callback,
+      // it asserts that it does not call back into this module. Strip its
+      // edge to CallsExternalNode so it acts as a leaf.
+      if (CGN->getFunction() && CGN->getFunction()->isDeclaration() &&
+          TM.getSubtargetImpl(*CGN->getFunction())->hasNoCallback()) {
+        RemovedAsmEdges.emplace_back(CGN, nullptr);
+        CGN->removeCallEdge(I);
         continue;
       }
       // Skip call records without an instruction reference.
@@ -172,8 +182,20 @@ bool Z80NonReentrantImpl::run(Module &M) {
     }
   }
 
+  // Under +no-callbacks, external functions and indirect calls are assumed
+  // not to re-enter this module, allowing entry points like CP/M main to
+  // receive static frames.
+  bool AssumeNoCallbacks = false;
+  for (Function &F : M.functions()) {
+    if (!F.isDeclaration() && TM.getSubtargetImpl(F)->assumeNoCallbacks()) {
+      AssumeNoCallbacks = true;
+      break;
+    }
+  }
+
   assert(CallsExternal->empty());
-  CallsExternal->addCalledFunction(nullptr, CG.getExternalCallingNode());
+  if (!AssumeNoCallbacks)
+    CallsExternal->addCalledFunction(nullptr, CG.getExternalCallingNode());
 
   // Operations like block copies and wide arithmetic only become calls
   // during instruction selection, so their callees have no edge in the IR
