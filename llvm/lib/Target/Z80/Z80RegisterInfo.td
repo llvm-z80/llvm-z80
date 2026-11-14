@@ -166,6 +166,10 @@ def GR16 : Z80Reg16Class<(add BC, DE, HL)>;
 // BC and DE, for a pair used alongside HL
 def GR16_BCDE : Z80Reg16Class<(add BC, DE)>;
 
+// HL alone, for an address the instruction can only take from HL, as CP (HL)
+// does. It leaves the register allocator no choice but HL.
+def GR16_HL : Z80Reg16Class<(add HL)>;
+
 // Index registers only
 def IR16 : Z80Reg16Class<(add IX, IY)>;
 
