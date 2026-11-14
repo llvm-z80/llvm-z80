@@ -84,10 +84,6 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80StaticFrameAllocPass(PR);
 }
 
-// On by default for both targets. On SM83 a wide slot costs a byte more in
-// static memory than on the stack, so frame lowering keeps a size build's
-// wide slots on the stack; an eight-bit slot is a win either way. Explicit
-// true/false overrides the default.
 static cl::opt<cl::boolOrDefault> EnableStaticFramesOpt(
     "z80-static-frames",
     cl::desc("Allocate the frames of provably non-reentrant functions in "

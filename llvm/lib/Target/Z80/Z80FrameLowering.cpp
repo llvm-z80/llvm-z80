@@ -151,17 +151,12 @@ void Z80FrameLowering::processFunctionBeforeFrameFinalized(
   if (usesStaticFrame(MF)) {
     MachineFrameInfo &StaticMFI = MF.getFrameInfo();
 
-    // On SM83 an eight-bit slot is a free win in static memory (byte-neutral,
-    // a cycle cheaper), but a wide slot costs an extra byte per access. Moving
-    // the wide slots out too is what removes the stack pointer adjustment, so
-    // it pays off only while those extra bytes stay under the four bytes that
-    // adjustment costs. A speed build always takes the trade for the cycles;
-    // a size build keeps the wide slots on the stack once they no longer pay,
-    // leaving a mixed frame whose eight-bit slots are still static. Z80 has a
-    // direct absolute form for every class, so all of its slots go static.
+    // On SM83 the slots move to the static frame by two rules:
+    // 1. An eight-bit slot always moves. A static access is never worse.
+    // 2. The wide slots move only while the extra byte of each wide access
+    //    adds up to no more than the stack pointer adjustment.
     bool KeepWideOnStack = false;
-    if (MF.getSubtarget<Z80Subtarget>().hasSM83() &&
-        MF.getFunction().hasOptSize()) {
+    if (MF.getSubtarget<Z80Subtarget>().hasSM83()) {
       const unsigned PrologueBytes = 4;
       KeepWideOnStack = countWideFrameAccesses(MF) > PrologueBytes;
     }
