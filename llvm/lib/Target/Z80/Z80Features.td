@@ -53,6 +53,23 @@ def FeatureStaticFrame
     : SubtargetFeature<"static-frame", "StaticFrame", "true",
                        "Allow this function's frame in static memory">;
 
+// A function declaration that carries this attribute (spelled
+// __attribute__((target("no-callback"))) in C) declares that it does not
+// invoke any callbacks or re-enter the calling module. Calls to this function
+// do not count as escaping to foreign code in static-frame whole-module analysis.
+def FeatureNoCallback
+    : SubtargetFeature<"no-callback", "NoCallback", "true",
+                       "Declare that this function does not call back into caller module">;
+
+// Whole-program or module flag asserting that external functions do not
+// re-enter this module (spelled -mattr=+no-callbacks).
+// Allows main and other exported entry points to receive static frames in
+// environments like CP/M and embedded firmware where external calls (e.g. BDOS,
+// BIOS, hardware ports) are pure leaf operations.
+def FeatureAssumeNoCallbacks
+    : SubtargetFeature<"no-callbacks", "AssumeNoCallbacks", "true",
+                       "Assume external calls do not call back into this module">;
+
 // Inline-expand 16-bit runtime library calls (__mulhi3, __udivhi3, __divhi3,
 // __umodhi3, __modhi3) as shift-and-add / restoring-division loops instead of
 // emitting CALL instructions to z80_rt.lib.  This eliminates the runtime
