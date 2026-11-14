@@ -154,3 +154,90 @@ entry:
 ; CHECK-LABEL: _add_two:
 ; CHECK-NOT:   inc (hl)
 ; CHECK:       ld a,(hl)
+
+; Shape (a): Exact pattern: dec global and branch if zero
+define void @dec_global_check_zero(ptr %target) {
+entry:
+  %v = load i8, ptr @counter, align 1
+  %dec = sub i8 %v, 1
+  store i8 %dec, ptr @counter, align 1
+  %cmp = icmp eq i8 %dec, 0
+  br i1 %cmp, label %if.zero, label %if.end
+
+if.zero:
+  tail call void %target()
+  ret void
+
+if.end:
+  ret void
+}
+
+; CHECK-LABEL: _dec_global_check_zero:
+; CHECK:       ld hl,_counter
+; CHECK-NEXT:  dec (hl)
+; CHECK-NEXT:  ret nz
+; CHECK-NOT:   ld a,(_counter)
+; ISEL-LABEL: name: dec_global_check_zero
+; ISEL:        DEC8_IND
+
+; Shape (b1): Structural variation: dec pointer and branch if non-zero
+define void @dec_ptr_check_nonzero(ptr %p, ptr %target) {
+entry:
+  %v = load i8, ptr %p, align 1
+  %dec = sub i8 %v, 1
+  store i8 %dec, ptr %p, align 1
+  %cmp = icmp ne i8 %dec, 0
+  br i1 %cmp, label %if.nonzero, label %if.end
+
+if.nonzero:
+  tail call void %target()
+  ret void
+
+if.end:
+  ret void
+}
+
+; CHECK-LABEL: _dec_ptr_check_nonzero:
+; CHECK:       dec (hl)
+; CHECK-NEXT:  ret z
+; ISEL-LABEL: name: dec_ptr_check_nonzero
+; ISEL:        DEC8_IND
+
+; Shape (d1): Safety case: result has another register use (ret i8), must NOT fold
+define i8 @dec_ptr_multi_use(ptr %p) {
+entry:
+  %v = load i8, ptr %p, align 1
+  %dec = sub i8 %v, 1
+  store i8 %dec, ptr %p, align 1
+  %cmp = icmp eq i8 %dec, 0
+  br i1 %cmp, label %if.zero, label %if.end
+
+if.zero:
+  ret i8 %dec
+
+if.end:
+  ret i8 0
+}
+
+; CHECK-LABEL: _dec_ptr_multi_use:
+; CHECK-NOT:   dec (hl)
+
+; Shape (d2): Safety case: compare against non-zero constant (e.g. 5), must NOT fold without compare
+define void @dec_ptr_check_five(ptr %p, ptr %target) {
+entry:
+  %v = load i8, ptr %p, align 1
+  %dec = sub i8 %v, 1
+  store i8 %dec, ptr %p, align 1
+  %cmp = icmp eq i8 %dec, 5
+  br i1 %cmp, label %if.five, label %if.end
+
+if.five:
+  tail call void %target()
+  ret void
+
+if.end:
+  ret void
+}
+
+; CHECK-LABEL: _dec_ptr_check_five:
+; CHECK-NOT:   dec (hl)
