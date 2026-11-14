@@ -992,6 +992,78 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     return std::nullopt;
   };
 
+  // Helper: check if Reg produces its 16-bit result in HL.
+  auto isProducedInHL = [&](Register Reg) -> bool {
+    if (!Reg.isVirtual())
+      return Reg == Z80::HL;
+    MachineInstr *Def = MRI.getVRegDef(Reg);
+    if (!Def)
+      return false;
+    if (Def->getOpcode() == TargetOpcode::COPY) {
+      if (Def->getOperand(1).isReg() && Def->getOperand(1).getReg() == Z80::HL)
+        return true;
+    }
+    if (Def->getOpcode() == TargetOpcode::G_SHL) {
+      LLT Ty = MRI.getType(Reg);
+      if (Ty.getSizeInBits() == 16) {
+        MachineInstr *AmtDef = MRI.getVRegDef(Def->getOperand(2).getReg());
+        if (AmtDef && AmtDef->getOpcode() == TargetOpcode::G_CONSTANT) {
+          int64_t Amt = AmtDef->getOperand(1).getCImm()->getZExtValue();
+          if (Amt > 0 && Amt < 8)
+            return true;
+        }
+      }
+    }
+    if (Def->getOpcode() == TargetOpcode::G_PTR_ADD ||
+        Def->getOpcode() == TargetOpcode::G_ADD ||
+        Def->getOpcode() == TargetOpcode::G_SUB) {
+      LLT Ty = MRI.getType(Reg);
+      if (Ty.getSizeInBits() == 16)
+        return true;
+    }
+    return false;
+  };
+
+  // Helper: for commutative 16-bit addition (G_PTR_ADD, G_ADD), decide if
+  // (Base, Off) should be swapped to (Off, Base) so the operand whose value
+  // will be in HL is mapped to HL, avoiding unnecessary register copies.
+  auto shouldSwapAddOperands = [&](Register Base, Register Off) -> bool {
+    // If an operand cannot be allocated to BC/DE, it must be the primary (Base)
+    // operand in HL, never the secondary (Off) operand.
+    auto cannotBeBCDE = [&](Register R) -> bool {
+      if (!R.isVirtual())
+        return R == Z80::HL;
+      const TargetRegisterClass *RC = MRI.getRegClassOrNull(R);
+      return RC && !TRI.getCommonSubClass(RC, &Z80::GR16_BCDERegClass);
+    };
+    if (cannotBeBCDE(Base))
+      return false;
+    if (cannotBeBCDE(Off))
+      return true;
+
+    bool BaseInHL = isProducedInHL(Base);
+    bool OffInHL = isProducedInHL(Off);
+    if (OffInHL && !BaseInHL)
+      return true;
+    if (!OffInHL)
+      return false;
+    // Both produce in HL: the one defined later (closer to MI) in MBB
+    // will execute after the earlier one, so its value in HL wins.
+    MachineInstr *DefBase = MRI.getVRegDef(Base);
+    MachineInstr *DefOff = MRI.getVRegDef(Off);
+    if (!DefBase || !DefOff || DefBase->getParent() != &MBB ||
+        DefOff->getParent() != &MBB)
+      return false;
+    for (auto It = MI.getIterator(); It != MBB.begin();) {
+      --It;
+      if (&*It == DefOff)
+        return true;
+      if (&*It == DefBase)
+        return false;
+    }
+    return false;
+  };
+
   // If the instruction is already selected (not a pre-isel generic), it's done.
   // Use MCInstrDesc::isPreISelOpcode() instead of isPreISelGenericOpcode() to
   // also cover target-specific generic instructions (Z80::G_Z80_ICMP32, etc.)
@@ -1742,10 +1814,18 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       }
     }
 
-    // Try fold: if OffReg is a single-use G_LOAD from frame index,
+    // Pointer addition is commutative: base + offset == offset + base.
+    // Prefer putting the operand that is currently in HL into HL to avoid
+    // unnecessary register copies (e.g. when an index was just shifted into
+    // HL).
+    if (shouldSwapAddOperands(BaseReg, OffReg))
+      std::swap(BaseReg, OffReg);
+
+    // Try fold: if either operand is a single-use G_LOAD from frame index,
     // fold into ADD_HL_FI to avoid a GR16_BCDE register allocation.
     if (STI.hasZ80() && CachedFoldCount > 2 &&
-        tryFIFold(BaseReg, OffReg, DstReg, Z80::ADD_HL_FI))
+        (tryFIFold(BaseReg, OffReg, DstReg, Z80::ADD_HL_FI) ||
+         tryFIFold(OffReg, BaseReg, DstReg, Z80::ADD_HL_FI)))
       return true;
 
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
@@ -1884,18 +1964,10 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(Src1Reg);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::ADD_HL_HL));
       } else {
-        // G_ADD is commutative. Prefer putting the operand that came from HL
-        // as Src1 (→HL) to avoid unnecessary register swaps.
-        MachineInstr *Def1 = MRI.getVRegDef(Src1Reg);
-        MachineInstr *Def2 = MRI.getVRegDef(Src2Reg);
-        bool Src1FromHL = Def1 && Def1->getOpcode() == TargetOpcode::COPY &&
-                          Def1->getOperand(1).getReg() == Z80::HL;
-        bool Src2FromHL = Def2 && Def2->getOpcode() == TargetOpcode::COPY &&
-                          Def2->getOperand(1).getReg() == Z80::HL;
-        if (Src2FromHL && !Src1FromHL) {
+        // G_ADD is commutative. Prefer putting the operand that is currently in
+        // HL into HL to avoid unnecessary register swaps.
+        if (shouldSwapAddOperands(Src1Reg, Src2Reg))
           std::swap(Src1Reg, Src2Reg);
-          std::swap(Def1, Def2);
-        }
 
         // Try fold: if either operand is a single-use G_LOAD from frame
         // index, fold into ADD_HL_FI.  G_ADD is commutative, so try Src2
