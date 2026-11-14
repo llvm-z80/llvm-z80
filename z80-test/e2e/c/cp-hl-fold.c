@@ -1,5 +1,14 @@
+// RUN: %cc -O2 -S -emit-llvm %s -o - | %llc -O2 -o - | FileCheck %s
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0x000F %t
+
+// CHECK-LABEL: _ub_lt:
+// CHECK:       cp (hl)
+// CHECK:       ret
+
+// CHECK-LABEL: _ub_ge:
+// CHECK:       cp (hl)
+// CHECK:       ret
 
 /* A byte compared with a byte in memory, in branches. The compiler folds the
  * load into CP (HL) when the compare only feeds a branch and the loaded byte

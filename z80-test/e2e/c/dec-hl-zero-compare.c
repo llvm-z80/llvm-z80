@@ -1,5 +1,15 @@
+// RUN: %cc -O2 -S -emit-llvm %s -o - | %llc -O2 -o - | FileCheck %s
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0x000F %t
+
+// CHECK-LABEL: _dec_ptr_branch_nonzero:
+// CHECK:       dec (hl)
+// CHECK-NEXT:  ret z
+
+// CHECK-LABEL: _dec_global_branch_zero:
+// CHECK:       ld hl,_counter
+// CHECK-NEXT:  dec (hl)
+// CHECK-NEXT:  ret nz
 
 /* Test compare-against-zero combined with memory DEC/INC (HL).
  * Verifies that countdown loops and zero-branching correctly consume
@@ -8,7 +18,23 @@
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 
-static uint8_t counter;
+uint8_t counter;
+
+__attribute__((noinline))
+void dec_ptr_branch_nonzero(uint8_t *p, void (*target)(void)) {
+    if (--(*p) != 0)
+        target();
+}
+
+__attribute__((noinline))
+void dec_global_branch_zero(void (*target)(void)) {
+    if (--counter == 0)
+        target();
+}
+
+static uint16_t side_effect = 0;
+static void hit_nonzero(void) { side_effect |= 1; }
+static void hit_zero(void) { side_effect |= 2; }
 
 __attribute__((noinline))
 static uint16_t countdown(uint8_t *p) {
@@ -70,6 +96,17 @@ int main(void) {
         uint8_t val = 0xFF;
         if (inc_and_check_zero(&val) == 1 && val == 0)
             status |= 8;
+    }
+
+    /* Also verify branched side effects */
+    {
+        uint8_t val = 2;
+        dec_ptr_branch_nonzero(&val, hit_nonzero);
+        dec_ptr_branch_nonzero(&val, hit_nonzero); // val becomes 0, must not hit
+        counter = 1;
+        dec_global_branch_zero(hit_zero);
+        if (side_effect != 3)
+            return 0;
     }
 
     return status; /* expect 0x000F */

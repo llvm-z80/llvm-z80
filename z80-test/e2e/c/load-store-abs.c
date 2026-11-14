@@ -1,5 +1,14 @@
+// RUN: %cc -O2 -S -emit-llvm %s -o - | %llc -O2 -o - | FileCheck %s
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0x000F %t
+
+// CHECK-LABEL: _set_u8:
+// CHECK:       ld (_g_u8),a
+// CHECK:       ret
+
+// CHECK-LABEL: _get_u8:
+// CHECK:       ld a,(_g_u8)
+// CHECK:       ret
 
 /* Test 8-bit load/store with constant address lowering to LD A,(nn) / LD (nn),A.
  * Verifies correctness across unsigned and signed globals, array offsets, and

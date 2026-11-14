@@ -1,5 +1,22 @@
+// RUN: %cc -O2 -S -emit-llvm %s -o - | %llc -O2 -o - | FileCheck %s
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0x000F %t
+
+// CHECK-LABEL: _and_from_ptr:
+// CHECK:       and (hl)
+// CHECK:       ret
+
+// CHECK-LABEL: _xor_from_ptr:
+// CHECK:       xor (hl)
+// CHECK:       ret
+
+// CHECK-LABEL: _add_from_ptr:
+// CHECK:       add a,(hl)
+// CHECK:       ret
+
+// CHECK-LABEL: _sub_from_ptr:
+// CHECK:       sub (hl)
+// CHECK:       ret
 
 /* Test byte-wise AND, XOR, ADD, SUB folded into memory-direct (HL) forms.
  * Verifies correctness across pointers, globals, and commutative orders. */
@@ -8,22 +25,22 @@ typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 
 __attribute__((noinline))
-static uint8_t and_from_ptr(const uint8_t *p, uint8_t x) {
+uint8_t and_from_ptr(const uint8_t *p, uint8_t x) {
     return *p & x;
 }
 
 __attribute__((noinline))
-static uint8_t xor_from_ptr(const uint8_t *p, uint8_t x) {
+uint8_t xor_from_ptr(const uint8_t *p, uint8_t x) {
     return x ^ *p; // Commuted order
 }
 
 __attribute__((noinline))
-static uint8_t add_from_ptr(const uint8_t *p, uint8_t x) {
+uint8_t add_from_ptr(const uint8_t *p, uint8_t x) {
     return *p + x;
 }
 
 __attribute__((noinline))
-static uint8_t sub_from_ptr(uint8_t x, const uint8_t *p) {
+uint8_t sub_from_ptr(uint8_t x, const uint8_t *p) {
     return x - *p; // Only RHS can fold for SUB
 }
 

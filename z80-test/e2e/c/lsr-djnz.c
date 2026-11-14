@@ -1,5 +1,15 @@
+// RUN: %cc -O2 -S -emit-llvm %s -o - | %llc -O2 -o - | FileCheck %s
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0x0007 %t
+
+// CHECK-LABEL: _cmp_blocks:
+// CHECK:       ld a,(bc)
+// CHECK-NEXT:  cp (hl)
+// CHECK-NEXT:  jr nz,
+// CHECK:       dec
+// CHECK-DAG:   inc hl
+// CHECK-DAG:   inc bc
+// CHECK:       ret
 
 /* Test LSR cost-model optimizations and narrow loop down-counters.
  * Verifies that pointer comparison loops and countdown loops execute
@@ -9,7 +19,7 @@ typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 
 __attribute__((noinline))
-static uint8_t cmp_blocks(const uint8_t *a, const uint8_t *b, uint8_t len) {
+uint8_t cmp_blocks(const uint8_t *a, const uint8_t *b, uint8_t len) {
     while (len--) {
         if (*a != *b)
             return 1;

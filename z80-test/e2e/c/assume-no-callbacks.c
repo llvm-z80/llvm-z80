@@ -1,5 +1,12 @@
+// RUN: %cc -O2 -S -emit-llvm %s -o - | %llc -O2 -z80-static-frames -o - | FileCheck %s
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0x0003 %t
+
+// CHECK-LABEL: _compute:
+// CHECK:       ld (L_compute.frame),hl
+// CHECK:       call _external_leaf
+// CHECK:       ret
+// CHECK:       L_compute.frame = L___static_frames
 
 /* Test static frames with external leaf function calls under assume-no-callbacks.
  * Verifies that functions calling external helpers compute correct results. */
@@ -13,7 +20,7 @@ uint16_t external_leaf(uint16_t x) {
 }
 
 __attribute__((noinline))
-static uint16_t compute(uint16_t val) {
+uint16_t compute(uint16_t val) {
     volatile uint16_t local_buf[4];
     local_buf[0] = val;
     local_buf[1] = external_leaf(local_buf[0]);

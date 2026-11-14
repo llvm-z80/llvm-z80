@@ -1,5 +1,14 @@
+// RUN: %cc -O2 -S -emit-llvm %s -o - | %llc -O2 -o - | FileCheck %s
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0x003F %t
+
+// CHECK-LABEL: _inc_at:
+// CHECK:       inc (hl)
+// CHECK:       ret
+
+// CHECK-LABEL: _dec_at:
+// CHECK:       dec (hl)
+// CHECK:       ret
 
 /* Test INC (HL) / DEC (HL) fold on pointer-based counter updates. */
 typedef unsigned char uint8_t;
