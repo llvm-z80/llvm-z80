@@ -113,7 +113,7 @@ define cc 131 i16 @callee_reti16(i16 %a, i16 %b, i16 %c) {
 ; CHECK:      ld hl,#4
 ; CHECK-NEXT: add hl,sp
 ; CHECK:      add hl,hl
-; CHECK:      add hl,de
+; CHECK:      add hl,bc
 ; CHECK:      pop bc
 ; CHECK-NEXT: inc sp
 ; CHECK-NEXT: inc sp
