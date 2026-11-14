@@ -1,3 +1,4 @@
+// REQUIRES: z80, elf
 // RUN: %cc -O2 -S -emit-llvm %s -o - | %llc -O2 -o - | FileCheck %s
 // RUN: %cc %s -o %t
 // RUN: %run --expect-result=0x003F %t

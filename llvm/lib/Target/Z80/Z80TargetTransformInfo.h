@@ -144,9 +144,7 @@ public:
   // formula requires more IVs than registers available — the only
   // proxy LSR has for spill cost. Reporting 3 here pressures LSR to
   // choose fewer IVs for loops that would otherwise exceed the file.
-  unsigned getNumberOfRegisters(unsigned ClassID) const override {
-    return 3;
-  }
+  unsigned getNumberOfRegisters(unsigned ClassID) const override { return 3; }
 
   // LSR often detects that its own transformed solution is more expensive
   // than the un-transformed baseline (nested loops with multiple pointer
@@ -162,8 +160,7 @@ public:
   // intrinsics are generated; this hook is purely a cost-model signal
   // consumed by LSR.
   bool isHardwareLoopProfitable(Loop *L, ScalarEvolution &SE,
-                                AssumptionCache &AC,
-                                TargetLibraryInfo *LibInfo,
+                                AssumptionCache &AC, TargetLibraryInfo *LibInfo,
                                 HardwareLoopInfo &HWLoopInfo) const override {
     const SCEV *EC = SE.getSymbolicMaxBackedgeTakenCount(L);
     if (isa<SCEVCouldNotCompute>(EC))
@@ -171,8 +168,7 @@ public:
     if (SE.getUnsignedRangeMax(EC).getActiveBits() > 8)
       return false;
     HWLoopInfo.CountType = Type::getInt8Ty(L->getHeader()->getContext());
-    HWLoopInfo.LoopDecrement =
-        ConstantInt::get(HWLoopInfo.CountType, 1);
+    HWLoopInfo.LoopDecrement = ConstantInt::get(HWLoopInfo.CountType, 1);
     HWLoopInfo.CounterInReg = true;
     return true;
   }

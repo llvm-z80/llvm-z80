@@ -1356,8 +1356,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       if (AddrDef->getOpcode() == TargetOpcode::G_FRAME_INDEX)
         return false;
       if (AddrDef->getOpcode() == TargetOpcode::G_PTR_ADD) {
-        MachineInstr *BaseDef =
-            MRI.getVRegDef(AddrDef->getOperand(1).getReg());
+        MachineInstr *BaseDef = MRI.getVRegDef(AddrDef->getOperand(1).getReg());
         if (BaseDef && BaseDef->getOpcode() == TargetOpcode::G_FRAME_INDEX)
           return false;
       }
@@ -1836,32 +1835,32 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             bool Safe = true;
             for (; It != MBB.end() && It != StoreIt; ++It) {
               if (It->mayLoadOrStore() || It->hasUnmodeledSideEffects() ||
-                It->getOpcode() == TargetOpcode::LIFETIME_START ||
-                It->getOpcode() == TargetOpcode::LIFETIME_END) {
-              Safe = false;
-              break;
+                  It->getOpcode() == TargetOpcode::LIFETIME_START ||
+                  It->getOpcode() == TargetOpcode::LIFETIME_END) {
+                Safe = false;
+                break;
+              }
             }
-          }
-          if (Safe && It == StoreIt &&
-              RBI.constrainGenericRegister(AddrReg, Z80::GR16_HLRegClass,
-                                           MRI)) {
-            unsigned Opc = Delta > 0 ? Z80::INC8_IND : Z80::DEC8_IND;
-            BuildMI(MBB, MI, DL, TII.get(Opc))
-                .addReg(AddrReg)
-                .cloneMergedMemRefs({&MI, LoadMI});
-            if (ZeroTestMI)
-              ZeroTestMI->eraseFromParent();
-            for (MachineInstr *C : llvm::reverse(ZeroChainMIs))
-              C->eraseFromParent();
-            LoadMI->eraseFromParent();
-            ArithMI->eraseFromParent();
-            MI.eraseFromParent();
-            return true;
+            if (Safe && It == StoreIt &&
+                RBI.constrainGenericRegister(AddrReg, Z80::GR16_HLRegClass,
+                                             MRI)) {
+              unsigned Opc = Delta > 0 ? Z80::INC8_IND : Z80::DEC8_IND;
+              BuildMI(MBB, MI, DL, TII.get(Opc))
+                  .addReg(AddrReg)
+                  .cloneMergedMemRefs({&MI, LoadMI});
+              if (ZeroTestMI)
+                ZeroTestMI->eraseFromParent();
+              for (MachineInstr *C : llvm::reverse(ZeroChainMIs))
+                C->eraseFromParent();
+              LoadMI->eraseFromParent();
+              ArithMI->eraseFromParent();
+              MI.eraseFromParent();
+              return true;
+            }
           }
         }
       }
     }
-  }
 
     // See the matching fold in G_LOAD.
     if (SrcTy.getSizeInBits() == 8 && MI.hasOneMemOperand() &&
@@ -2083,7 +2082,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     // Pointer addition is commutative: base + offset == offset + base.
     // Prefer putting the operand that is currently in HL into HL to avoid
-    // unnecessary register copies (e.g. when an index was just shifted into HL).
+    // unnecessary register copies (e.g. when an index was just shifted into
+    // HL).
     if (shouldSwapAddOperands(BaseReg, OffReg))
       std::swap(BaseReg, OffReg);
 
@@ -2234,8 +2234,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
             .addReg(Src1Reg);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::ADD_HL_HL));
       } else {
-        // G_ADD is commutative. Prefer putting the operand that is currently in HL
-        // into HL to avoid unnecessary register swaps.
+        // G_ADD is commutative. Prefer putting the operand that is currently in
+        // HL into HL to avoid unnecessary register swaps.
         if (shouldSwapAddOperands(Src1Reg, Src2Reg))
           std::swap(Src1Reg, Src2Reg);
 

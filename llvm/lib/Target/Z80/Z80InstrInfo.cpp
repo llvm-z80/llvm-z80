@@ -1103,12 +1103,23 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
            "ALU8_IND: address must be in HL");
     unsigned Real;
     switch (MI.getOpcode()) {
-    case Z80::OR8_IND:  Real = Z80::OR_HLind;    break;
-    case Z80::AND8_IND: Real = Z80::AND_HLind;   break;
-    case Z80::XOR8_IND: Real = Z80::XOR_HLind;   break;
-    case Z80::ADD8_IND: Real = Z80::ADD_A_HLind; break;
-    case Z80::SUB8_IND: Real = Z80::SUB_HLind;   break;
-    default: llvm_unreachable("unexpected ALU8_IND pseudo");
+    case Z80::OR8_IND:
+      Real = Z80::OR_HLind;
+      break;
+    case Z80::AND8_IND:
+      Real = Z80::AND_HLind;
+      break;
+    case Z80::XOR8_IND:
+      Real = Z80::XOR_HLind;
+      break;
+    case Z80::ADD8_IND:
+      Real = Z80::ADD_A_HLind;
+      break;
+    case Z80::SUB8_IND:
+      Real = Z80::SUB_HLind;
+      break;
+    default:
+      llvm_unreachable("unexpected ALU8_IND pseudo");
     }
     BuildMI(MBB, MI, DL, get(Real)).cloneMemRefs(MI);
     MI.eraseFromParent();
@@ -2204,7 +2215,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::LD_rr_nn:
   case Z80::LD_SP_nn:
   case Z80::SUB_HL_rr: // AND A(1) + SBC HL,rr(2) = 3
-  case Z80::LOAD8_ABS:  // LD A,(nn) = 3
+  case Z80::LOAD8_ABS: // LD A,(nn) = 3
   case Z80::STORE8_ABS: // LD (nn),A = 3
     return 3;
 
