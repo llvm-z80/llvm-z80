@@ -52,11 +52,12 @@ config.substitutions.append(
         ),
     )
 )
+llc_opt = "-O2" if opt in ("Os", "Oz") else "-" + opt
 config.substitutions.append(
     (
         "%llc",
         " ".join(
-            [os.path.join(tools, "llc"), "-mtriple=" + cpu, "-" + opt]
+            [os.path.join(tools, "llc"), "-mtriple=" + cpu, llc_opt]
             + llc_flags
             + [config.z80_llc_flags]
         ),
