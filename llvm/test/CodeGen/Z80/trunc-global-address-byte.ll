@@ -42,10 +42,12 @@ define i8 @get_bank_direct() {
 }
 
 ; The symbol also used as a real address: the full materialization must
-; survive next to the folded byte load.
+; survive next to the folded byte load. Z80 folds the byte load into
+; LD A,(nn) directly, so there is no pair-load alongside it; SM83 still
+; loads via a pair.
 ; CHECK-LABEL: bank_and_load:
 ; CHECK-DAG: z80_16lo(___bank_music)
-; CHECK-DAG: ld {{hl|bc|de}},___bank_music
+; CHECK-DAG: {{(ld a,\(___bank_music\)|ld (hl|bc|de),___bank_music)}}
 define i8 @bank_and_load() {
   %addr = ptrtoint ptr @__bank_music to i16
   %bank = trunc i16 %addr to i8

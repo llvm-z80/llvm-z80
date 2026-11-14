@@ -6,9 +6,11 @@
 @g = global i8 0
 
 define void @isr() #0 {
+; Z80 folds the byte store into LD (nn),A, so only AF needs saving.
+; SM83 still loads the address into BC and uses LD (BC),A.
 ; Z80-LABEL: _isr:
 ; Z80:       push af
-; Z80:       push bc
+; Z80-NOT:   push bc
 ; Z80:       reti
 
 ; SM83-LABEL: _isr:
@@ -36,7 +38,7 @@ define void @normal() {
 define void @isr_complex() #0 {
 ; Z80-LABEL: _isr_complex:
 ; Z80:       push af
-; Z80:       push bc
+; Z80-NOT:   push bc
 ; Z80:       reti
 
 ; SM83-LABEL: _isr_complex:
