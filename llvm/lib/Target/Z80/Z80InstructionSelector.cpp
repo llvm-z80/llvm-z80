@@ -1270,6 +1270,69 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     return true;
   };
 
+  // Fold a single-use ordinary-memory load into an ALU-op-with-(HL) pseudo
+  // (OR8_IND / AND8_IND / XOR8_IND / ADD8_IND / SUB8_IND). The read moves
+  // from the load to this operation, so no memory access or side effect may
+  // lie between them; frame-index loads remain with the dedicated IX-fold
+  // path. The caller supplies the pseudo opcode; the pseudo layout matches
+  // OR8_IND: (outs Ac:$dst), (ins Ac:$lhs, GR16_HL:$addr), $dst=$lhs.
+  auto tryALUIndirectFold = [&](unsigned PseudoOpc, Register ASrcReg,
+                                Register FoldReg, Register DstReg) -> bool {
+    // A second use needs the loaded byte after the op as well.
+    if (!FoldReg.isVirtual() || !MRI.hasOneNonDBGUse(FoldReg))
+      return false;
+    MachineInstr *LoadMI = MRI.getVRegDef(FoldReg);
+    if (!LoadMI || LoadMI->getOpcode() != TargetOpcode::G_LOAD ||
+        LoadMI->getParent() != &MBB ||
+        MRI.getType(FoldReg).getSizeInBits() != 8)
+      return false;
+    if (!LoadMI->hasOneMemOperand())
+      return false;
+    // Frame/fixed-stack slots are handled by the dedicated IX-indexed fold
+    // (and by the inherited `LD r,(IX+d)` arg-load path). Routing them
+    // through LEA_IX_FI + op (HL) is a size regression because the IX→HL
+    // copy costs more bytes than the direct indexed load/op pair.
+    Register LAddrReg = LoadMI->getOperand(1).getReg();
+    if (MachineInstr *AddrDef = MRI.getVRegDef(LAddrReg)) {
+      if (AddrDef->getOpcode() == TargetOpcode::G_FRAME_INDEX)
+        return false;
+      if (AddrDef->getOpcode() == TargetOpcode::G_PTR_ADD) {
+        MachineInstr *BaseDef = MRI.getVRegDef(AddrDef->getOperand(1).getReg());
+        if (BaseDef && BaseDef->getOpcode() == TargetOpcode::G_FRAME_INDEX)
+          return false;
+      }
+    }
+    const MachineMemOperand &MMO = **LoadMI->memoperands_begin();
+    // Address-space 2 models port I/O, not an ordinary (HL) RAM read.
+    if (MMO.getAddrSpace() != 0)
+      return false;
+
+    MachineBasicBlock::iterator UseIt(&MI);
+    auto It = std::next(MachineBasicBlock::iterator(LoadMI));
+    for (; It != MBB.end() && It != UseIt; ++It) {
+      // In or_after_aliasing_store, reading after the store would return 42.
+      if (It->mayLoadOrStore() || It->hasUnmodeledSideEffects() ||
+          It->getOpcode() == TargetOpcode::LIFETIME_START ||
+          It->getOpcode() == TargetOpcode::LIFETIME_END)
+        return false;
+    }
+    if (It != UseIt)
+      return false;
+
+    Register AddrReg = LoadMI->getOperand(1).getReg();
+    if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
+        !RBI.constrainGenericRegister(ASrcReg, Z80::GR8RegClass, MRI) ||
+        !RBI.constrainGenericRegister(AddrReg, Z80::GR16_HLRegClass, MRI))
+      return false;
+
+    buildAccOp(MBB, MI, MI.getDebugLoc(), PseudoOpc, DstReg, ASrcReg, MRI)
+        .addReg(AddrReg)
+        .cloneMemRefs(*LoadMI);
+    LoadMI->eraseFromParent();
+    MI.eraseFromParent();
+    return true;
+  };
+
   // Handle generic opcodes
   switch (Opcode) {
   default:
@@ -1575,6 +1638,153 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT SrcTy = MRI.getType(SrcReg);
     const DebugLoc &DL = MI.getDebugLoc();
 
+    // Fold load/+-1/store on the same pointer into INC (HL) or DEC (HL).
+    // G_STORE: [0]=SrcReg, [1]=AddrReg. We check whether SrcReg was produced
+    // by G_ADD or G_SUB where one operand is a single-use load from AddrReg
+    // and the other is constant 1 or -1.
+    if (SrcTy.getSizeInBits() == 8 && MI.hasOneMemOperand()) {
+      const MachineMemOperand &SMMO = **MI.memoperands_begin();
+      MachineInstr *ArithMI = MRI.getVRegDef(SrcReg);
+      if (SMMO.getAddrSpace() == 0 && !SMMO.isVolatile() && ArithMI &&
+          ArithMI->getParent() == &MBB &&
+          (ArithMI->getOpcode() == TargetOpcode::G_ADD ||
+           ArithMI->getOpcode() == TargetOpcode::G_SUB)) {
+        MachineInstr *ZeroTestMI = nullptr;
+        SmallVector<MachineInstr *, 4> ZeroChainMIs;
+        bool UsesOK = false;
+
+        if (MRI.hasOneNonDBGUse(SrcReg)) {
+          UsesOK = true;
+        } else {
+          // Allow a second use if it is a zero test (TST_Ac) in the same block,
+          // which can consume the Z flag set directly by INC/DEC (HL).
+          SmallVector<MachineInstr *, 2> NonDBGUsers;
+          for (MachineInstr &U : MRI.use_nodbg_instructions(SrcReg))
+            if (&U != &MI)
+              NonDBGUsers.push_back(&U);
+
+          if (NonDBGUsers.size() == 1) {
+            MachineInstr *CurrMI = NonDBGUsers[0];
+            while (CurrMI && CurrMI->getParent() == &MBB &&
+                   (CurrMI->getOpcode() == TargetOpcode::COPY ||
+                    CurrMI->getOpcode() == TargetOpcode::G_FREEZE)) {
+              ZeroChainMIs.push_back(CurrMI);
+              Register DstReg = CurrMI->getOperand(0).getReg();
+              if (!DstReg.isVirtual() || !MRI.hasOneNonDBGUse(DstReg)) {
+                CurrMI = nullptr;
+                break;
+              }
+              CurrMI = &*MRI.use_nodbg_instructions(DstReg).begin();
+            }
+
+            if (CurrMI && CurrMI->getParent() == &MBB &&
+                CurrMI->getOpcode() == Z80::TST_Ac) {
+              ZeroTestMI = CurrMI;
+            }
+
+            if (ZeroTestMI) {
+              // Ensure no flags clobber between the store and the zero test.
+              MachineBasicBlock::iterator StoreIt(&MI);
+              auto It = std::next(StoreIt);
+              bool SafeFlags = true;
+              for (; It != MBB.end() && &*It != ZeroTestMI; ++It) {
+                if (llvm::is_contained(ZeroChainMIs, &*It))
+                  continue;
+                if (It->modifiesRegister(Z80::FLAGS, &TRI) ||
+                    It->readsRegister(Z80::FLAGS, &TRI)) {
+                  SafeFlags = false;
+                  break;
+                }
+              }
+              if (SafeFlags && It != MBB.end() && &*It == ZeroTestMI)
+                UsesOK = true;
+              else {
+                ZeroTestMI = nullptr;
+                ZeroChainMIs.clear();
+              }
+            }
+          }
+        }
+
+        if (UsesOK) {
+          bool IsAdd = ArithMI->getOpcode() == TargetOpcode::G_ADD;
+          Register LhsReg = ArithMI->getOperand(1).getReg();
+          Register RhsReg = ArithMI->getOperand(2).getReg();
+
+          // Helper: matches `load from AddrReg` on one side and a constant
+          // +1 or -1 on the other. Returns {LoadMI, delta} or {nullptr, 0}.
+          auto matchLoadConstPM1 =
+              [&](Register LoadCandidate,
+                  Register ConstReg) -> std::pair<MachineInstr *, int> {
+            if (!LoadCandidate.isVirtual() ||
+                !MRI.hasOneNonDBGUse(LoadCandidate))
+              return {nullptr, 0};
+            MachineInstr *LoadMI = MRI.getVRegDef(LoadCandidate);
+            if (!LoadMI || LoadMI->getOpcode() != TargetOpcode::G_LOAD ||
+                LoadMI->getParent() != &MBB ||
+                LoadMI->getOperand(1).getReg() != AddrReg ||
+                !LoadMI->hasOneMemOperand())
+              return {nullptr, 0};
+            const MachineMemOperand &LMMO = **LoadMI->memoperands_begin();
+            if (LMMO.getAddrSpace() != 0 || LMMO.isVolatile())
+              return {nullptr, 0};
+            MachineInstr *CDef = MRI.getVRegDef(ConstReg);
+            if (!CDef || CDef->getOpcode() != TargetOpcode::G_CONSTANT)
+              return {nullptr, 0};
+            unsigned V = CDef->getOperand(1).getCImm()->getZExtValue() & 0xFF;
+            if (V == 1)
+              return {LoadMI, +1};
+            if (V == 0xFF)
+              return {LoadMI, -1};
+            return {nullptr, 0};
+          };
+
+          // RHS is the constant for both G_ADD and G_SUB. For G_ADD we also
+          // try the commuted form (constant on the LHS).
+          auto [LoadMI, Delta] = matchLoadConstPM1(LhsReg, RhsReg);
+          if (!LoadMI && IsAdd)
+            std::tie(LoadMI, Delta) = matchLoadConstPM1(RhsReg, LhsReg);
+
+          // G_SUB(load, +-1) flips the sign of the delta.
+          if (LoadMI && !IsAdd)
+            Delta = -Delta;
+
+          if (LoadMI) {
+            // No aliasing or side-effecting ops may lie between the load and
+            // the store. Also forbid lifetime markers (they can hide stack
+            // coloring hazards for frame-indexed addresses).
+            MachineBasicBlock::iterator StoreIt(&MI);
+            auto It = std::next(MachineBasicBlock::iterator(LoadMI));
+            bool Safe = true;
+            for (; It != MBB.end() && It != StoreIt; ++It) {
+              if (It->mayLoadOrStore() || It->hasUnmodeledSideEffects() ||
+                  It->getOpcode() == TargetOpcode::LIFETIME_START ||
+                  It->getOpcode() == TargetOpcode::LIFETIME_END) {
+                Safe = false;
+                break;
+              }
+            }
+            if (Safe && It == StoreIt &&
+                RBI.constrainGenericRegister(AddrReg, Z80::GR16_HLRegClass,
+                                             MRI)) {
+              unsigned Opc = Delta > 0 ? Z80::INC8_IND : Z80::DEC8_IND;
+              BuildMI(MBB, MI, DL, TII.get(Opc))
+                  .addReg(AddrReg)
+                  .cloneMergedMemRefs({&MI, LoadMI});
+              if (ZeroTestMI)
+                ZeroTestMI->eraseFromParent();
+              for (MachineInstr *C : llvm::reverse(ZeroChainMIs))
+                C->eraseFromParent();
+              LoadMI->eraseFromParent();
+              ArithMI->eraseFromParent();
+              MI.eraseFromParent();
+              return true;
+            }
+          }
+        }
+      }
+    }
+
     // See the matching fold in G_LOAD.
     if (SrcTy.getSizeInBits() == 8 && MI.hasOneMemOperand() &&
         MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
@@ -1843,6 +2053,10 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           tryAluFIFold(Src2Reg, Src1Reg, DstReg, Z80::ALU_ADD))
         return true;
 
+      if (tryALUIndirectFold(Z80::ADD8_IND, Src1Reg, Src2Reg, DstReg) ||
+          tryALUIndirectFold(Z80::ADD8_IND, Src2Reg, Src1Reg, DstReg))
+        return true;
+
       // Constrain registers
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
@@ -1984,6 +2198,10 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       }
 
       if (tryAluFIFold(Src1Reg, Src2Reg, DstReg, Z80::ALU_SUB))
+        return true;
+
+      // SUB is non-commutative: only the RHS load can fold into SUB (HL).
+      if (tryALUIndirectFold(Z80::SUB8_IND, Src1Reg, Src2Reg, DstReg))
         return true;
 
       // Constrain registers
@@ -2131,6 +2349,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
                         tryAluFIFold(Src2Reg, Src1Reg, DstReg, Z80::ALU_AND)))
           return true;
 
+        if (!ImmVal &&
+            (tryALUIndirectFold(Z80::AND8_IND, Src1Reg, Src2Reg, DstReg) ||
+             tryALUIndirectFold(Z80::AND8_IND, Src2Reg, Src1Reg, DstReg)))
+          return true;
+
         if (ImmVal)
           buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::AND_Ac_n, DstReg, Src1Reg,
                      MRI)
@@ -2204,6 +2427,13 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         auto ImmVal = getConst8(Src2Reg);
 
         bool IsOr = Opcode == TargetOpcode::G_OR;
+        if (!ImmVal) {
+          unsigned FoldOpc = IsOr ? Z80::OR8_IND : Z80::XOR8_IND;
+          if (tryALUIndirectFold(FoldOpc, Src1Reg, Src2Reg, DstReg) ||
+              tryALUIndirectFold(FoldOpc, Src2Reg, Src1Reg, DstReg))
+            return true;
+        }
+
         // Setting one bit is SET, as clearing one is RES, and flipping all
         // of them is CPL. None of them writes the flags OR and XOR would; a
         // test that wants those turns them back into OR and XOR.

@@ -755,6 +755,25 @@ def COMPARE8_IND : Z80Pseudo<(outs), (ins Ac:$lhs, GR16_HL:$addr)> {
   let mayStore = false;
 }
 
+// ALU op with the byte at HL. The fixed address class keeps the operand
+// choice visible to register allocation until this pseudo expands after RA.
+let Constraints = "$dst = $lhs", Defs = [FLAGS], mayLoad = true,
+    mayStore = false in {
+  def OR8_IND  : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR16_HL:$addr)>;
+  def AND8_IND : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR16_HL:$addr)>;
+  def XOR8_IND : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR16_HL:$addr)>;
+  def ADD8_IND : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR16_HL:$addr)>;
+  def SUB8_IND : Z80Pseudo<(outs Ac:$dst), (ins Ac:$lhs, GR16_HL:$addr)>;
+}
+
+// INC/DEC of the byte at HL. These do NOT touch A — RA just needs to see
+// the HL constraint on the address so post-RA expansion emits the 1-byte
+// 0x34/0x35 memory-direct forms.
+let mayLoad = true, mayStore = true, Defs = [FLAGS] in {
+  def INC8_IND : Z80Pseudo<(outs), (ins GR16_HL:$addr)>;
+  def DEC8_IND : Z80Pseudo<(outs), (ins GR16_HL:$addr)>;
+}
+
 // Direct access to an address the linker settles: a global, or a global plus a
 // constant. Z80 reaches one in a single instruction per pair, against putting
 // the address in a pointer register and reading the two bytes through it. The
