@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -128,6 +129,19 @@ static unsigned countWideFrameAccesses(const MachineFunction &MF) {
   return N;
 }
 
+/// Whether an instruction other than debug info accesses a fixed stack object.
+static bool accessesFixedObject(const MachineFunction &MF) {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  return llvm::any_of(MF, [&](const MachineBasicBlock &MBB) {
+    return llvm::any_of(MBB, [&](const MachineInstr &MI) {
+      return !MI.isDebugInstr() &&
+             llvm::any_of(MI.operands(), [&](const MachineOperand &MO) {
+               return MO.isFI() && MFI.isFixedObjectIndex(MO.getIndex());
+             });
+    });
+  });
+}
+
 void Z80FrameLowering::processFunctionBeforeFrameFinalized(
     MachineFunction &MF, RegScavenger *RS) const {
   // Move the locals of a provably non-reentrant function out of the stack: the
@@ -137,17 +151,12 @@ void Z80FrameLowering::processFunctionBeforeFrameFinalized(
   if (usesStaticFrame(MF)) {
     MachineFrameInfo &StaticMFI = MF.getFrameInfo();
 
-    // On SM83 an eight-bit slot is a free win in static memory (byte-neutral,
-    // a cycle cheaper), but a wide slot costs an extra byte per access. Moving
-    // the wide slots out too is what removes the stack pointer adjustment, so
-    // it pays off only while those extra bytes stay under the four bytes that
-    // adjustment costs. A speed build always takes the trade for the cycles;
-    // a size build keeps the wide slots on the stack once they no longer pay,
-    // leaving a mixed frame whose eight-bit slots are still static. Z80 has a
-    // direct absolute form for every class, so all of its slots go static.
+    // On SM83 the slots move to the static frame by two rules:
+    // 1. An eight-bit slot always moves. A static access is never worse.
+    // 2. The wide slots move only while the extra byte of each wide access
+    //    adds up to no more than the stack pointer adjustment.
     bool KeepWideOnStack = false;
-    if (MF.getSubtarget<Z80Subtarget>().hasSM83() &&
-        MF.getFunction().hasOptSize()) {
+    if (MF.getSubtarget<Z80Subtarget>().hasSM83()) {
       const unsigned PrologueBytes = 4;
       KeepWideOnStack = countWideFrameAccesses(MF) > PrologueBytes;
     }
@@ -196,6 +205,50 @@ void Z80FrameLowering::processFunctionBeforeFrameFinalized(
             "aligned data",
         F.getSubprogram()));
   }
+
+  MF.getInfo<Z80FunctionInfo>()->AccessesFixedObject = accessesFixedObject(MF);
+}
+
+void Z80FrameLowering::processFunctionBeforeFrameIndicesReplaced(
+    MachineFunction &MF, RegScavenger *RS) const {
+  auto *FuncInfo = MF.getInfo<Z80FunctionInfo>();
+  FuncInfo->HasSpillPush = llvm::any_of(MF, [](const MachineBasicBlock &MBB) {
+    return llvm::any_of(MBB, [](const MachineInstr &MI) {
+      return MI.getOpcode() == Z80::SPILL_PUSH;
+    });
+  });
+
+  // IX does not move with SPILL_PUSH.
+  if (!FuncInfo->HasSpillPush || hasFP(MF))
+    return;
+
+  const Z80InstrInfo &TII = *MF.getSubtarget<Z80Subtarget>().getInstrInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  for (MachineBasicBlock &MBB : MF)
+    for (MachineInstr &MI : MBB) {
+      if (!MI.isDebugValue())
+        continue;
+      for (MachineOperand &MO : MI.debug_operands()) {
+        if (!MO.isFI() ||
+            MFI.getStackID(MO.getIndex()) != TargetStackID::Default)
+          continue;
+        int Depth = TII.getSpillPushDepth(MI);
+        if (Depth == 0)
+          continue;
+        // PEI only prepends SP and the frame offset to the indirect form.
+        // PEI rewrites the other forms further. Those forms lose the location
+        // instead.
+        if (MI.isNonListDebugValue() && MI.getDebugOffset().isImm() &&
+            !MI.getDebugExpression()->isImplicit()) {
+          MI.getDebugExpressionOp().setMetadata(DIExpression::prepend(
+              MI.getDebugExpression(), DIExpression::ApplyOffset, Depth));
+          continue;
+        }
+        MO.ChangeToRegister(Register(), /*isDef=*/false);
+        if (MI.isNonListDebugValue())
+          MI.getDebugOffset().ChangeToRegister(Register(), /*isDef=*/false);
+      }
+    }
 }
 
 bool Z80FrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
@@ -279,8 +332,8 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
 
   if (hasFP(MF)) {
     // --- Frame pointer mode (IX = frame pointer) ---
-    bool NeedsFP = MFI.getNumFixedObjects() > 0 || MFI.isFrameAddressTaken() ||
-                   MFI.hasVarSizedObjects();
+    bool NeedsFP = MF.getInfo<Z80FunctionInfo>()->AccessesFixedObject ||
+                   MFI.isFrameAddressTaken() || MFI.hasVarSizedObjects();
 
     if (!StackSize && !NeedsFP)
       return;
@@ -371,8 +424,8 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
   uint64_t StackSize = MFI.getStackSize();
 
   if (hasFP(MF)) {
-    bool NeedsFP = MFI.getNumFixedObjects() > 0 || MFI.isFrameAddressTaken() ||
-                   MFI.hasVarSizedObjects();
+    bool NeedsFP = MF.getInfo<Z80FunctionInfo>()->AccessesFixedObject ||
+                   MFI.isFrameAddressTaken() || MFI.hasVarSizedObjects();
 
     if (!StackSize && !NeedsFP)
       return;

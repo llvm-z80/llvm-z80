@@ -6,25 +6,21 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Frame index elimination writes accesses to static frame slots against a
-// placeholder target index, since the frame's address is not known until
-// every function has been through codegen. This module pass then lays all
-// static frames out inside a single global.
+// Assign each static frame an offset inside one global, __static_frames.
+// Then replace the placeholder target indices that frame index elimination
+// wrote with the real addresses.
 //
-// The layout mirrors what a stack would have done: walking the condensed
-// call graph in topological order, every SCC is placed after the frames of
-// all of its callers, so any chain of simultaneously active functions
-// occupies disjoint memory while functions that can never be active at the
-// same time overlap. The total size therefore converges to the worst-case
-// call path, the same memory a stack would need. Interrupt handlers and
-// their exclusive callees interleave with everything, so their region
-// starts where the rest of the layout ends.
+// Offsets follow the condensed call graph in topological order. Each SCC
+// starts after the frames of all callers. So functions on one call chain
+// never share memory, but functions that are never active together can
+// share it.
 //
 //===----------------------------------------------------------------------===//
 
 #include "Z80StaticFrameAlloc.h"
 
 #include "Z80FrameLowering.h"
+#include "Z80NonReentrant.h"
 #include "Z80Subtarget.h"
 
 #include "llvm/ADT/SCCIterator.h"
@@ -99,21 +95,19 @@ static void addSymbolCallEdges(CallGraph &CG, const MachineModuleInfo &MMI) {
   }
 }
 
-// An external call may call back into any externally-callable function that
-// is not an interrupt entry point.
+// An external call may call back into any externally-callable function.
 static void addExternalEdges(CallGraph &CG) {
   assert(CG.getCallsExternalNode()->empty());
-  for (auto &KV : *CG.getExternalCallingNode()) {
-    Function *F = KV.second->getFunction();
-    if (F && !F->hasFnAttribute("interrupt"))
+  for (auto &KV : *CG.getExternalCallingNode())
+    if (KV.second->getFunction())
       CG.getCallsExternalNode()->addCalledFunction(nullptr, KV.second);
-  }
 }
 
 bool Z80StaticFrameAlloc::runOnModule(Module &M) {
   auto &MMI = getAnalysis<MachineModuleInfoWrapperPass>().getMMI();
   auto &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
 
+  removeInlineAsmCallEdges(CG);
   addSymbolCallEdges(CG, MMI);
   addExternalEdges(CG);
 
@@ -159,30 +153,11 @@ bool Z80StaticFrameAlloc::runOnModule(Module &M) {
     if (!CallerSCCs.count(&S))
       RootSCCs.push_back(&S);
 
-  // Propagate offsets root-to-leaf. Interrupt handlers and their exclusive
-  // subtrees are deferred: they interleave with every other context, so
-  // they are placed after the region everything else settled into.
+  // Propagate offsets root-to-leaf.
   uint64_t FrameRegionSize = 0;
-  std::vector<SCC *> InterruptSCCs;
-  bool PlacingInterrupts = false;
-  while (!RootSCCs.empty() || !InterruptSCCs.empty()) {
-    if (RootSCCs.empty()) {
-      PlacingInterrupts = true;
-      RootSCCs.push_back(InterruptSCCs.back());
-      RootSCCs.back()->Offset = FrameRegionSize;
-      InterruptSCCs.pop_back();
-      continue;
-    }
-
+  while (!RootSCCs.empty()) {
     SCC &S = *RootSCCs.back();
     RootSCCs.pop_back();
-
-    if (!PlacingInterrupts && S.Nodes.size() == 1 &&
-        S.Nodes.front()->getFunction() &&
-        S.Nodes.front()->getFunction()->hasFnAttribute("interrupt")) {
-      InterruptSCCs.push_back(&S);
-      continue;
-    }
 
     uint64_t Size = 0;
     for (CallGraphNode *CGN : S.Nodes)

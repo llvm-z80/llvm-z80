@@ -30,7 +30,7 @@ define void @g_memcpy(i16 %n) {
 ; Z80-NEXT:    ld de,_dst
 ; Z80-NEXT:    ld a,b
 ; Z80-NEXT:    or c
-; Z80-NEXT:    jr z,
+; Z80-NEXT:    ret z
 ; Z80:         ldir
 ; Z80-NOT:     call
 ;

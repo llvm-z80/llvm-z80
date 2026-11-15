@@ -1,13 +1,17 @@
 ; RUN: llc -mtriple=z80 -O2 < %s | FileCheck %s --check-prefix=Z80
 ; RUN: opt -strip-debug < %s | llc -mtriple=z80 -O2 | FileCheck %s --check-prefix=Z80
-; RUN: llc -mtriple=sm83 -O2 < %s | FileCheck %s --check-prefix=SM83
-; RUN: opt -strip-debug < %s | llc -mtriple=sm83 -O2 | FileCheck %s --check-prefix=SM83
+; RUN: llc -mtriple=sm83 -O2 -z80-enable-push-pop-spills=false < %s \
+; RUN:   | FileCheck %s --check-prefix=SM83
+; RUN: opt -strip-debug < %s \
+; RUN:   | llc -mtriple=sm83 -O2 -z80-enable-push-pop-spills=false \
+; RUN:   | FileCheck %s --check-prefix=SM83
 ;
 ; Debug information does not change the code, so each function is checked
 ; with it and without it. In @sister a debug value sits between a reload and
 ; the instruction the pre-emit peephole folds the reload into. In @bar a
 ; debug value names a frame slot, which is no access to count when an
-; optsize build decides whether its wide slots stay on the stack.
+; optsize build decides whether its wide slots stay on the stack. The SM83
+; runs disable the PUSH/POP spills to keep the slots of @bar.
 
 target datalayout = "e-m:o-p:16:8-i16:8-i32:8-i64:8-i128:8-f16:8-f32:8-f64:8-f128:8-ve-a:8-n8:16"
 

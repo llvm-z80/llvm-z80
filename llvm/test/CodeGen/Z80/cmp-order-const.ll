@@ -12,7 +12,7 @@ define void @below_page(i16 %x) {
 ; Z80:           ld a,h
 ; SM83:          ld a,d
 ; CHECK-NEXT:    cp 172
-; CHECK-NEXT:    jr nc,
+; CHECK-NEXT:    ret nc
   %c = icmp ult i16 %x, 44032
   br i1 %c, label %t, label %f
 t:
@@ -30,7 +30,7 @@ define void @below(i16 %x) {
 ; Z80-NEXT:      ld a,h
 ; SM83-NEXT:     ld a,d
 ; CHECK-NEXT:    sbc a,43
-; CHECK-NEXT:    jr nc,
+; CHECK-NEXT:    ret nc
   %c = icmp ult i16 %x, 11172
   br i1 %c, label %t, label %f
 t:
@@ -46,7 +46,7 @@ define void @above(i16 %x) {
 ; Z80:           ld a,h
 ; SM83:          ld a,d
 ; CHECK-NEXT:    cp 19
-; CHECK-NEXT:    jr c,
+; CHECK-NEXT:    ret c
   %c = icmp ugt i16 %x, 4863
   br i1 %c, label %t, label %f
 t:
@@ -81,7 +81,7 @@ define void @below_wide(i32 %x) {
 ; CHECK-NEXT:    sbc a,1
 ; CHECK-NEXT:    ld a,{{[a-l]}}
 ; CHECK-NEXT:    sbc a,0
-; CHECK-NEXT:    jr nc,
+; CHECK-NEXT:    ret nc
   %c = icmp ult i32 %x, 100000
   br i1 %c, label %t, label %f
 t:

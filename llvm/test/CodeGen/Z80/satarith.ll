@@ -7,11 +7,11 @@
 define i8 @uaddsat_i8(i8 %a, i8 %b) {
 ; CHECK-LABEL: _uaddsat_i8:
 ; CHECK:       add a,
-; CHECK:       jr nc,
+; CHECK:       ret nc
 ; CHECK:       ld a,#255
 ; SM83-LABEL: _uaddsat_i8:
 ; SM83:       add a,
-; SM83:       jr nc,
+; SM83:       ret nc
 ; SM83:       ld a,#255
   %r = call i8 @llvm.uadd.sat.i8(i8 %a, i8 %b)
   ret i8 %r
@@ -20,11 +20,11 @@ define i8 @uaddsat_i8(i8 %a, i8 %b) {
 define i8 @usubsat_i8(i8 %a, i8 %b) {
 ; CHECK-LABEL: _usubsat_i8:
 ; CHECK:       sub
-; CHECK:       jr nc,
+; CHECK:       ret nc
 ; CHECK:       xor a
 ; SM83-LABEL: _usubsat_i8:
 ; SM83:       sub
-; SM83:       jr nc,
+; SM83:       ret nc
 ; SM83:       xor a
   %r = call i8 @llvm.usub.sat.i8(i8 %a, i8 %b)
   ret i8 %r
@@ -33,7 +33,7 @@ define i8 @usubsat_i8(i8 %a, i8 %b) {
 define i8 @saddsat_i8(i8 %a, i8 %b) {
 ; CHECK-LABEL: _saddsat_i8:
 ; CHECK:       add a,
-; CHECK:       jp po,
+; CHECK:       ret po
 ; CHECK:       rlca
 ; CHECK-NEXT:  sbc a,a
 ; CHECK-NEXT:  xor #128
@@ -44,7 +44,7 @@ define i8 @saddsat_i8(i8 %a, i8 %b) {
 define i8 @ssubsat_i8(i8 %a, i8 %b) {
 ; CHECK-LABEL: _ssubsat_i8:
 ; CHECK:       sub
-; CHECK:       jp po,
+; CHECK:       ret po
 ; CHECK:       rlca
 ; CHECK-NEXT:  sbc a,a
 ; CHECK-NEXT:  xor #128

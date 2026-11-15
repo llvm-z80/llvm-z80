@@ -1,0 +1,38 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=prolog-epilog %s -o - | FileCheck %s
+#
+# A callee-cleanup call pops the stack arguments before returning. A frame
+# access between the call and ADJCALLSTACKUP sees SP without the arguments.
+
+--- |
+  define void @callee_cleanup() { ret void }
+  declare void @f(i16)
+...
+---
+# CHECK-LABEL: name: callee_cleanup
+# CHECK:       PUSH_HL implicit killed $hl
+# CHECK-NEXT:  $hl = LD_rr_nn 2
+# CHECK-NEXT:  ADD_HL_SP
+# CHECK-NEXT:  $c = LD_r_HLind
+# CHECK:       CALL_nn @f
+# CHECK-NEXT:  $hl = LD_rr_nn 0
+# CHECK-NEXT:  ADD_HL_SP
+# CHECK-NEXT:  $e = LD_r_HLind
+name:            callee_cleanup
+tracksRegLiveness: true
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+stack:
+  - { id: 0, type: spill-slot, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $de, $hl
+    SPILL_GR16 killed $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
+    ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
+    PUSH_HL implicit killed $hl
+    $bc = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $bc
+    $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
+    ADJCALLSTACKUP 2, 2, implicit-def $sp, implicit $sp
+    RET implicit $de
+...

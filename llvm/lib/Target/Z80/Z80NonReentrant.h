@@ -17,12 +17,17 @@
 
 namespace llvm {
 
+class CallGraph;
 class ModulePass;
 class PassRegistry;
 class Z80TargetMachine;
 
 ModulePass *createZ80NonReentrantPass(const Z80TargetMachine &TM);
 void initializeZ80NonReentrantPass(PassRegistry &);
+
+// Remove the call edges of inline asm statements.
+// Static frame passes assume that inline asm never calls into the module.
+void removeInlineAsmCallEdges(CallGraph &CG);
 
 } // namespace llvm
 

@@ -52,6 +52,7 @@
 #include "Z80NarrowMemAccess.h"
 #include "Z80NonReentrant.h"
 #include "Z80PreEmitPeephole.h"
+#include "Z80PushPopSpills.h"
 #include "Z80ShiftRotateChain.h"
 #include "Z80StaticFrameAlloc.h"
 #include "Z80TargetObjectFile.h"
@@ -74,6 +75,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80PostLegalizerCombinerPass(PR);
   initializeZ80FixupImplicitDefsPass(PR);
   initializeZ80PreEmitPeepholePass(PR);
+  initializeZ80PushPopSpillsPass(PR);
   initializeZ80LowerSelectPass(PR);
   initializeZ80LowerThreadLocalPass(PR);
   initializeZ80NarrowMemAccessPass(PR);
@@ -82,10 +84,6 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeZ80Target() {
   initializeZ80StaticFrameAllocPass(PR);
 }
 
-// On by default for both targets. On SM83 a wide slot costs a byte more in
-// static memory than on the stack, so frame lowering keeps a size build's
-// wide slots on the stack; an eight-bit slot is a win either way. Explicit
-// true/false overrides the default.
 static cl::opt<cl::boolOrDefault> EnableStaticFramesOpt(
     "z80-static-frames",
     cl::desc("Allocate the frames of provably non-reentrant functions in "
@@ -217,8 +215,8 @@ public:
   void addPreRegAlloc() override;
   void addFastRegAlloc() override { addOptimizedRegAlloc(); }
   void addOptimizedRegAlloc() override;
+  bool addRegAssignAndRewriteOptimized() override;
 
-  void addPostRewrite() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
 };
@@ -312,12 +310,21 @@ void Z80PassConfig::addOptimizedRegAlloc() {
   TargetPassConfig::addOptimizedRegAlloc();
 }
 
-void Z80PassConfig::addPostRewrite() {
+bool Z80PassConfig::addRegAssignAndRewriteOptimized() {
+  if (!TargetPassConfig::addRegAssignAndRewriteOptimized())
+    return false;
+
   // Mitigation for https://github.com/llvm/llvm-project/issues/156428
   // Remove spurious super-register implicit-defs added by LiveVariables.
   // Must run before MachineCopyPropagation to prevent incorrect dead-copy
   // elimination.  See Z80FixupImplicitDefs.cpp for full explanation.
   addPass(createZ80FixupImplicitDefsPass());
+
+  // Replace spill slots with PUSH and POP before stack slot coloring merges
+  // them.
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createZ80PushPopSpillsPass());
+  return true;
 }
 
 void Z80PassConfig::addPreSched2() {
@@ -348,10 +355,10 @@ void Z80PassConfig::addPreSched2() {
 
 void Z80PassConfig::addPreEmitPass() {
   addPass(&BranchRelaxationPassID);
-  // Collapse JR_CC+JP trampolines from BranchRelaxation into JP_CC.
-  if (getOptLevel() != CodeGenOptLevel::None)
-    addPass(createZ80BranchCleanupPass());
   // Expand pseudos that split MBBs (variable shift loops) after branch
   // relaxation. The generated JR/DJNZ branches are always short-range.
   addPass(createZ80ExpandPseudoPass());
+  // Fold branches into JP cc, RET cc and conditional tail calls.
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createZ80BranchCleanupPass());
 }

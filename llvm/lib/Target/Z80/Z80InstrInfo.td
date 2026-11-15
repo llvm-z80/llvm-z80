@@ -658,6 +658,19 @@ def RELOAD_ANY16 : Z80Pseudo<(outs Any16:$dst), (ins i32imm:$fi, i32imm:$offset)
   let isReMaterializable = true;
 }
 
+// SPILL_PUSH and SPILL_POP are the PUSH and POP of a spill slot replaced by
+// Z80PushPopSpills. getSPAdjust returns 0 for this pair.
+// Z80InstrInfo::getSpillPushDepth counts this pair for PEI instead.
+// expandPostRAPseudo lowers this pair to PUSH and POP.
+def SPILL_PUSH : Z80Pseudo<(outs), (ins Any16:$src)> {
+  let mayStore = true;
+  let mayLoad = false;
+}
+def SPILL_POP : Z80Pseudo<(outs Any16:$dst), (ins)> {
+  let mayLoad = true;
+  let mayStore = false;
+}
+
 // 16-bit add/sub from frame slot via 8-bit IX-indexed ALU.
 // ADD_HL_FI expands to: LD A,L; ADD A,(IX+d); LD L,A; LD A,H; ADC A,(IX+d+1); LD H,A
 // SUB_HL_FI expands to: LD A,L; SUB (IX+d); LD L,A; LD A,H; SBC A,(IX+d+1); LD H,A
@@ -1032,6 +1045,21 @@ let Uses = [SP, IY], Defs = [A, BC, DE, HL, IY, FLAGS] in
 def TCRETURN_IY : Z80Pseudo<(outs), (ins)>, PseudoInstExpansion<(JP_IYind)>;
 let Uses = [SP, HL], Defs = [A, BC, DE, HL, FLAGS] in
 def TCRETURN_HL : Z80Pseudo<(outs), (ins)>, PseudoInstExpansion<(JP_HLind)>;
+}
+
+// Conditional tail calls. The path that falls through sees no register
+// change.
+let isCall = true, isReturn = true, isTerminator = true,
+    hasSideEffects = true, mayLoad = true, mayStore = true,
+    Uses = [SP, FLAGS] in {
+def TCRETURN_NZ_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                     PseudoInstExpansion<(JP_NZ_nn imm16:$dst)>;
+def TCRETURN_Z_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                    PseudoInstExpansion<(JP_Z_nn imm16:$dst)>;
+def TCRETURN_NC_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                     PseudoInstExpansion<(JP_NC_nn imm16:$dst)>;
+def TCRETURN_C_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
+                    PseudoInstExpansion<(JP_C_nn imm16:$dst)>;
 }
 
 // SM83-only instructions and pseudos

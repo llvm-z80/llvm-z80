@@ -162,6 +162,7 @@ protected:
   /// Whether \p Info can become a jump.
   bool isEligibleForTailCallOptimization(MachineFunction &MF,
                                          const CallLoweringInfo &Info,
+                                         ArrayRef<unsigned> StackArgIndices,
                                          unsigned StackArgBytes) const;
 
 public:

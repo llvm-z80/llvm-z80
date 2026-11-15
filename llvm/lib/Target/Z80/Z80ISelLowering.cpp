@@ -25,6 +25,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/KnownBits.h"
 
@@ -74,6 +75,12 @@ Z80TargetLowering::Z80TargetLowering(const Z80TargetMachine &TM,
   // to a branch sequence. Prefer branches over selects since they avoid
   // computing both sides of the conditional.
   PredictableSelectIsExpensive = true;
+}
+
+bool Z80TargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
+  const Function *F = CI->getFunction();
+  return CI->isTailCall() && !F->hasFnAttribute("interrupt") &&
+         !F->getFnAttribute("disable-tail-calls").getValueAsBool();
 }
 
 // Values wider than a 16-bit register pair are passed and returned as
