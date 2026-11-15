@@ -6,29 +6,15 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// A function whose frame can live at a fixed address must satisfy two
-// independent conditions, both derived from the module call graph:
+// Add the "nonreentrant" attribute to every function that is never entered
+// again before returning. Z80FrameLowering places the frame of such a
+// function at a fixed address.
 //
-//  * It never recurses: no cycle reaches it, including cycles that pass
-//    through external code or an indirect call, which the graph models
-//    conservatively as calls to every address-taken function.
-//
-//  * At most one execution context reaches it. Interrupt handlers run
-//    concurrently with everything else, so each handler roots its own
-//    context and the external world (main and any other outside entry)
-//    roots another; a function reachable from two contexts can have two
-//    activations live at once and keeps its stack frame.
-//
-// The result is the "nonreentrant" attribute. Everything downstream keys
-// off that attribute alone, so the analysis can be replaced without
-// touching the frame machinery.
-//
-// Enabling static frames asserts that every interrupt entry point is a
-// function in this module carrying the interrupt attribute. A function
-// entered from a context the analysis cannot see, such as a handler living
-// in foreign code, must carry the no-static-frame target feature (spelled
-// __attribute__((target("no-static-frame"))) in C); it and everything it
-// reaches then keep their stack frames.
+// Recursion and interrupts can re-enter a function. The cycle check treats
+// a call into another module or through a pointer as a call to every
+// non-static or address-taken function. A function on a cycle keeps a stack
+// frame. Interrupt handlers, functions marked no-static-frame, and
+// everything those functions call keep stack frames too.
 //
 //===----------------------------------------------------------------------===//
 
@@ -42,6 +28,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/LTO/LTO.h"
@@ -61,8 +48,6 @@ class Z80NonReentrantImpl {
   const Z80TargetMachine &TM;
   CallGraph &CG;
   SmallPtrSet<const CallGraphNode *, 8> Reentrant;
-  SmallPtrSet<const CallGraphNode *, 16> ReachableFromCurrent;
-  SmallPtrSet<const CallGraphNode *, 16> ReachableFromOther;
 
 public:
   Z80NonReentrantImpl(const Z80TargetMachine &TM, CallGraph &CG)
@@ -70,12 +55,7 @@ public:
   bool run(Module &M);
 
 private:
-  bool isContextRoot(const Function &F) const {
-    return F.hasFnAttribute("interrupt");
-  }
-
   void markReentrantReachable(const CallGraphNode &CGN);
-  void visitContext(const CallGraphNode &CGN);
 };
 
 } // namespace
@@ -85,6 +65,19 @@ static bool callsSelf(const CallGraphNode &N) {
     if (CR.second == &N)
       return true;
   return false;
+}
+
+void llvm::removeInlineAsmCallEdges(CallGraph &CG) {
+  for (auto &KV : CG) {
+    CallGraphNode &CGN = *KV.second;
+    for (auto I = CGN.begin(); I != CGN.end();) {
+      auto *Call = I->first ? dyn_cast_or_null<CallBase>(*I->first) : nullptr;
+      if (Call && Call->isInlineAsm())
+        CGN.removeCallEdge(I);
+      else
+        ++I;
+    }
+  }
 }
 
 // A function entered from a context the module analysis cannot see keeps
@@ -103,26 +96,6 @@ void Z80NonReentrantImpl::markReentrantReachable(const CallGraphNode &CGN) {
     markReentrantReachable(*CR.second);
 }
 
-void Z80NonReentrantImpl::visitContext(const CallGraphNode &CGN) {
-  if (!ReachableFromCurrent.insert(&CGN).second)
-    return;
-
-  const Function *F = CGN.getFunction();
-  if (F && !F->isDeclaration() && ReachableFromOther.contains(&CGN)) {
-    LLVM_DEBUG(dbgs() << "Reachable from multiple contexts: " << F->getName()
-                      << "\n");
-    Reentrant.insert(&CGN);
-  }
-  // A context does not extend into another context's root: an interrupt
-  // handler reached from here still only ever runs in its own context.
-  for (const CallGraphNode::CallRecord &CR : CGN) {
-    const Function *Callee = CR.second->getFunction();
-    if (Callee && isContextRoot(*Callee))
-      continue;
-    visitContext(*CR.second);
-  }
-}
-
 bool Z80NonReentrantImpl::run(Module &M) {
   // This pass is the attribute's only legitimate writer; drop any that
   // arrived with the input IR so everything downstream is backed by this
@@ -133,6 +106,8 @@ bool Z80NonReentrantImpl::run(Module &M) {
       F.removeFnAttr("nonreentrant");
       Changed = true;
     }
+
+  removeInlineAsmCallEdges(CG);
 
   // Any external call may end up calling any externally-callable function,
   // which lets the SCC walk see recursion that passes through code outside
@@ -156,20 +131,20 @@ bool Z80NonReentrantImpl::run(Module &M) {
       ImplicitCallees.push_back(CG[F]);
   }
 
-  // A function that cleared the static-frame feature (the no-static-frame
-  // spelling of the target attribute) is entered from a context this module
-  // cannot see; it and its whole call tree stay on the stack. The IR walk
-  // does not see the calls instruction selection will introduce, so the
-  // runtime functions above count as part of any such tree.
+  // Keep stack frames in interrupt handlers, no-static-frame functions and
+  // everything these functions call.
   bool HasForeignContext = false;
   for (Function &F : M.functions()) {
     if (F.isDeclaration())
       continue;
-    if (!TM.getSubtargetImpl(F)->hasStaticFrame()) {
+    if (!TM.getSubtargetImpl(F)->hasStaticFrame() ||
+        F.hasFnAttribute("interrupt")) {
       HasForeignContext = true;
       markReentrantReachable(*CG[&F]);
     }
   }
+  // Code from instruction selection in these trees may call the runtime
+  // functions above.
   if (HasForeignContext)
     for (CallGraphNode *N : ImplicitCallees)
       markReentrantReachable(*N);
@@ -190,30 +165,6 @@ bool Z80NonReentrantImpl::run(Module &M) {
     F->setDoesNotRecurse();
     ++NumDoesNotRecurse;
     Changed = true;
-  }
-
-  // Context analysis. The external world (main and any other entry called
-  // from outside) is one context; each interrupt handler is another. A
-  // function reachable from more than one of them can be active twice.
-  //
-  // The walks run with the artificial external edge still in place, so an
-  // indirect call inside one context conservatively reaches every
-  // address-taken function.
-  auto FinishContext = [&]() {
-    for (CallGraphNode *N : ImplicitCallees)
-      visitContext(*N);
-    ReachableFromOther.insert(ReachableFromCurrent.begin(),
-                              ReachableFromCurrent.end());
-    ReachableFromCurrent.clear();
-  };
-
-  visitContext(*CG.getExternalCallingNode());
-  FinishContext();
-  for (Function &F : M.functions()) {
-    if (F.isDeclaration() || !isContextRoot(F))
-      continue;
-    visitContext(*CG[&F]);
-    FinishContext();
   }
 
   CallGraphNode *CallsExternal = CG.getCallsExternalNode();

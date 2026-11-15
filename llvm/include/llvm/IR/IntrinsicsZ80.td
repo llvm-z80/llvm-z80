@@ -10,35 +10,30 @@
 //
 //===----------------------------------------------------------------------===//
 
-let TargetPrefix = "z80" in {  // All intrinsics start with "llvm.z80."
+let TargetPrefix = "z80" in {
 
-  // Port I/O intrinsics
-  // These map directly to Z80 IN and OUT instructions
-
-  // Read a byte from an I/O port
   // i8 @llvm.z80.in(i8 port)
   def int_z80_in : Intrinsic<[llvm_i8_ty], [llvm_i8_ty],
-                             [IntrNoMem, IntrHasSideEffects]>;
+                             [IntrNoMem, IntrHasSideEffects, IntrNoCallback]>;
 
-  // Write a byte to an I/O port
   // void @llvm.z80.out(i8 port, i8 value)
   def int_z80_out : Intrinsic<[], [llvm_i8_ty, llvm_i8_ty],
-                              [IntrNoMem, IntrHasSideEffects]>;
+                              [IntrNoMem, IntrHasSideEffects, IntrNoCallback]>;
 
-  // Halt the CPU (useful for ending programs)
   // void @llvm.z80.halt()
-  def int_z80_halt : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects]>;
+  def int_z80_halt
+      : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects, IntrNoCallback]>;
 
-  // Disable interrupts
   // void @llvm.z80.di()
-  def int_z80_di : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects]>;
+  def int_z80_di
+      : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects, IntrNoCallback]>;
 
-  // Enable interrupts
   // void @llvm.z80.ei()
-  def int_z80_ei : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects]>;
+  def int_z80_ei
+      : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects, IntrNoCallback]>;
 
-  // No operation (useful for timing loops)
   // void @llvm.z80.nop()
-  def int_z80_nop : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects]>;
+  def int_z80_nop
+      : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects, IntrNoCallback]>;
 
 }

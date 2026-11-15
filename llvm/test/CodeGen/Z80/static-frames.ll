@@ -3,8 +3,8 @@
 ; RUN: llc -mtriple=z80 -O1 -verify-machineinstrs < %s -o /dev/null
 
 ; The frames of provably non-reentrant functions move to static memory:
-; no prologue, every slot access an absolute address. Recursive functions
-; and functions shared between execution contexts keep their stack frames.
+; no prologue, every slot access an absolute address. Recursive functions,
+; interrupt handlers and everything a handler calls keep their stack frames.
 
 @sink = global ptr null
 
@@ -60,13 +60,24 @@ define internal i16 @pointed(i16 %x) {
   ret i16 %v
 }
 
-; The handler itself is a context root with a frame of its own.
+; Called only from the interrupt handler: stack frame.
+; CHECK-LABEL: isr_only:
+; CHECK-NOT: L_isr_only.frame
+define internal i16 @isr_only(i16 %x) {
+  %buf = alloca i16, align 1
+  store volatile i16 %x, ptr %buf, align 1
+  %v = load volatile i16, ptr %buf, align 1
+  ret i16 %v
+}
+
+; A nested interrupt can re-enter the handler: stack frame.
 ; CHECK-LABEL: isr:
-; CHECK: L_isr.frame
+; CHECK-NOT: L_isr.frame
 define void @isr() #0 {
   %buf = alloca i16, align 1
   store volatile i16 7, ptr %buf, align 1
   %r = call i16 @shared(i16 3)
+  %o = call i16 @isr_only(i16 4)
   ret void
 }
 
@@ -87,6 +98,6 @@ define i16 @main() {
 ; Every frame is carved out of one block.
 ; CHECK: L___static_frames
 ; CHECK-DAG: L_main.frame = L___static_frames
-; CHECK-DAG: L_isr.frame = L___static_frames
+; CHECK-DAG: L_leaf.frame = L___static_frames
 
 attributes #0 = { "interrupt" }
