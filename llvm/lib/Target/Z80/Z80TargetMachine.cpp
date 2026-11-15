@@ -214,9 +214,8 @@ public:
   void addPreRegAlloc() override;
   void addFastRegAlloc() override { addOptimizedRegAlloc(); }
   void addOptimizedRegAlloc() override;
+  bool addRegAssignAndRewriteOptimized() override;
 
-  void addPostRewrite() override;
-  void addPostRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
 };
@@ -310,17 +309,21 @@ void Z80PassConfig::addOptimizedRegAlloc() {
   TargetPassConfig::addOptimizedRegAlloc();
 }
 
-void Z80PassConfig::addPostRewrite() {
+bool Z80PassConfig::addRegAssignAndRewriteOptimized() {
+  if (!TargetPassConfig::addRegAssignAndRewriteOptimized())
+    return false;
+
   // Mitigation for https://github.com/llvm/llvm-project/issues/156428
   // Remove spurious super-register implicit-defs added by LiveVariables.
   // Must run before MachineCopyPropagation to prevent incorrect dead-copy
   // elimination.  See Z80FixupImplicitDefs.cpp for full explanation.
   addPass(createZ80FixupImplicitDefsPass());
-}
 
-void Z80PassConfig::addPostRegAlloc() {
+  // Replace spill slots with PUSH and POP before stack slot coloring merges
+  // them.
   if (getOptLevel() != CodeGenOptLevel::None)
     addPass(createZ80PushPopSpillsPass());
+  return true;
 }
 
 void Z80PassConfig::addPreSched2() {
