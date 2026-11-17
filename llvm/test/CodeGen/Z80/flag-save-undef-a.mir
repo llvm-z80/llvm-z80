@@ -1,0 +1,82 @@
+# RUN: llc -mtriple=sm83 -z80-static-frames=false -run-pass=prolog-epilog \
+# RUN:   -verify-machineinstrs %s -o - | FileCheck %s
+#
+# The spill sits between the DEC that sets the flags and the branch that
+# reads them, so its LDHL SP,e is wrapped in PUSH AF and POP AF. Nothing
+# reads A after the last access, so the PUSH reads A as undefined and that
+# access keeps its kill or dead flag.
+
+--- |
+  define void @kill() { ret void }
+  define void @dead() { ret void }
+...
+---
+name:            kill
+legalized:       true
+regBankSelected: true
+selected:        true
+tracksRegLiveness: true
+noPhis:          true
+isSSA:           false
+noVRegs:         true
+stack:
+  - { id: 0, type: spill-slot, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    successors: %bb.1
+
+  bb.1:
+    successors: %bb.2, %bb.1
+
+    $a = LD_r_n 3
+    $b = LD_r_r killed $a
+    $b = DEC_r killed $b, implicit-def $flags
+    SPILL_GR8 killed $b, %stack.0, 0 :: (store (s8) into %stack.0)
+    JP_NZ_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.2:
+    RET
+...
+---
+name:            dead
+legalized:       true
+regBankSelected: true
+selected:        true
+tracksRegLiveness: true
+noPhis:          true
+isSSA:           false
+noVRegs:         true
+stack:
+  - { id: 0, type: spill-slot, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    successors: %bb.1
+
+  bb.1:
+    successors: %bb.2, %bb.1
+
+    dead $a = LD_r_n 3
+    $b = LD_r_n 3
+    $b = DEC_r killed $b, implicit-def $flags
+    SPILL_GR8 killed $b, %stack.0, 0 :: (store (s8) into %stack.0)
+    JP_NZ_nn %bb.1, implicit $flags
+    JP_nn %bb.2
+
+  bb.2:
+    RET
+...
+
+# CHECK-LABEL: name: kill
+# CHECK:       $b = LD_r_r killed $a
+# CHECK:       $b = DEC_r
+# CHECK-NEXT:  PUSH_AF implicit undef $a, implicit $flags
+# CHECK-NEXT:  LDHL_SP_e
+# CHECK-NEXT:  POP_AF
+
+# CHECK-LABEL: name: dead
+# CHECK:       dead $a = LD_r_n 3
+# CHECK:       $b = DEC_r
+# CHECK-NEXT:  PUSH_AF implicit undef $a, implicit $flags
+# CHECK-NEXT:  LDHL_SP_e
+# CHECK-NEXT:  POP_AF

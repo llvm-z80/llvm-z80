@@ -299,35 +299,15 @@ static bool isFlagsLiveAfter(MachineBasicBlock::iterator MI,
 //===----------------------------------------------------------------------===//
 
 // Emit the PUSH AF of a flag-preserving PUSH AF; ...; POP AF pair.
-//
-// The pair carries A's value across as well as F, so the push genuinely
-// reads A whenever anything reads A after the pop. Calling the read undef
-// would let later passes clobber a value the pop still delivers — the
-// verifier's complaint is instead about the nearest preceding definition
-// being marked dead (when nothing else reads A), so clear that flag. Only
-// when the block holds no definition and A is not live-in is the read
-// genuinely of an undefined register.
 static void emitFlagSavePush(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator InsertBefore,
                              const DebugLoc &DL, const TargetInstrInfo &TII) {
   const TargetRegisterInfo *TRI =
       MBB.getParent()->getSubtarget().getRegisterInfo();
+  bool AHasValue = Z80::hasLiveValue(MBB, InsertBefore, Z80::A, TRI);
   MachineInstrBuilder Push =
       BuildMI(MBB, InsertBefore, DL, TII.get(Z80::PUSH_AF));
-  for (MachineBasicBlock::iterator I = Push->getIterator(); I != MBB.begin();) {
-    --I;
-    if (I->modifiesRegister(Z80::A, TRI)) {
-      if (MachineOperand *MO = I->findRegisterDefOperand(Z80::A, TRI))
-        MO->setIsDead(false);
-      return;
-    }
-    if (MachineOperand *MO =
-            I->findRegisterUseOperand(Z80::A, TRI, /*isKill=*/true)) {
-      MO->setIsKill(false);
-      return;
-    }
-  }
-  if (!MBB.isLiveIn(Z80::A) && !MBB.isLiveIn(Z80::AF))
+  if (!AHasValue)
     Z80::markUndefUse(Push, Z80::A);
 }
 
