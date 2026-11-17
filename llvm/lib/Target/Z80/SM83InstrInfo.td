@@ -112,7 +112,6 @@ let isPseudo = true in
 def CALL_HL : Z80Inst<"call\t__call_hl">, InstCall {
   let InOperandList = (ins);
   let Uses = [HL];
-  let Defs = [A, BC, DE, HL, FLAGS];
 }
 
 //===----------------------------------------------------------------------===//

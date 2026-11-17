@@ -175,7 +175,6 @@ let isPseudo = true in
 def CALL_IY : Z80Inst<"call\t__call_iy">, InstCall {
   let InOperandList = (ins);
   let Uses = [IY];
-  let Defs = [A, BC, DE, HL, IY, FLAGS];
 }
 
 // CALL cc,nn - Sign/parity conditions (Z80-only)
