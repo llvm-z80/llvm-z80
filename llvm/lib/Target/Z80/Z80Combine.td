@@ -6,6 +6,8 @@
 //
 //===---------------------------------------------------------------------===//
 
+include "llvm/Target/GlobalISel/Combine.td"
+
 // srem a, b -> sext (G_Z80_SREM8 a, b)
 def narrow_srem : GICombineRule<
   (defs root:$dst),

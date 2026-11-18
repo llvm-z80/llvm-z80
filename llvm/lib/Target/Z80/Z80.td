@@ -1,4 +1,4 @@
-//===-- Z80.td - Describe the Z80 Target Machine ----------*- tablegen -*-===//
+//===-- Z80.td - Describe the Z80 Target Machine -------------------------===//
 //
 // Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -9,12 +9,10 @@
 //===---------------------------------------------------------------------===//
 
 //===---------------------------------------------------------------------===//
-// Target-independent interfaces which we are implementing
+// Target-independent interfaces
 //===---------------------------------------------------------------------===//
 
 include "llvm/Target/Target.td"
-include "llvm/Target/GlobalISel/Combine.td"
-include "llvm/TableGen/SearchableTable.td"
 
 //===---------------------------------------------------------------------===//
 // Z80 Device Definitions
@@ -28,33 +26,19 @@ include "Z80Schedule.td"
 include "Z80Devices.td"
 include "Z80Combine.td"
 
-def Z80InstrInfoDef : InstrInfo {
-  let guessInstructionProperties = 0;
-}
-
 include "Z80CallingConv.td"
 include "SM83CallingConv.td"
 
+def Z80InstrInfoDef : InstrInfo {
+  let guessInstructionProperties = false;
+}
+
 def Z80AsmWriter : AsmWriter {
- string AsmWriterClassName = "InstPrinter";
- bit isMCAsmWriter = 1;
+  string AsmWriterClassName = "InstPrinter";
 }
 
 def Z80AsmParser : AsmParser {
-  let ShouldEmitMatchRegisterAltName = 1;
-  let ReportMultipleNearMisses = 0;
-  string RegisterPrefix = "";
-  string TokenizingCharacters = "#(),[]*!";
-}
-
-def Z80AsmParserVariantDefault : AsmParserVariant {
-  int Variant = 0;
-  let Name = "generic";
-}
-
-def Z80AsmParserVariantZilog : AsmParserVariant {
-  int Variant = 1;
-  let Name = "zilog";
+  let ShouldEmitMatchRegisterAltName = true;
 }
 
 //===---------------------------------------------------------------------===//
@@ -65,10 +49,7 @@ defm : RemapAllTargetPseudoPointerOperands<GR16>;
 
 def Z80 : Target {
   let InstructionSet         = Z80InstrInfoDef;
+  let AllowRegisterRenaming  = true;
   let AssemblyWriters        = [Z80AsmWriter];
-  let AllowRegisterRenaming = 1;
-
   let AssemblyParsers        = [Z80AsmParser];
-  let AssemblyParserVariants = [Z80AsmParserVariantDefault,
-                                Z80AsmParserVariantZilog];
 }

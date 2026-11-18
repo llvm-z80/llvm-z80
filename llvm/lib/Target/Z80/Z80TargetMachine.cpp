@@ -113,7 +113,7 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, const Triple &TT,
     : CodeGenTargetMachineImpl(T, TT, selectZ80CPU(CPU, TT), FS, Options,
                                Reloc::Static,
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
-      SubTarget(TT, selectZ80CPU(CPU, TT).str(), FS.str(), *this) {
+      SubTarget(TT, selectZ80CPU(CPU, TT), FS, *this) {
   this->TLOF = std::make_unique<Z80TargetObjectFile>();
 
   initAsmInfo();

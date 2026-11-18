@@ -17,7 +17,6 @@ tablegen(LLVM Z80GenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM Z80GenMCPseudoLowering.inc -gen-pseudo-lowering)
 tablegen(LLVM Z80GenRegisterBank.inc -gen-register-bank)
 tablegen(LLVM Z80GenRegisterInfo.inc -gen-register-info)
-tablegen(LLVM Z80GenSearchableTables.inc -gen-searchable-tables)
 tablegen(LLVM Z80GenSubtargetInfo.inc -gen-subtarget)
 
 add_public_tablegen_target(Z80CommonTableGen)
