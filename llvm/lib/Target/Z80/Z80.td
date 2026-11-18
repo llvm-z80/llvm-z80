@@ -39,10 +39,6 @@ def Z80AsmWriter : AsmWriter {
   string AsmWriterClassName = "InstPrinter";
 }
 
-def Z80AsmParser : AsmParser {
-  let ShouldEmitMatchRegisterAltName = true;
-}
-
 //===---------------------------------------------------------------------===//
 // Target Declaration
 //===---------------------------------------------------------------------===//
@@ -53,5 +49,4 @@ def Z80 : Target {
   let InstructionSet         = Z80InstrInfoDef;
   let AllowRegisterRenaming  = true;
   let AssemblyWriters        = [Z80AsmWriter];
-  let AssemblyParsers        = [Z80AsmParser];
 }
