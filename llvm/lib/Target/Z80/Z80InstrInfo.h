@@ -487,7 +487,7 @@ inline bool readsUndef(const MachineInstr &MI, Register Reg) {
 ///
 /// Reserved registers are asked about by membership: LivePhysRegs reports them
 /// as unavailable whether or not they carry anything, so only that answer is
-/// meaningful for FLAGS. For everything else availability is the right test,
+/// meaningful for F. For everything else availability is the right test,
 /// since a pair matters as soon as either half does.
 inline bool isLiveAt(MachineBasicBlock &MBB, MachineBasicBlock::iterator At,
                      MCRegister Reg, const TargetRegisterInfo *TRI) {

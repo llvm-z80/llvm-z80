@@ -734,7 +734,7 @@ class LDrrnn<string mnemonic> : Z80Inst<mnemonic # " $dst, $imm"> {
 class JRcond<Z80CondCode cc> : Inst16<"jr " # cc.Name # ",",
                                       !or(0x20, !shl(cc.cc, 3)), RelativeMode>,
                                InstConditionalBranch {
-  let Uses = [FLAGS];
+  let Uses = [F];
 }
 
 /// JP cc,nn - Conditional absolute jump
@@ -742,7 +742,7 @@ class JRcond<Z80CondCode cc> : Inst16<"jr " # cc.Name # ",",
 class JPcond<Z80CondCode cc> : Inst24<"jp " # cc.Name # ",",
                                       !or(0xC2, !shl(cc.cc, 3)), Imm16Mode>,
                                InstConditionalBranch {
-  let Uses = [FLAGS];
+  let Uses = [F];
 }
 
 /// CALL cc,nn - Conditional call
@@ -751,8 +751,8 @@ class JPcond<Z80CondCode cc> : Inst24<"jp " # cc.Name # ",",
 class CALLcond<Z80CondCode cc> : Inst24<"call " # cc.Name # ",",
                                         !or(0xC4, !shl(cc.cc, 3)), Imm16Mode>,
                                  InstCall {
-  let Uses = [FLAGS];
-  let Defs = [A, BC, DE, HL, IY, FLAGS];
+  let Uses = [F];
+  let Defs = [A, BC, DE, HL, IY, F];
 }
 
 /// RET cc - Conditional return
@@ -761,7 +761,7 @@ class RETcond<Z80CondCode cc> : Inst8<"ret " # cc.Name,
                                       !or(0xC0, !shl(cc.cc, 3))> {
   let isReturn = true;
   let isTerminator = true;
-  let Uses = [FLAGS];
+  let Uses = [F];
 }
 
 /// RST n - Restart to vector
@@ -810,7 +810,7 @@ class INCDECr<string mnemonic, bits<3> lo> : Z80Inst<mnemonic # " $dst"> {
   let OutOperandList = (outs GR8:$dst);
   let InOperandList = (ins GR8:$src);
   let Constraints = "$dst = $src";
-  let Defs = [FLAGS];
+  let Defs = [F];
 }
 
 /// ADD HL,rr - Add a register pair to HL
@@ -847,7 +847,7 @@ class CBRotate<string mnemonic, bits<3> op> : Z80Inst<mnemonic # " $dst"> {
   let OutOperandList = (outs GR8:$dst);
   let InOperandList = (ins GR8:$src);
   let Constraints = "$dst = $src";
-  let Defs = [FLAGS];
+  let Defs = [F];
 }
 
 /// BIT b,r / RES b,r / SET b,r - test, clear or set one bit of a register

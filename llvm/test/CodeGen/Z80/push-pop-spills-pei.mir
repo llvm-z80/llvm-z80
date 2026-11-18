@@ -75,7 +75,7 @@ body:             |
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
     PUSH_HL implicit killed $hl
     $c = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
-    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $c
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $c
     ADJCALLSTACKUP 2, 2, implicit-def $sp, implicit $sp
     $de = SPILL_POP
     RET implicit $de
@@ -130,7 +130,7 @@ body:             |
     SPILL_PUSH killed $de
     ADJCALLSTACKDOWN 0, 0, implicit-def $sp, implicit $sp
     $c = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
-    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $c
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $c
     $de = SPILL_POP
     $b = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
     ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
@@ -166,7 +166,7 @@ body:             |
     SPILL_PUSH killed $de
     PUSH_HL implicit killed $hl
     $c = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
-    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $c
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $c
     ADJCALLSTACKUP 2, 2, implicit-def $sp, implicit $sp
     $b = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
     $de = SPILL_POP
@@ -192,7 +192,7 @@ body:             |
     ADJCALLSTACKDOWN 0, 0, implicit-def $sp, implicit $sp
     SPILL_PUSH killed $de
     DBG_VALUE %stack.0, 0, !10, !DIExpression(), debug-location !11
-    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $f
     $de = SPILL_POP
     ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
     RET implicit $de

@@ -99,15 +99,6 @@ def DEp : Z80RegPair<"alt_de", 0, 10, Ep, Dp>;
 def HLp : Z80RegPair<"alt_hl", 0, 11, Lp, Hp>;
 
 //===----------------------------------------------------------------------===//
-//  Flags pseudo-register
-//===----------------------------------------------------------------------===//
-
-// Standalone FLAGS register for dependency tracking by RA/scheduler.
-// NOT a sub-register of AF to avoid implicit-def $af issues
-// (LDrn/CBRotate implicit-def problem).
-def FLAGS : Z80Reg<"flags", 0>;
-
-//===----------------------------------------------------------------------===//
 //  Register classes
 //===----------------------------------------------------------------------===//
 
@@ -167,10 +158,3 @@ def AFc : Z80Reg16Class<(add AF)>;
 
 // F alone. Inline asm can name F.
 def Fc : Z80Reg8Class<(add F)>;
-
-// Condition code register class for FLAGS dependency tracking.
-// Non-allocatable, CopyCost=-1 prevents copying (like ARM's CCR for CPSR).
-def CCR : RegisterClass<"Z80", [i8], 8, (add FLAGS)> {
-  let CopyCost = -1;
-  let isAllocatable = 0;
-}

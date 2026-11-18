@@ -36,7 +36,7 @@ body:             |
     $c = LD_r_IXd 10, implicit $ix
     DBG_VALUE $c, $noreg, !5, !DIExpression(), debug-location !7
     $a = LD_r_IXd 7, implicit $ix
-    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    XOR_r killed $c, implicit-def $a, implicit-def $f, implicit $a
     RET implicit $a
 ...
 ---

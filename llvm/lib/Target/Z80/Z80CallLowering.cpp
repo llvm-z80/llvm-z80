@@ -58,7 +58,7 @@ static Register widenToPhysRegWidth(MachineIRBuilder &MIRBuilder,
 
 /// INC SP leaves the F byte below the stack.
 static void pushByteInA(MachineIRBuilder &MIRBuilder) {
-  Z80::markUndefUse(MIRBuilder.buildInstr(Z80::PUSH_AF), Z80::FLAGS);
+  Z80::markUndefUse(MIRBuilder.buildInstr(Z80::PUSH_AF), Z80::F);
   MIRBuilder.buildInstr(Z80::INC_SP);
 }
 

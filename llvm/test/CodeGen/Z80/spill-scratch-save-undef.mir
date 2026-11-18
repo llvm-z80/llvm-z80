@@ -16,7 +16,7 @@ stack:
 body:             |
   bb.0:
     liveins: $d, $hl, $sp
-    ASHR16_VAR implicit-def $hl, implicit-def dead $b, implicit-def $flags, implicit $hl, implicit undef $b
+    ASHR16_VAR implicit-def $hl, implicit-def dead $b, implicit-def $f, implicit $hl, implicit undef $b
     SPILL_GR16 killed renamable $hl, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
     $a = LD_r_r killed $d
     $c = LD_r_n 3

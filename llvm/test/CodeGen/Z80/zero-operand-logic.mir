@@ -15,7 +15,7 @@ body:             |
   bb.0:
     liveins: $a
     $l = LD_r_n 0
-    OR_r $l, implicit-def $a, implicit-def $flags, implicit $a
+    OR_r $l, implicit-def $a, implicit-def $f, implicit $a
     LD_IXd_r -2, $a, implicit $ix
     RET
 
@@ -32,8 +32,8 @@ body:             |
   bb.0:
     liveins: $a
     $l = LD_r_n 0
-    OR_r $l, implicit-def $a, implicit-def $flags, implicit $a
-    JP_Z_nn %bb.1, implicit $flags
+    OR_r $l, implicit-def $a, implicit-def $f, implicit $a
+    JP_Z_nn %bb.1, implicit $f
   bb.1:
     RET
 

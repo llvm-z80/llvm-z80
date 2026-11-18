@@ -79,14 +79,14 @@ let mayLoad = false, mayStore = true, hasSideEffects = false in {
 def PUSH_BC : PUSHrr<REGPAIR_BC> { let Uses = [BC]; }
 def PUSH_DE : PUSHrr<REGPAIR_DE> { let Uses = [DE]; }
 def PUSH_HL : PUSHrr<REGPAIR_HL> { let Uses = [HL]; }
-def PUSH_AF : PUSHrr<REGPAIR_AF> { let Uses = [A, FLAGS]; }
+def PUSH_AF : PUSHrr<REGPAIR_AF> { let Uses = [A, F]; }
 }
 
 let mayLoad = true, mayStore = false, hasSideEffects = false in {
 def POP_BC : POPrr<REGPAIR_BC> { let Defs = [BC]; }
 def POP_DE : POPrr<REGPAIR_DE> { let Defs = [DE]; }
 def POP_HL : POPrr<REGPAIR_HL> { let Defs = [HL]; }
-def POP_AF : POPrr<REGPAIR_AF> { let Defs = [A, FLAGS]; }
+def POP_AF : POPrr<REGPAIR_AF> { let Defs = [A, F]; }
 }
 
 //===----------------------------------------------------------------------===//
@@ -95,38 +95,38 @@ def POP_AF : POPrr<REGPAIR_AF> { let Defs = [A, FLAGS]; }
 
 // ALU A,r - The eight accumulator operations against a register.
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def ADD_A_r : ALUAr<"add a,", 0b000> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def ADC_A_r : ALUAr<"adc a,", 0b001> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
-def SUB_r   : ALUAr<"sub",    0b010> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def SBC_A_r : ALUAr<"sbc a,", 0b011> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
-def AND_r   : ALUAr<"and",    0b100> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def XOR_r   : ALUAr<"xor",    0b101> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def OR_r    : ALUAr<"or",     0b110> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def CP_r    : ALUAr<"cp",     0b111> { let Uses = [A]; let Defs = [FLAGS]; }
+def ADD_A_r : ALUAr<"add a,", 0b000> { let Uses = [A]; let Defs = [A, F]; }
+def ADC_A_r : ALUAr<"adc a,", 0b001> { let Uses = [A, F]; let Defs = [A, F]; }
+def SUB_r   : ALUAr<"sub",    0b010> { let Uses = [A]; let Defs = [A, F]; }
+def SBC_A_r : ALUAr<"sbc a,", 0b011> { let Uses = [A, F]; let Defs = [A, F]; }
+def AND_r   : ALUAr<"and",    0b100> { let Uses = [A]; let Defs = [A, F]; }
+def XOR_r   : ALUAr<"xor",    0b101> { let Uses = [A]; let Defs = [A, F]; }
+def OR_r    : ALUAr<"or",     0b110> { let Uses = [A]; let Defs = [A, F]; }
+def CP_r    : ALUAr<"cp",     0b111> { let Uses = [A]; let Defs = [F]; }
 }
 
 // ALU A,(HL) - the same operations against the byte HL points at.
 let mayLoad = true, mayStore = false, hasSideEffects = false in {
-def ADD_A_HLind : Inst8<"add a,(hl)", 0x86> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
-def ADC_A_HLind : Inst8<"adc a,(hl)", 0x8E> { let Uses = [A, HL, FLAGS]; let Defs = [A, FLAGS]; }
-def SUB_HLind : Inst8<"sub (hl)", 0x96> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
-def SBC_A_HLind : Inst8<"sbc a,(hl)", 0x9E> { let Uses = [A, HL, FLAGS]; let Defs = [A, FLAGS]; }
-def AND_HLind : Inst8<"and (hl)", 0xA6> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
-def XOR_HLind : Inst8<"xor (hl)", 0xAE> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
-def OR_HLind : Inst8<"or (hl)", 0xB6> { let Uses = [A, HL]; let Defs = [A, FLAGS]; }
-def CP_HLind : Inst8<"cp (hl)", 0xBE> { let Uses = [A, HL]; let Defs = [FLAGS]; }
+def ADD_A_HLind : Inst8<"add a,(hl)", 0x86> { let Uses = [A, HL]; let Defs = [A, F]; }
+def ADC_A_HLind : Inst8<"adc a,(hl)", 0x8E> { let Uses = [A, HL, F]; let Defs = [A, F]; }
+def SUB_HLind : Inst8<"sub (hl)", 0x96> { let Uses = [A, HL]; let Defs = [A, F]; }
+def SBC_A_HLind : Inst8<"sbc a,(hl)", 0x9E> { let Uses = [A, HL, F]; let Defs = [A, F]; }
+def AND_HLind : Inst8<"and (hl)", 0xA6> { let Uses = [A, HL]; let Defs = [A, F]; }
+def XOR_HLind : Inst8<"xor (hl)", 0xAE> { let Uses = [A, HL]; let Defs = [A, F]; }
+def OR_HLind : Inst8<"or (hl)", 0xB6> { let Uses = [A, HL]; let Defs = [A, F]; }
+def CP_HLind : Inst8<"cp (hl)", 0xBE> { let Uses = [A, HL]; let Defs = [F]; }
 }
 
 // ALU A,n - the same operations against an immediate.
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def ADD_A_n : Inst16<"add a,", 0xC6, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def ADC_A_n : Inst16<"adc a,", 0xCE, Imm8Mode> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
-def SUB_n : Inst16<"sub", 0xD6, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def SBC_A_n : Inst16<"sbc a,", 0xDE, Imm8Mode> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
-def AND_n : Inst16<"and", 0xE6, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def XOR_n : Inst16<"xor", 0xEE, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def OR_n : Inst16<"or", 0xF6, Imm8Mode> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def CP_n : Inst16<"cp", 0xFE, Imm8Mode> { let Uses = [A]; let Defs = [FLAGS]; }
+def ADD_A_n : Inst16<"add a,", 0xC6, Imm8Mode> { let Uses = [A]; let Defs = [A, F]; }
+def ADC_A_n : Inst16<"adc a,", 0xCE, Imm8Mode> { let Uses = [A, F]; let Defs = [A, F]; }
+def SUB_n : Inst16<"sub", 0xD6, Imm8Mode> { let Uses = [A]; let Defs = [A, F]; }
+def SBC_A_n : Inst16<"sbc a,", 0xDE, Imm8Mode> { let Uses = [A, F]; let Defs = [A, F]; }
+def AND_n : Inst16<"and", 0xE6, Imm8Mode> { let Uses = [A]; let Defs = [A, F]; }
+def XOR_n : Inst16<"xor", 0xEE, Imm8Mode> { let Uses = [A]; let Defs = [A, F]; }
+def OR_n : Inst16<"or", 0xF6, Imm8Mode> { let Uses = [A]; let Defs = [A, F]; }
+def CP_n : Inst16<"cp", 0xFE, Imm8Mode> { let Uses = [A]; let Defs = [F]; }
 }
 
 // INC/DEC r - 8-bit INC/DEC set all flags except carry
@@ -137,8 +137,8 @@ def DEC_r : INCDECr<"dec", 0b101>;
 
 // The (HL) forms occupy the register field slot that names no register.
 let mayLoad = true, mayStore = true, hasSideEffects = false in {
-def INC_HLind : Inst8<"inc (hl)", 0x34> { let Uses = [HL]; let Defs = [FLAGS]; }
-def DEC_HLind : Inst8<"dec (hl)", 0x35> { let Uses = [HL]; let Defs = [FLAGS]; }
+def INC_HLind : Inst8<"inc (hl)", 0x34> { let Uses = [HL]; let Defs = [F]; }
+def DEC_HLind : Inst8<"dec (hl)", 0x35> { let Uses = [HL]; let Defs = [F]; }
 }
 
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
@@ -147,10 +147,10 @@ let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 //  General-Purpose Arithmetic and CPU Control (common subset)
 //===----------------------------------------------------------------------===//
 
-def DAA : Inst8<"daa", 0x27> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
-def CPL : Inst8<"cpl", 0x2F> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def CCF : Inst8<"ccf", 0x3F> { let Uses = [FLAGS]; let Defs = [FLAGS]; }
-def SCF : Inst8<"scf", 0x37> { let Defs = [FLAGS]; }
+def DAA : Inst8<"daa", 0x27> { let Uses = [A, F]; let Defs = [A, F]; }
+def CPL : Inst8<"cpl", 0x2F> { let Uses = [A]; let Defs = [A, F]; }
+def CCF : Inst8<"ccf", 0x3F> { let Uses = [F]; let Defs = [F]; }
+def SCF : Inst8<"scf", 0x37> { let Defs = [F]; }
 def NOP : Inst8<"nop", 0x00>;
 }
 def HALT : Inst8<"halt", 0x76>;
@@ -163,9 +163,9 @@ def EI : Inst8<"ei", 0xFB>;
 
 // ADD HL,ss - Uses HL and the source register pair, defines HL (sets carry, H)
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def ADD_HL_rr : ADDHLrr<"add"> { let Uses = [HL]; let Defs = [HL, FLAGS]; }
-def ADD_HL_HL : Inst8<"add hl,hl", 0x29> { let Uses = [HL]; let Defs = [HL, FLAGS]; }
-def ADD_HL_SP : Inst8<"add hl,sp", 0x39> { let Uses = [HL, SP]; let Defs = [HL, FLAGS]; }
+def ADD_HL_rr : ADDHLrr<"add"> { let Uses = [HL]; let Defs = [HL, F]; }
+def ADD_HL_HL : Inst8<"add hl,hl", 0x29> { let Uses = [HL]; let Defs = [HL, F]; }
+def ADD_HL_SP : Inst8<"add hl,sp", 0x39> { let Uses = [HL, SP]; let Defs = [HL, F]; }
 }
 
 // INC/DEC ss
@@ -187,8 +187,8 @@ def DEC_SP : Inst8<"dec sp", 0x3B> { let Uses = [SP]; let Defs = [SP]; }
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def RLC_r : CBRotate<"rlc", 0b000>;
 def RRC_r : CBRotate<"rrc", 0b001>;
-def RL_r : CBRotate<"rl", 0b010> { let Uses = [FLAGS]; let Defs = [FLAGS]; }
-def RR_r : CBRotate<"rr", 0b011> { let Uses = [FLAGS]; let Defs = [FLAGS]; }
+def RL_r : CBRotate<"rl", 0b010> { let Uses = [F]; let Defs = [F]; }
+def RR_r : CBRotate<"rr", 0b011> { let Uses = [F]; let Defs = [F]; }
 def SLA_r : CBRotate<"sla", 0b100>;
 def SRA_r : CBRotate<"sra", 0b101>;
 def SRL_r : CBRotate<"srl", 0b111>;
@@ -197,22 +197,22 @@ def SRL_r : CBRotate<"srl", 0b111>;
 // Accumulator rotates — read and modify A
 // RLCA/RRCA: don't read carry. RLA/RRA: read carry (rotate through carry).
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def RLCA : Inst8<"rlca", 0x07> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def RRCA : Inst8<"rrca", 0x0F> { let Uses = [A]; let Defs = [A, FLAGS]; }
-def RLA  : Inst8<"rla",  0x17> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
-def RRA  : Inst8<"rra",  0x1F> { let Uses = [A, FLAGS]; let Defs = [A, FLAGS]; }
+def RLCA : Inst8<"rlca", 0x07> { let Uses = [A]; let Defs = [A, F]; }
+def RRCA : Inst8<"rrca", 0x0F> { let Uses = [A]; let Defs = [A, F]; }
+def RLA  : Inst8<"rla",  0x17> { let Uses = [A, F]; let Defs = [A, F]; }
+def RRA  : Inst8<"rra",  0x1F> { let Uses = [A, F]; let Defs = [A, F]; }
 }
 
 // The same rotates and shifts against the byte HL points at. RL and RR read
 // the carry; the rest only write it.
 let mayLoad = true, mayStore = true, hasSideEffects = false in {
-def RLC_HLind : InstCB<"rlc (hl)", 0x06> { let Uses = [HL]; let Defs = [FLAGS]; }
-def RRC_HLind : InstCB<"rrc (hl)", 0x0E> { let Uses = [HL]; let Defs = [FLAGS]; }
-def RL_HLind : InstCB<"rl (hl)", 0x16> { let Uses = [HL, FLAGS]; let Defs = [FLAGS]; }
-def RR_HLind : InstCB<"rr (hl)", 0x1E> { let Uses = [HL, FLAGS]; let Defs = [FLAGS]; }
-def SLA_HLind : InstCB<"sla (hl)", 0x26> { let Uses = [HL]; let Defs = [FLAGS]; }
-def SRA_HLind : InstCB<"sra (hl)", 0x2E> { let Uses = [HL]; let Defs = [FLAGS]; }
-def SRL_HLind : InstCB<"srl (hl)", 0x3E> { let Uses = [HL]; let Defs = [FLAGS]; }
+def RLC_HLind : InstCB<"rlc (hl)", 0x06> { let Uses = [HL]; let Defs = [F]; }
+def RRC_HLind : InstCB<"rrc (hl)", 0x0E> { let Uses = [HL]; let Defs = [F]; }
+def RL_HLind : InstCB<"rl (hl)", 0x16> { let Uses = [HL, F]; let Defs = [F]; }
+def RR_HLind : InstCB<"rr (hl)", 0x1E> { let Uses = [HL, F]; let Defs = [F]; }
+def SLA_HLind : InstCB<"sla (hl)", 0x26> { let Uses = [HL]; let Defs = [F]; }
+def SRA_HLind : InstCB<"sra (hl)", 0x2E> { let Uses = [HL]; let Defs = [F]; }
+def SRL_HLind : InstCB<"srl (hl)", 0x3E> { let Uses = [HL]; let Defs = [F]; }
 }
 
 //===----------------------------------------------------------------------===//
@@ -221,7 +221,7 @@ def SRL_HLind : InstCB<"srl (hl)", 0x3E> { let Uses = [HL]; let Defs = [FLAGS]; 
 
 // The bit number and the register are both operands.
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def BIT_b_r : BITbr<"bit", 0b01> { let Defs = [FLAGS]; }
+def BIT_b_r : BITbr<"bit", 0b01> { let Defs = [F]; }
 def RES_b_r : RESSETbr<"res", 0b10>;
 def SET_b_r : RESSETbr<"set", 0b11>;
 }
@@ -298,7 +298,7 @@ def JP_HLind : Inst8<"jp (hl)", 0xE9>, InstUnconditionalBranch {
 // Argument registers are added dynamically as implicit uses in lowerCall.
 // IY: caller-saved on Z80; harmless on SM83 where IY is reserved.
 def CALL_nn : Inst24<"call", 0xCD, Imm16Mode>, InstCall {
-  let Defs = [A, BC, DE, HL, IY, FLAGS];
+  let Defs = [A, BC, DE, HL, IY, F];
 }
 
 // CALL cc,nn (NZ/Z/NC/C only — shared with SM83)

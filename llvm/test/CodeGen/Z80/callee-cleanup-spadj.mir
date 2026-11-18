@@ -31,7 +31,7 @@ body:             |
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
     PUSH_HL implicit killed $hl
     $bc = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
-    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $bc
+    CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $bc
     $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     ADJCALLSTACKUP 2, 2, implicit-def $sp, implicit $sp
     RET implicit $de

@@ -15,7 +15,7 @@ stack:
 body:             |
   bb.0:
     liveins: $c, $d, $sp
-    LDHL_SP_e 0, implicit-def $hl, implicit-def $flags, implicit $sp
+    LDHL_SP_e 0, implicit-def $hl, implicit-def $f, implicit $sp
     LD_HLind_r killed $c, implicit $hl :: (store (s16) into %stack.0, align 1)
     $hl = INC_rr $hl
     LD_HLind_r undef $b, implicit $hl :: (store (s16) into %stack.0, align 1)

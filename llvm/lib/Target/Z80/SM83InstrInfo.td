@@ -22,7 +22,7 @@ let Predicates = [IsSM83], DecoderNamespace = "SM83" in {
 // SM83 uses it as a nibble swap instruction.
 def SWAP_A : InstCB<"swap a", 0x37> {
   let Uses = [A];
-  let Defs = [A, FLAGS];
+  let Defs = [A, F];
 }
 
 // SM83 RETI - Return from interrupt (opcode 0xD9)
@@ -35,7 +35,7 @@ def SM83_RETI : Inst8<"reti", 0xD9>, InstReturn;
 // sdasgb syntax: ldhl sp,#imm
 def LDHL_SP_e : Inst16SImm<"ldhl sp,", 0xF8> {
   let Uses = [SP];
-  let Defs = [HL, FLAGS];
+  let Defs = [HL, F];
   let mayLoad = 0;
   let mayStore = 0;
   let hasSideEffects = 0;
@@ -45,7 +45,7 @@ def LDHL_SP_e : Inst16SImm<"ldhl sp,", 0xF8> {
 // sdasgb syntax: add sp,#imm
 def ADD_SP_e : Inst16SImm<"add sp,", 0xE8> {
   let Uses = [SP];
-  let Defs = [SP, FLAGS];
+  let Defs = [SP, F];
 }
 
 // LD (nn),A - Store A to direct address (opcode 0xEA)
@@ -112,7 +112,7 @@ let isPseudo = true in
 def CALL_HL : Z80Inst<"call\t__call_hl">, InstCall {
   let InOperandList = (ins);
   let Uses = [HL];
-  let Defs = [A, BC, DE, HL, FLAGS];
+  let Defs = [A, BC, DE, HL, F];
 }
 
 //===----------------------------------------------------------------------===//

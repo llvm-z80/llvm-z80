@@ -1019,7 +1019,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           // copyPhysReg handles IX/IY to BC/DE via PUSH/POP.
           RC = &Z80::GR16RegClass;
         } else {
-          // F, FLAGS, shadow registers — use LLT type.
+          // F, shadow registers — use LLT type.
           LLT Ty = MRI.getType(DstReg);
           RC = (Ty.isValid() && Ty.getSizeInBits() <= 8) ? &Z80::GR8RegClass
                                                          : &Z80::GR16RegClass;

@@ -7,8 +7,8 @@
 # CHECK-LABEL: name: two_branches
 # CHECK:       bb.0:
 # CHECK-NEXT:    successors: %bb.1(
-# CHECK:         RET_Z implicit $flags
-# CHECK-NEXT:    RET_C implicit $flags
+# CHECK:         RET_Z implicit $f
+# CHECK-NEXT:    RET_C implicit $f
 # CHECK:       bb.1:
 # CHECK:         $a = LD_r_r $l
 # CHECK-NOT:     JR_e
@@ -22,9 +22,9 @@ body: |
     successors: %bb.3, %bb.2, %bb.1
     liveins: $a, $l
 
-    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
-    JR_Z_e %bb.3, implicit $flags
-    JR_C_e %bb.2, implicit $flags
+    OR_r $a, implicit-def $a, implicit-def $f, implicit $a
+    JR_Z_e %bb.3, implicit $f
+    JR_C_e %bb.2, implicit $f
 
   bb.1:
     successors: %bb.3
@@ -45,7 +45,7 @@ body: |
 # CHECK-LABEL: name: over_tail_call
 # CHECK:       bb.0:
 # CHECK-NEXT:    successors: %bb.2(
-# CHECK:         TCRETURN_NZ_nn &g, implicit $sp, implicit $flags, implicit $hl
+# CHECK:         TCRETURN_NZ_nn &g, implicit $sp, implicit $f, implicit $hl
 # CHECK-NOT:   bb.1:
 # CHECK:       bb.2:
 name: over_tail_call
@@ -55,13 +55,13 @@ body: |
     successors: %bb.2, %bb.1
     liveins: $a, $hl
 
-    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
-    JR_Z_e %bb.2, implicit $flags
+    OR_r $a, implicit-def $a, implicit-def $f, implicit $a
+    JR_Z_e %bb.2, implicit $f
 
   bb.1:
     liveins: $hl
 
-    TCRETURN_nn &g, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $sp, implicit $hl
+    TCRETURN_nn &g, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $sp, implicit $hl
 
   bb.2:
     RET
@@ -70,7 +70,7 @@ body: |
 # The trampoline collapses into JP Z, which then becomes RET Z.
 # CHECK-LABEL: name: trampoline
 # CHECK:       bb.0:
-# CHECK:         RET_Z implicit $flags
+# CHECK:         RET_Z implicit $f
 # CHECK-NOT:   bb.1:
 # CHECK:       bb.2:
 name: trampoline
@@ -80,8 +80,8 @@ body: |
     successors: %bb.2, %bb.1
     liveins: $a, $l
 
-    OR_r $a, implicit-def $a, implicit-def $flags, implicit $a
-    JR_NZ_e %bb.2, implicit $flags
+    OR_r $a, implicit-def $a, implicit-def $f, implicit $a
+    JR_NZ_e %bb.2, implicit $f
 
   bb.1:
     successors: %bb.3

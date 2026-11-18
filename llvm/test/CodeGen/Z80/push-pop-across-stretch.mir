@@ -15,7 +15,7 @@ body:             |
   bb.0:
     liveins: $bc, $sp
     PUSH_BC implicit $bc, implicit-def $sp, implicit $sp
-    LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
+    LDHL_SP_e 6, implicit-def $hl, implicit-def $f, implicit $sp
     $a = LD_r_HLind implicit $hl
     POP_BC implicit-def $bc, implicit-def $sp, implicit $sp
     RET implicit $bc, implicit $a
@@ -34,7 +34,7 @@ body:             |
   bb.0:
     liveins: $hl, $sp
     PUSH_HL implicit $hl, implicit-def $sp, implicit $sp
-    LDHL_SP_e 6, implicit-def $hl, implicit-def $flags, implicit $sp
+    LDHL_SP_e 6, implicit-def $hl, implicit-def $f, implicit $sp
     $a = LD_r_HLind implicit $hl
     POP_HL implicit-def $hl, implicit-def $sp, implicit $sp
     RET implicit $hl, implicit $a

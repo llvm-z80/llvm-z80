@@ -111,8 +111,8 @@ BitVector Z80RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // Reserve the stack pointer
   Reserved.set(Z80::SP);
 
-  // Reserve FLAGS: non-allocatable status register for dependency tracking
-  Reserved.set(Z80::FLAGS);
+  // Reserve F. Instructions use it only to track the flags.
+  Reserved.set(Z80::F);
 
   // Always reserve IX and IY (16-bit).
   // IX is the frame pointer when hasFP, and stack frame code uses it
@@ -281,17 +281,17 @@ bool Z80RegisterInfo::saveScavengerRegister(MachineBasicBlock &MBB,
 }
 
 //===----------------------------------------------------------------------===//
-// FLAGS liveness helper
+// F liveness helper
 //===----------------------------------------------------------------------===//
 
-// Check if the FLAGS register is live after MI.
-// Scans forward: if an instruction reads FLAGS before any instruction writes
-// FLAGS, then FLAGS is live. Conditional branches (JP cc, JR cc) are
-// terminators with Uses = [FLAGS], so they are caught by readsRegister.
-// Also checks successor blocks for FLAGS live-in.
+// Check if the F register is live after MI.
+// Scans forward: if an instruction reads F before any instruction writes
+// F, then F is live. Conditional branches (JP cc, JR cc) are
+// terminators with Uses = [F], so they are caught by readsRegister.
+// Also checks successor blocks for F live-in.
 static bool isFlagsLiveAfter(MachineBasicBlock::iterator MI,
                              const TargetRegisterInfo *TRI) {
-  return Z80::isLiveAt(*MI->getParent(), std::next(MI), Z80::FLAGS, TRI);
+  return Z80::isLiveAt(*MI->getParent(), std::next(MI), Z80::F, TRI);
 }
 
 //===----------------------------------------------------------------------===//
@@ -318,7 +318,7 @@ using Z80::emitHLSavePush;
 // Emit: PUSH IX; POP HL; LD <TempReg>,offset; ADD HL,<TempReg>
 // After this, HL = IX + offset. TempReg must be BC or DE.
 // If PreserveFlags is true, wraps ADD HL with PUSH AF/POP AF to preserve
-// the FLAGS register. This is safe because no instruction between PUSH AF
+// the F register. This is safe because no instruction between PUSH AF
 // and POP AF modifies A (PUSH IX, POP HL, LD rr,nn don't touch A).
 static void emitLargeOffsetAddr(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator InsertBefore,
@@ -604,9 +604,9 @@ static void expandReloadGR16LargeOffset(MachineBasicBlock &MBB,
 // Emit code to compute HL = SP_at_instruction + Offset.
 // SPDelta accounts for PUSHes emitted by the CALLER before this point.
 // PreserveFlags adds a SEPARATE PUSH AF/POP AF inside this function to
-// protect FLAGS from ADD HL,SP. These are independent SP shifts:
+// protect F from ADD HL,SP. These are independent SP shifts:
 //   - SPDelta: caller's PUSHes (e.g., NeedSaveAF, NeedSaveHL)
-//   - PreserveFlags +2: this function's own PUSH AF for FLAGS preservation
+//   - PreserveFlags +2: this function's own PUSH AF for F preservation
 //
 // SM83 optimization: uses LDHL SP,e (0xF8) when the adjusted offset fits
 // in a signed 8-bit range (-128..+127). This replaces the 2-instruction

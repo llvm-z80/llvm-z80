@@ -219,11 +219,11 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   // Handle reading SP into HL, IX, IY
   // Z80 has no "LD HL,SP" so we use "LD reg,0; ADD reg,SP"
-  // ADD rr,SP clobbers FLAGS (carry). If FLAGS is live, we wrap with
+  // ADD rr,SP clobbers F (carry). If F is live, we wrap with
   // PUSH AF/POP AF and compensate the offset (+2) for the changed SP.
   if (SrcReg == Z80::SP) {
     const TargetRegisterInfo *TRI = STI->getRegisterInfo();
-    auto FlagsLQ = MBB.computeRegisterLiveness(TRI, Z80::FLAGS, I);
+    auto FlagsLQ = MBB.computeRegisterLiveness(TRI, Z80::F, I);
     bool FlagsLive = (FlagsLQ != MachineBasicBlock::LQR_Dead);
     int SPComp = FlagsLive ? 2 : 0; // SP compensation for PUSH AF
 
@@ -256,7 +256,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     }
     // SP → BC or DE: Z80 has no ADD BC,SP / ADD DE,SP, so route through HL.
     // PUSH HL; LD HL,N; ADD HL,SP; LD r,H; LD r,L; POP HL
-    // N compensates for PUSH HL (and PUSH AF if FLAGS is live).
+    // N compensates for PUSH HL (and PUSH AF if F is live).
     if (DestReg == Z80::BC || DestReg == Z80::DE) {
       Register DstHi = (DestReg == Z80::BC) ? Z80::B : Z80::D;
       Register DstLo = (DestReg == Z80::BC) ? Z80::C : Z80::E;
@@ -935,21 +935,21 @@ bool Z80InstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
 
   const TargetRegisterInfo *TRI = STI->getRegisterInfo();
   for (auto I = std::next(Def->getIterator()); &*I != &CmpInstr; ++I)
-    if (I->modifiesRegister(Z80::FLAGS, TRI) || I->isCall() ||
+    if (I->modifiesRegister(Z80::F, TRI) || I->isCall() ||
         I->hasUnmodeledSideEffects() ||
-        (FlagForm && I->readsRegister(Z80::FLAGS, TRI)))
+        (FlagForm && I->readsRegister(Z80::F, TRI)))
       return false;
 
   bool Redefined = false;
   for (MachineBasicBlock::iterator I = std::next(CmpInstr.getIterator()),
                                    E = MBB.end();
        I != E && !Redefined; ++I) {
-    if (I->readsRegister(Z80::FLAGS, TRI) && !isAnsweredBy(*I, Kind))
+    if (I->readsRegister(Z80::F, TRI) && !isAnsweredBy(*I, Kind))
       return false;
-    Redefined = I->modifiesRegister(Z80::FLAGS, TRI);
+    Redefined = I->modifiesRegister(Z80::F, TRI);
   }
   if (!Redefined && any_of(MBB.successors(), [](const MachineBasicBlock *S) {
-        return S->isLiveIn(Z80::FLAGS);
+        return S->isLiveIn(Z80::F);
       }))
     return false;
 
@@ -977,7 +977,7 @@ bool Z80InstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
     Def->eraseFromParent();
     return true;
   }
-  if (MachineOperand *FlagsDef = Def->findRegisterDefOperand(Z80::FLAGS, TRI))
+  if (MachineOperand *FlagsDef = Def->findRegisterDefOperand(Z80::F, TRI))
     FlagsDef->setIsDead(false);
   return true;
 }
@@ -1371,7 +1371,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   case Z80::CMP16_FLAGS: {
     // 8-bit SUB/SBC chain for 16-bit unsigned comparison.
     // LD A,lhs_lo; SUB rhs_lo; LD A,lhs_hi; SBC A,rhs_hi
-    // Does NOT clobber HL/DE. Only clobbers A and FLAGS.
+    // Does NOT clobber HL/DE. Only clobbers A and F.
     Register LHSReg = MI.getOperand(0).getReg();
     Register RHSReg = MI.getOperand(1).getReg();
     Register LhsLo = TRI->getSubReg(LHSReg, Z80::sub_lo);
@@ -1456,7 +1456,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       Z80::buildAlu8(MBB, MI, DL, *this, Z80::SBC_A_r, Hi);
       Z80::buildLD8(MBB, MI, DL, *this, Z80::H, Z80::A);
     } else {
-      // Z80: AND A; SBC HL,rr — atomic to prevent FLAGS clobbering.
+      // Z80: AND A; SBC HL,rr — atomic to prevent F clobbering.
       Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Z80::A),
                         Z80::A);
       Z80::buildAdcSbcHL(MBB, MI, DL, *this, Z80::SBC_HL_rr, RHS);
