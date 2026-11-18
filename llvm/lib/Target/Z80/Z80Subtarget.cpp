@@ -1,13 +1,14 @@
-//===-- Z80Subtarget.cpp - Z80 Subtarget Information ----------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// This file implements the Z80 specific subclass of TargetSubtargetInfo.
-//
+///
+/// \file
+/// This file implements the Z80 specific subclass of TargetSubtargetInfo.
+///
 //===----------------------------------------------------------------------===//
 
 #include "Z80Subtarget.h"
@@ -16,17 +17,17 @@
 #include "Z80CallLowering.h"
 #include "Z80InstructionSelector.h"
 
+using namespace llvm;
+
 #define DEBUG_TYPE "z80-subtarget"
 
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "Z80GenSubtargetInfo.inc"
 
-using namespace llvm;
-
 Z80Subtarget::Z80Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
                            const Z80TargetMachine &TM)
-    : Z80GenSubtargetInfo(TT, CPU, /* TuneCPU */ CPU, FS),
+    : Z80GenSubtargetInfo(TT, CPU, /*TuneCPU=*/CPU, FS),
       InstrInfo(initializeSubtargetDependencies(CPU, FS)), TLInfo(TM, *this),
       Legalizer(*this),
       InstSelector(createZ80InstructionSelector(TM, *this, RegBankInfo)),
@@ -43,6 +44,6 @@ Z80Subtarget::Z80Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
 
 Z80Subtarget &Z80Subtarget::initializeSubtargetDependencies(StringRef CPU,
                                                             StringRef FS) {
-  ParseSubtargetFeatures(CPU, /* TuneCPU */ CPU, FS);
+  ParseSubtargetFeatures(CPU, /*TuneCPU=*/CPU, FS);
   return *this;
 }

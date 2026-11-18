@@ -1,12 +1,14 @@
-//===-- Z80Features.td - Z80 Features ------------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-//===---------------------------------------------------------------------===//
+//===----------------------------------------------------------------------===//
+//
 // Z80 Features and Subtarget Definitions
-//===---------------------------------------------------------------------===//
+//
+//===----------------------------------------------------------------------===//
 
 // Default Z80 instructions
 def FeatureZ80
