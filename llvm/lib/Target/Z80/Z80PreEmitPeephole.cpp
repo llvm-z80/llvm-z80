@@ -1343,7 +1343,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // When a 16-bit constant is stored to the stack via a register pair,
     // replace with immediate stores to (HL). Saves 1 byte (8B → 7B) per
     // occurrence and frees the register pair.
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE;) {
         MachineInstr &MI = *MII;
@@ -1422,7 +1422,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // non-HL-modifying instructions between them, replace the second LDHL
     // with INC HL or DEC HL. Saves 1 byte (2B → 1B) per occurrence.
     // Common in consecutive byte-at-a-time stack initialization.
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE; ++MII) {
         if (MII->getOpcode() != Z80::LDHL_SP_e)
@@ -1510,7 +1510,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     //   LD r,(HL); INC HL → LD A,(HL+); LD r,A   (2B → 2B, saves 4T)
     //   LD (HL),r; INC HL → LD A,r; LD (HL+),A   (2B → 2B, saves 4T)
     //   (same for DEC HL variants with HL-/HL-)
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE;) {
         MachineInstr &MI = *MII;
@@ -1705,7 +1705,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // On SM83, stack access uses LDHL SP,#N; LD (HL),r / LD (HL),#imm.
     // Track what values (register or immediate) are at each stack offset,
     // then forward to subsequent loads to eliminate redundant LDHL sequences.
-    if (MF.getSubtarget<Z80Subtarget>().hasSM83()) {
+    if (MF.getSubtarget<Z80Subtarget>().isSM83()) {
       // Each slot can hold either a register value or an immediate.
       struct SlotVal {
         bool IsImm = false;
@@ -2270,7 +2270,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
   // (redundant store elimination keys slot identity on them), so the
   // address-reuse rewrite must not obscure those first.
   for (MachineBasicBlock &MBB : MF) {
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       Changed |= hoistLDHLOutOfFlagSave(MBB, TII, TRI);
       Changed |= reuseLDHLAddress(MBB, TII, TRI);
       // After address reuse: it creates the INC HL neighbors these fuse with.
@@ -2283,7 +2283,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // The store itself costs the same either way, so the LD A,n that pays
     // for the shorter stores is pure added time: a size-for-speed trade,
     // which is the level that takes those.
-    if (!STI.hasSM83() && MF.getFunction().hasMinSize())
+    if (!STI.isSM83() && MF.getFunction().hasMinSize())
       Changed |= materializeIXConstantStores(MBB, TII, TRI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
     Changed |= elidePushPopAcrossStretch(MBB, TII, TRI);

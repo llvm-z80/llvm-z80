@@ -86,11 +86,11 @@ const MCPhysReg *
 Z80RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   const auto &STI = MF->getSubtarget<Z80Subtarget>();
   if (MF->getFunction().hasFnAttribute("interrupt")) {
-    if (STI.hasSM83())
+    if (STI.isSM83())
       return SM83_Interrupt_CSR_SaveList;
     return Z80_Interrupt_CSR_SaveList;
   }
-  if (STI.hasSM83())
+  if (STI.isSM83())
     return SM83_CSR_SaveList;
   return Z80_CSR_SaveList;
 }
@@ -99,7 +99,7 @@ const uint32_t *
 Z80RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                       CallingConv::ID CallingConv) const {
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
-  if (STI.hasSM83())
+  if (STI.isSM83())
     return SM83_CSR_RegMask;
   return Z80_CSR_RegMask;
 }
@@ -123,14 +123,14 @@ BitVector Z80RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
   // IXH/IXL/IYH/IYL are undocumented Z80 half-index registers.
   // Only available when FeatureUndocumented is enabled; absent on SM83.
-  if (!STI.hasUndocumented() || STI.hasSM83()) {
+  if (!STI.hasUndocumented() || STI.isSM83()) {
     Reserved.set(Z80::IXH);
     Reserved.set(Z80::IXL);
     Reserved.set(Z80::IYH);
     Reserved.set(Z80::IYL);
   }
 
-  if (STI.hasSM83()) {
+  if (STI.isSM83()) {
     // SM83 has no I/R or shadow registers.
     Reserved.set(Z80::I);
     Reserved.set(Z80::R);
@@ -623,7 +623,7 @@ static void emitSPRelativeAddr(MachineBasicBlock &MBB,
   // SM83: use LDHL SP,e if adjusted offset fits in signed 8-bit.
   // This replaces 2-instruction LD HL,nn + ADD HL,SP with a single LDHL SP,e.
   const auto &STI = MBB.getParent()->getSubtarget<Z80Subtarget>();
-  if (STI.hasSM83() && AdjOffset >= -128 && AdjOffset <= 127) {
+  if (STI.isSM83() && AdjOffset >= -128 && AdjOffset <= 127) {
     if (PreserveFlags)
       emitFlagSavePush(MBB, InsertBefore, DL, TII);
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::LDHL_SP_e))
@@ -980,7 +980,7 @@ static bool rewriteStaticSlotAccess(MachineBasicBlock::iterator MI,
   MachineBasicBlock &MBB = *MI->getParent();
   MachineFunction &MF = *MI->getMF();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
-  const bool IsSM83 = MF.getSubtarget<Z80Subtarget>().hasSM83();
+  const bool IsSM83 = MF.getSubtarget<Z80Subtarget>().isSM83();
   DebugLoc DL = MI->getDebugLoc();
   unsigned Opc = MI->getOpcode();
   auto NextIt = std::next(MI);
@@ -1269,7 +1269,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
         emitSlotAddr(MBB, MI, DL, TII, false, Offset, SPDelta, PreserveFlags);
         if (DstReg == Z80::DE) {
           const auto &STI = MF.getSubtarget<Z80Subtarget>();
-          if (STI.hasSM83()) {
+          if (STI.isSM83()) {
             Z80::buildLD8(MBB, MI, DL, TII, Z80::D, Z80::H);
             Z80::buildLD8(MBB, MI, DL, TII, Z80::E, Z80::L);
           } else {

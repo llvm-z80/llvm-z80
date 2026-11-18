@@ -10,30 +10,12 @@
 
 // Default Z80 instructions
 def FeatureZ80
-    : SubtargetFeature<"z80", "HasZ80", "true",
+    : SubtargetFeature<"z80", "Z80ProcFamily", "Z80ProcFamilyEnum::Z80",
                        "Zilog Z80 instruction set">;
-
-// Z180 extensions
-def FeatureZ180
-    : SubtargetFeature<"z180", "HasZ180", "true",
-                       "Zilog Z180 instruction set",
-                       [FeatureZ80]>;
-
-// R800 extensions (MSX TurboR)
-def FeatureR800
-    : SubtargetFeature<"r800", "HasR800", "true",
-                       "ASCII R800 instruction set",
-                       [FeatureZ80]>;
-
-// eZ80 extensions (Z80-compatible mode)
-def FeatureEZ80
-    : SubtargetFeature<"ez80", "HasEZ80", "true",
-                       "Zilog eZ80 (Z80 mode) instruction set",
-                       [FeatureZ80]>;
 
 // Sharp SM83 instructions (or GBZ80, Game Boy CPU)
 def FeatureSM83
-    : SubtargetFeature<"sm83", "HasSM83", "true",
+    : SubtargetFeature<"sm83", "Z80ProcFamily", "Z80ProcFamilyEnum::SM83",
                        "Sharp SM83 instruction set">;
 
 // Undocumented Z80 instructions: 

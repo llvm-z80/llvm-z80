@@ -668,7 +668,7 @@ Register Z80InstructionSelector::emitLshrByte(MachineBasicBlock &MBB,
                                               MachineRegisterInfo &MRI) {
   if (Amt >= 8)
     return emitZeroByte(MBB, I, DL, MRI);
-  bool IsSM83 = MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83();
+  bool IsSM83 = MBB.getParent()->getSubtarget<Z80Subtarget>().isSM83();
   if (Amt == 4 && IsSM83)
     return emitAccImm(MBB, I, DL, Z80::AND_Ac_n,
                       emitAccUnary(MBB, I, DL, Z80::SWAP_Ac, Src, MRI), 0x0F,
@@ -1392,7 +1392,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     // high page 0xFF00-0xFFFF in two bytes and anywhere else in three, against
     // four for loading a pair and going indirect.
     if (DstTy.getSizeInBits() == 8 && MI.hasOneMemOperand() &&
-        MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
+        MBB.getParent()->getSubtarget<Z80Subtarget>().isSM83()) {
       if (std::optional<uint16_t> Addr = getConstantAddr(AddrReg, MRI)) {
         if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI))
           return false;
@@ -1410,7 +1410,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     // against putting the address in a pointer register and reading the two
     // bytes through it. SM83 has no such instruction.
     if (DstTy.getSizeInBits() == 16 && MI.hasOneMemOperand() &&
-        !MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
+        !MBB.getParent()->getSubtarget<Z80Subtarget>().isSM83()) {
       const GlobalValue *GV = nullptr;
       int64_t Offset = 0;
       if (getGlobalAddr(AddrReg, MRI, GV, Offset)) {
@@ -1543,7 +1543,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     // See the matching fold in G_LOAD.
     if (SrcTy.getSizeInBits() == 8 && MI.hasOneMemOperand() &&
-        MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
+        MBB.getParent()->getSubtarget<Z80Subtarget>().isSM83()) {
       if (std::optional<uint16_t> Addr = getConstantAddr(AddrReg, MRI)) {
         if (!RBI.constrainGenericRegister(SrcReg, Z80::GR8RegClass, MRI))
           return false;
@@ -1559,7 +1559,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     // See the matching fold in G_LOAD.
     if (SrcTy.getSizeInBits() == 16 && MI.hasOneMemOperand() &&
-        !MBB.getParent()->getSubtarget<Z80Subtarget>().hasSM83()) {
+        !MBB.getParent()->getSubtarget<Z80Subtarget>().isSM83()) {
       const GlobalValue *GV = nullptr;
       int64_t Offset = 0;
       if (getGlobalAddr(AddrReg, MRI, GV, Offset)) {
@@ -1633,7 +1633,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           // access and gets nothing back from the pair.
           const MachineFunction &StoreMF = *MBB.getParent();
           bool KeepSharedPair =
-              !StoreMF.getSubtarget<Z80Subtarget>().hasSM83() &&
+              !StoreMF.getSubtarget<Z80Subtarget>().isSM83() &&
               StoreMF.getFunction().hasOptSize();
           MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
           if (SrcDef && SrcDef->getOpcode() == TargetOpcode::G_CONSTANT &&
@@ -1744,7 +1744,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     // Try fold: if OffReg is a single-use G_LOAD from frame index,
     // fold into ADD_HL_FI to avoid a GR16_BCDE register allocation.
-    if (STI.hasZ80() && CachedFoldCount > 2 &&
+    if (STI.isZ80() && CachedFoldCount > 2 &&
         tryFIFold(BaseReg, OffReg, DstReg, Z80::ADD_HL_FI))
       return true;
 
@@ -1900,7 +1900,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         // Try fold: if either operand is a single-use G_LOAD from frame
         // index, fold into ADD_HL_FI.  G_ADD is commutative, so try Src2
         // first (preferred: Src1 stays in HL after HL-hint swap), then Src1.
-        if (STI.hasZ80() && CachedFoldCount > 2 &&
+        if (STI.isZ80() && CachedFoldCount > 2 &&
             (tryFIFold(Src1Reg, Src2Reg, DstReg, Z80::ADD_HL_FI) ||
              tryFIFold(Src2Reg, Src1Reg, DstReg, Z80::ADD_HL_FI)))
           return true;
@@ -1998,7 +1998,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
       // Try fold: if Src2 is a single-use G_LOAD from frame index,
       // fold into SUB_HL_FI.  SUB is not commutative, so only Src2.
-      if (STI.hasZ80() && CachedFoldCount > 2 &&
+      if (STI.isZ80() && CachedFoldCount > 2 &&
           tryFIFold(Src1Reg, Src2Reg, DstReg, Z80::SUB_HL_FI))
         return true;
 
@@ -2492,7 +2492,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       Amt = AmtDef->getOperand(1).getCImm()->getZExtValue() & 7;
 
     Register Result = SrcReg;
-    if (Amt == 4 && STI.hasSM83()) {
+    if (Amt == 4 && STI.isSM83()) {
       // SM83: SWAP A is a single-instruction nibble swap (rotate by 4).
       Result = emitAccUnary(MBB, MI, DL, Z80::SWAP_Ac, SrcReg, MRI);
     } else if (Amt > 0) {
@@ -3360,7 +3360,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         IsSigned ? RTLIB::SDIVREM_I16 : RTLIB::UDIVREM_I16,
         IsSigned ? "16-bit signed divmod" : "16-bit unsigned divmod");
 
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       // SM83: DE=dividend, BC=divisor → BC=quot, HL=rem
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::DE)
           .addReg(LHSReg);

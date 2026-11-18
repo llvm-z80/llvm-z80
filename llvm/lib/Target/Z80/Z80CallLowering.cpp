@@ -378,7 +378,7 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
         MachineInstrBuilder RetMI;
         if (IsInterrupt) {
           const auto &STI = MF.getSubtarget<Z80Subtarget>();
-          unsigned RetiOpc = STI.hasSM83() ? Z80::SM83_RETI : Z80::RETI;
+          unsigned RetiOpc = STI.isSM83() ? Z80::SM83_RETI : Z80::RETI;
           RetMI = MIRBuilder.buildInstr(RetiOpc);
         } else if (CleanupBytes > 0)
           RetMI = MIRBuilder.buildInstr(Z80::RET_CLEANUP).addImm(CleanupBytes);
@@ -641,7 +641,7 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
 /// so this only catches hand-written IR.
 static bool isUnsupportedCCForSubtarget(const MachineFunction &MF,
                                         CallingConv::ID CC) {
-  return MF.getSubtarget<Z80Subtarget>().hasSM83() &&
+  return MF.getSubtarget<Z80Subtarget>().isSM83() &&
          decodeZ80CC(CC).isFastCall();
 }
 
@@ -924,7 +924,7 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
         }
       }
     }
-    if (isCalleeCleanup(IsVarArg, EffectiveRetTy, FirstArgTy, STI.hasSM83(), CC,
+    if (isCalleeCleanup(IsVarArg, EffectiveRetTy, FirstArgTy, STI.isSM83(), CC,
                         DL)) {
       Z80FunctionInfo *FuncInfo = MF.getInfo<Z80FunctionInfo>();
       FuncInfo->StackParamBytes = StackArgOffset;
@@ -964,7 +964,7 @@ static bool isCallCalleeCleanup(const MachineFunction &MF,
   }
   Type *FirstArgTy = Info.OrigArgs.empty() ? nullptr : Info.OrigArgs[0].Ty;
   return isCalleeCleanup(Info.IsVarArg, EffectiveRetTy, FirstArgTy,
-                         STI.hasSM83(), Info.CallConv, DL);
+                         STI.isSM83(), Info.CallConv, DL);
 }
 
 /// Whether \p Reg is loaded unchanged from the incoming stack argument in the

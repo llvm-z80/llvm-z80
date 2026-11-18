@@ -33,6 +33,8 @@ class Z80TargetMachine;
 
 class Z80Subtarget : public Z80GenSubtargetInfo {
 public:
+  enum class Z80ProcFamilyEnum { Z80, SM83 };
+
   Z80Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
                const Z80TargetMachine &TM);
 
@@ -74,6 +76,10 @@ public:
   bool GETTER() const { return ATTRIBUTE; }
 #include "Z80GenSubtargetInfo.inc"
 
+  Z80ProcFamilyEnum getProcFamily() const { return Z80ProcFamily; }
+  bool isZ80() const { return Z80ProcFamily == Z80ProcFamilyEnum::Z80; }
+  bool isSM83() const { return Z80ProcFamily == Z80ProcFamilyEnum::SM83; }
+
   Z80Subtarget &initializeSubtargetDependencies(StringRef CPU, StringRef FS);
 
   /// Parses a subtarget feature string, setting appropriate options.
@@ -85,6 +91,7 @@ private:
 #define GET_SUBTARGETINFO_MACRO(ATTRIBUTE, DEFAULT, GETTER)                    \
   bool ATTRIBUTE = DEFAULT;
 #include "Z80GenSubtargetInfo.inc"
+  Z80ProcFamilyEnum Z80ProcFamily = Z80ProcFamilyEnum::Z80;
 
   Z80InstrInfo InstrInfo;
   Z80RegisterInfo RegInfo;

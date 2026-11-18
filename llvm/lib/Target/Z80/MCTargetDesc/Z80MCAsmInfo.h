@@ -32,8 +32,6 @@ extern cl::opt<Z80AsmFormatTy> Z80AsmFormat;
 class Z80MCAsmInfo : public MCAsmInfoELF {
 public:
   explicit Z80MCAsmInfo(const Triple &TT, const MCTargetOptions &Options);
-
-  unsigned getMaxInstLength(const MCSubtargetInfo *STI) const override;
 };
 
 /// Specifies the format of Z80 assembly files for sdasz80 (SDCC assembler).
@@ -43,8 +41,6 @@ public:
 
   /// Returns the sdasz80 area of an ELF section, or "" if it has none.
   static StringRef getAreaName(StringRef Name);
-
-  unsigned getMaxInstLength(const MCSubtargetInfo *STI) const override;
 
   void printSwitchToSection(const MCSection &Section, uint32_t Subsection,
                             const Triple &T, raw_ostream &OS) const override;
@@ -59,8 +55,6 @@ public:
 
   /// Returns the z88dk name of an ELF section, or "" if it has none.
   static StringRef getSectionName(StringRef Name);
-
-  unsigned getMaxInstLength(const MCSubtargetInfo *STI) const override;
 
   void printSwitchToSection(const MCSection &Section, uint32_t Subsection,
                             const Triple &T, raw_ostream &OS) const override;

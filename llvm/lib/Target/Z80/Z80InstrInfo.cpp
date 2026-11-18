@@ -136,8 +136,8 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // Note: EX DE,HL swaps both registers, so the source is also modified.
   // This is safe when the source is dead after this copy.
   // SM83 lacks EX DE,HL; fall through to the 2x LD path below.
-  if (!STI->hasSM83() && ((DestReg == Z80::DE && SrcReg == Z80::HL) ||
-                          (DestReg == Z80::HL && SrcReg == Z80::DE))) {
+  if (!STI->isSM83() && ((DestReg == Z80::DE && SrcReg == Z80::HL) ||
+                         (DestReg == Z80::HL && SrcReg == Z80::DE))) {
     bool SrcDead = KillSrc;
     if (!SrcDead) {
       // KillSrc may not be set for physical register liveins.
@@ -604,7 +604,7 @@ static InstrSeq buildStackRelease(MachineFunction &MF, const DebugLoc &DL,
                                   unsigned Amount, const LiveRegUnits &Live) {
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
   const Z80InstrInfo &TII = *STI.getInstrInfo();
-  bool IsSM83 = STI.hasSM83();
+  bool IsSM83 = STI.isSM83();
   auto Append = [&](InstrSeq &Seq, unsigned Opc,
                     MCRegister Dst = MCRegister()) {
     MachineInstrBuilder MIB = Dst ? BuildMI(MF, DL, TII.get(Opc), Dst)
@@ -1445,7 +1445,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   case Z80::SUB_HL_rr: {
     // 16-bit subtraction: HL = HL - rr (no borrow in).
     Register RHS = MI.getOperand(0).getReg();
-    if (STI->hasSM83()) {
+    if (STI->isSM83()) {
       // SM83: byte-by-byte SUB/SBC (no 16-bit SBC HL,rr instruction).
       // LD A,L; SUB lo; LD L,A; LD A,H; SBC A,hi; LD H,A
       auto [Lo, Hi] = getSubRegs16(RHS);
@@ -1477,7 +1477,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       Z80::buildLD8(MBB, MI, DL, *this, Z80::A, CarryReg);
     }
     BuildMI(MBB, MI, DL, get(Z80::RRCA));
-    if (STI->hasSM83()) {
+    if (STI->isSM83()) {
       // SM83: byte-by-byte ADC (carry flag set by RRCA above).
       // LD A,L; ADC A,lo; LD L,A; LD A,H; ADC A,hi; LD H,A
       auto [Lo, Hi] = getSubRegs16(RHS);
@@ -1507,7 +1507,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       Z80::buildLD8(MBB, MI, DL, *this, Z80::A, BorrowReg);
     }
     BuildMI(MBB, MI, DL, get(Z80::RRCA));
-    if (STI->hasSM83()) {
+    if (STI->isSM83()) {
       // SM83: byte-by-byte SBC (borrow flag set by RRCA above).
       // LD A,L; SBC A,lo; LD L,A; LD A,H; SBC A,hi; LD H,A
       auto [Lo, Hi] = getSubRegs16(RHS);
@@ -1531,7 +1531,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register Tmp = MI.getOperand(1).getReg();
     Register RHS = MI.getOperand(2).getReg();
     auto [TmpLo, TmpHi] = getSubRegs16(Tmp);
-    if (!STI->hasSM83()) {
+    if (!STI->isSM83()) {
       // The overflow is P/V, bit 2 of F.
       Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, *this, Z80::AND_r, Z80::A),
                         Z80::A);
@@ -1622,7 +1622,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     MachineInstrBuilder Term;
     if (Amount == 0) {
       Term = BuildMI(MBB, MI, DL, get(Z80::RET));
-    } else if (STI->hasSM83() && MI.readsRegister(Z80::HL, TRI)) {
+    } else if (STI->isSM83() && MI.readsRegister(Z80::HL, TRI)) {
       // SM83 with an i32/float return: the z88dk classic conventions bring it
       // back in HLDE, and SM83's only indirect jump goes through HL, so the
       // usual scratch would destroy the high word.  Return through the stack
@@ -1632,7 +1632,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       addToSP(Amount);
       BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
       Term = BuildMI(MBB, MI, DL, get(Z80::RET));
-    } else if (STI->hasSM83()) {
+    } else if (STI->isSM83()) {
       // SM83: POP HL; ADD SP,e; JP (HL)
       BuildMI(MBB, MI, DL, get(Z80::POP_HL));
       addToSP(Amount);
@@ -2018,7 +2018,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   // SM83 expansions are larger due to lacking ADC HL,HL / SBC HL,DE / EX DE,HL
   // / DJNZ and requiring byte-wise emulation + PUSH/POP AF for counter.
   {
-    bool IsSM83 = STI->hasSM83();
+    bool IsSM83 = STI->isSM83();
     // clang-format off
     switch (Opcode) {
     case Z80::MUL16:  return IsSM83 ? 24 : 20;
@@ -2186,7 +2186,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   // AND n(2) = 10. SM83: 13 x 1-byte + AND n(2) = 15.
   case Z80::SADDO16:
   case Z80::SSUBO16:
-    return STI->hasSM83() ? 15 : 10;
+    return STI->isSM83() ? 15 : 10;
 
   // Four-byte instructions (IX/IY indexed)
   case Z80::LD_IX_nn:

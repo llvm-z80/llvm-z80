@@ -15,14 +15,14 @@ def Z80Model : SchedMachineModel {
   let IssueWidth = 1;
   let MicroOpBufferSize = 0;
   let CompleteModel = 1;
-  let UnsupportedFeatures = [HasSM83];
+  let UnsupportedFeatures = [IsSM83];
 }
 
 def SM83Model : SchedMachineModel {
   let IssueWidth = 1;
   let MicroOpBufferSize = 0;
   let CompleteModel = 1;
-  let UnsupportedFeatures = [HasZ80];
+  let UnsupportedFeatures = [IsZ80];
 }
 
 //===----------------------------------------------------------------------===//

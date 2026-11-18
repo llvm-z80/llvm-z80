@@ -31,10 +31,14 @@ Z80Subtarget::Z80Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
       Legalizer(*this),
       InstSelector(createZ80InstructionSelector(TM, *this, RegBankInfo)),
       InlineAsmLoweringInfo(&TLInfo) {
-  if (hasSM83())
-    CallLoweringInfo = std::make_unique<SM83CallLowering>(&TLInfo);
-  else
+  switch (Z80ProcFamily) {
+  case Z80ProcFamilyEnum::Z80:
     CallLoweringInfo = std::make_unique<Z80CallLowering>(&TLInfo);
+    break;
+  case Z80ProcFamilyEnum::SM83:
+    CallLoweringInfo = std::make_unique<SM83CallLowering>(&TLInfo);
+    break;
+  }
 }
 
 Z80Subtarget &Z80Subtarget::initializeSubtargetDependencies(StringRef CPU,

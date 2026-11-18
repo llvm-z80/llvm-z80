@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-let Predicates = [HasSM83], DecoderNamespace = "SM83" in {
+let Predicates = [IsSM83], DecoderNamespace = "SM83" in {
 
 //===----------------------------------------------------------------------===//
 //  Hardware Instructions
@@ -162,4 +162,4 @@ def SM83_LDH_A_Cind : Inst8<"ldh a, (c)", 0xF2> {
   let hasSideEffects = true;
 }
 
-} // Predicates = [HasSM83]
+} // Predicates = [IsSM83]

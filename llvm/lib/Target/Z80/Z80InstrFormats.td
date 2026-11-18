@@ -19,27 +19,12 @@
 //===----------------------------------------------------------------------===//
 
 /// Predicates for Z80 variants
-def HasZ80 : Predicate<"Subtarget->hasZ80()">,
+def IsZ80 : Predicate<"Subtarget->isZ80()">,
              AssemblerPredicate<(all_of FeatureZ80), "Z80"> {
   let PredicateName = "FeatureZ80";
 }
 
-def HasZ180 : Predicate<"Subtarget->hasZ180()">,
-              AssemblerPredicate<(all_of FeatureZ180), "Z180"> {
-  let PredicateName = "FeatureZ180";
-}
-
-def HasR800 : Predicate<"Subtarget->hasR800()">,
-              AssemblerPredicate<(all_of FeatureR800), "R800"> {
-  let PredicateName = "FeatureR800";
-}
-
-def HasEZ80 : Predicate<"Subtarget->hasEZ80()">,
-              AssemblerPredicate<(all_of FeatureEZ80), "eZ80"> {
-  let PredicateName = "FeatureEZ80";
-}
-
-def HasSM83 : Predicate<"Subtarget->hasSM83()">,
+def IsSM83 : Predicate<"Subtarget->isSM83()">,
               AssemblerPredicate<(all_of FeatureSM83), "SM83"> {
   let PredicateName = "FeatureSM83";
 }

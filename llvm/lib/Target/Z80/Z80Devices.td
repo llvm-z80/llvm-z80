@@ -18,15 +18,6 @@ def : Proc<"z80", [FeatureZ80], Z80Model>;
 // Zilog Z80 with undocumented instructions enabled
 def : Proc<"z80-undoc", [FeatureZ80, FeatureUndocumented], Z80Model>;
 
-// Zilog Z180
-def : Proc<"z180", [FeatureZ180]>;
-
-// ASCII R800
-def : Proc<"r800", [FeatureR800]>;
-
-// Zilog eZ80 (Z80 mode)
-def : Proc<"ez80", [FeatureEZ80]>;
-
 // Sharp SM83 (GBZ80)
 def : Proc<"sm83", [FeatureSM83], SM83Model>;
 def : ProcessorAlias<"gbz80", "sm83">;

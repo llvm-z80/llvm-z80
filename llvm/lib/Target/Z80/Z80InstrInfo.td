@@ -27,7 +27,7 @@ include "Z80InstrCommon.td"
 // I/O operations, sign/parity condition codes, or opcodes reused by SM83.
 //===----------------------------------------------------------------------===//
 
-let Predicates = [HasZ80] in {
+let Predicates = [IsZ80] in {
 
 //===----------------------------------------------------------------------===//
 //  8-bit Load Group (Z80-only)
@@ -243,13 +243,13 @@ def OTIR : InstED8<"otir", 0xB3> { let Defs = [FLAGS]; }
 def OUTD : InstED8<"outd", 0xAB> { let Defs = [FLAGS]; }
 def OTDR : InstED8<"otdr", 0xBB> { let Defs = [FLAGS]; }
 
-} // Predicates = [HasZ80]
+} // Predicates = [IsZ80]
 
 //===----------------------------------------------------------------------===//
 //  IX/IY Instructions (DD/FD prefixed) - Selected examples
 //===----------------------------------------------------------------------===//
 
-let Predicates = [HasZ80] in {
+let Predicates = [IsZ80] in {
 
 // LD IX,nn / LD IY,nn
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
@@ -545,7 +545,7 @@ let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
   def SET_7_IYd : InstFDCB<"set 7,", 0xFE> { let Uses = [IY]; }
 }
 
-} // Predicates = [HasZ80]
+} // Predicates = [IsZ80]
 
 //===----------------------------------------------------------------------===//
 // Z80 Spill Pseudos
@@ -598,13 +598,13 @@ let Constraints = "$dst = $src", Defs = [FLAGS],
   def CPL_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
   def RLCA_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
   def RRCA_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
-  let Predicates = [HasSM83] in
+  let Predicates = [IsSM83] in
   def SWAP_Ac : Z80Pseudo<(outs Ac:$dst), (ins Ac:$src)>;
 }
 
 // SM83's loads and stores of A at an absolute address, the second in the
 // top page.
-let Predicates = [HasSM83] in {
+let Predicates = [IsSM83] in {
   let mayLoad = true, mayStore = false in {
     def SM83_LD_Ac_nnind : Z80Pseudo<(outs Ac:$dst), (ins i16imm:$addr)>;
     def SM83_LDH_Ac_nind : Z80Pseudo<(outs Ac:$dst), (ins i8imm:$port)>;
@@ -622,7 +622,7 @@ def SBC_Ac_Ac : Z80Pseudo<(outs Ac:$dst), (ins)>;
 
 // IN r,(C) and OUT (C),r name their register in the opcode. These take it as
 // an operand, any of them, and expand to the one allocated.
-let Predicates = [HasZ80], hasSideEffects = true, mayLoad = false,
+let Predicates = [IsZ80], hasSideEffects = true, mayLoad = false,
     mayStore = false, Uses = [C] in {
   def IN8_C : Z80Pseudo<(outs GR8:$dst), (ins)> { let Defs = [FLAGS]; }
   def OUT8_C : Z80Pseudo<(outs), (ins GR8:$src)>;
@@ -680,14 +680,14 @@ def ADD_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi, i32imm:$offset)> {
   let Defs = [HL, A, FLAGS];
   let mayLoad = true;
   let mayStore = false;
-  let Predicates = [HasZ80];
+  let Predicates = [IsZ80];
 }
 def SUB_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi, i32imm:$offset)> {
   let Uses = [HL];
   let Defs = [HL, A, FLAGS];
   let mayLoad = true;
   let mayStore = false;
-  let Predicates = [HasZ80];
+  let Predicates = [IsZ80];
 }
 // 8-bit ALU against a frame slot, with the accumulator as an operand as in
 // the register forms. $op says which operation, so one pseudo covers them
@@ -701,7 +701,7 @@ def ALU_Ac_FI : Z80Pseudo<(outs Ac:$dst),
   let Defs = [FLAGS];
   let mayLoad = true;
   let mayStore = false;
-  let Predicates = [HasZ80];
+  let Predicates = [IsZ80];
 }
 def SPILL_GR8 : Z80Pseudo<(outs), (ins GR8:$src, i32imm:$fi, i32imm:$offset)> {
   let mayStore = true;
