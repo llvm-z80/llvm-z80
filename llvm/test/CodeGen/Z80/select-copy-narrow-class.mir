@@ -17,7 +17,7 @@ body: |
     ; CHECK-NEXT: $hl = COPY [[V]]
     ; CHECK-NEXT: [[N:%[0-9]+]]:gr16_bcde = COPY [[V]]
     ; CHECK-NEXT: $bc = COPY [[N]]
-    %0:any(s16) = G_CONSTANT i16 16
+    %0:gpr(s16) = G_CONSTANT i16 16
     $hl = COPY %0(s16)
     %1:gr16_bcde = COPY %0(s16)
     $bc = COPY %1
@@ -35,7 +35,7 @@ body: |
     ; CHECK-NEXT: $l = COPY [[V]]
     ; CHECK-NEXT: [[N:%[0-9]+]]:ac = COPY [[V]]
     ; CHECK-NEXT: $a = COPY [[N]]
-    %0:any(s8) = G_CONSTANT i8 5
+    %0:gpr(s8) = G_CONSTANT i8 5
     $l = COPY %0(s8)
     %1:ac = COPY %0(s8)
     $a = COPY %1

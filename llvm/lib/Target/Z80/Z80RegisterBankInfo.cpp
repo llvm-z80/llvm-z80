@@ -9,7 +9,7 @@
 // This file defines the targeting of the RegisterBankInfo class for Z80.
 //
 // The Z80 doesn't have register banks. Since the hardware registers are
-// extremely tight, the bank selector allocates everything to the same "Any"
+// extremely tight, the bank selector allocates everything to the same "GPR"
 // register bank. The register allocator proper will later select real
 // registers for each value, taking register pressure fully into account.
 //
@@ -49,7 +49,7 @@ Z80RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
     if (!Ty.isValid())
       continue;
     ValMappings[I.index()] =
-        &getValueMapping(0, Ty.getSizeInBits(), Z80::AnyRegBank);
+        &getValueMapping(0, Ty.getSizeInBits(), Z80::GPRRegBank);
   }
   return getInstructionMapping(/*ID=*/1, /*Cost=*/1,
                                getOperandsMapping(ValMappings), NumOperands);
@@ -63,5 +63,5 @@ void Z80RegisterBankInfo::applyMappingImpl(
 const RegisterBank &
 Z80RegisterBankInfo::getRegBankFromRegClass(const TargetRegisterClass &RC,
                                             LLT Ty) const {
-  return Z80::AnyRegBank;
+  return Z80::GPRRegBank;
 }

@@ -1,4 +1,4 @@
-//===- Z80RegisterBanks.td - Z80 Register Bank Description -*- tablegen -*-===//
+//===----------------------------------------------------------------------===//
 //
 // Part of LLVM-Z80, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -10,11 +10,4 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Z80 has limited registers, so place everything in one bank.
-// Use the register classes defined in Z80RegisterInfo.td:
-// - GR8 (8-bit GPRs)
-// - GR16 (16-bit register pairs)
-// - HLI (HL/IX/IY — the class a stack pointer copy constrains to; a bank
-//   only covers the classes listed here, and a constrain to an uncovered
-//   class fails silently)
-def AnyRegBank : RegisterBank<"Any", [GR8, GR16, HLI]>;
+def GPRRegBank : RegisterBank<"GPR", [GR8, Any16]>;
