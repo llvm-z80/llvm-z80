@@ -77,7 +77,8 @@ def : InstRW<[Z80Write<19>], (instrs ADC_A_IXd, ADC_A_IYd, ADD_A_IXd, ADD_A_IYd,
   LD_IYd_r, LD_r_IXd, LD_r_IYd, OR_IXd, OR_IYd, SBC_A_IXd, SBC_A_IYd, SUB_IXd,
   SUB_IYd, XOR_IXd, XOR_IYd)>;
 def : InstRW<[Z80Write<20>], (instrs BIT_b_IXd, BIT_b_IYd, LD_BC_nnind,
-  LD_DE_nnind, LD_SP_nnind, LD_nnind_BC, LD_nnind_DE, LD_nnind_SP)>;
+  LD_DE_nnind, LD_IX_nnind, LD_IY_nnind, LD_SP_nnind, LD_nnind_BC, LD_nnind_DE,
+  LD_nnind_IX, LD_nnind_IY, LD_nnind_SP)>;
 def : InstRW<[Z80Write<21>], (instrs CPDR, CPIR, INDR, INIR, LDDR, LDIR, OTDR,
   OTIR)>;
 def : InstRW<[Z80Write<23>], (instrs DEC_IXd, DEC_IYd, EX_SPind_IX, EX_SPind_IY,
@@ -107,7 +108,7 @@ class SM83Write<int Cycles> : SchedWriteRes<[SM83CPU]> {
 
 def : InstRW<[SM83Write<4>], (instrs ADC_A_r, ADD_A_r, AND_r, CCF, CPL, CP_r,
   DAA, DEC_r, DI, EI, HALT, INC_r, JP_HLind, LD_r_r, NOP, OR_r, RLA, RLCA, RRA,
-  RRCA, SBC_A_r, SCF, SUB_r, XOR_r)>;
+  RRCA, SBC_A_r, SCF, STOP, SUB_r, XOR_r)>;
 def : InstRW<[SM83Write<8>], (instrs ADC_A_HLind, ADC_A_n, ADD_A_HLind, ADD_A_n,
   ADD_HL_HL, ADD_HL_SP, ADD_HL_rr, AND_HLind, AND_n, BIT_b_r, CP_HLind, CP_n,
   DEC_SP, DEC_rr, INC_SP, INC_rr, LD_A_BCind, LD_A_DEind, LD_A_HLD, LD_A_HLI,
@@ -123,7 +124,8 @@ def : InstRW<[SM83Write<16>], (instrs ADD_SP_e, JP_C_nn, JP_NC_nn, JP_NZ_nn,
   RLC_HLind, RL_HLind, RRC_HLind, RR_HLind, RST_00, RST_08, RST_10, RST_18,
   RST_20, RST_28, RST_30, RST_38, SET_b_HLind, SLA_HLind, SM83_LD_A_nnind,
   SM83_LD_nnind_A, SM83_RETI, SRA_HLind, SRL_HLind)>;
-def : InstRW<[SM83Write<20>], (instrs RET_C, RET_NC, RET_NZ, RET_Z)>;
+def : InstRW<[SM83Write<20>], (instrs RET_C, RET_NC, RET_NZ, RET_Z,
+  SM83_LD_nnind_SP)>;
 def : InstRW<[SM83Write<24>], (instrs CALL_C_nn, CALL_NC_nn, CALL_NZ_nn,
   CALL_Z_nn, CALL_nn)>;
 

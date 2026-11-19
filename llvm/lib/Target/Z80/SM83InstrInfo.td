@@ -64,6 +64,20 @@ def SM83_LD_A_nnind : Inst24<"ld a,", 0xFA, DirectMode> {
   let Defs = [A];
 }
 
+// LD (nn),SP
+let mayLoad = false, mayStore = true, hasSideEffects = false in
+def SM83_LD_nnind_SP : Inst24<"ld", 0x08, DirectMode> {
+  let AsmString = "ld ( $imm ),sp";
+  let Uses = [SP];
+}
+
+// STOP
+def STOP : Z80Inst16<"stop"> {
+  let Inst{7-0} = 0x10;
+  let Inst{15-8} = 0x00;
+  let InOperandList = (ins);
+}
+
 // LD (HL+),A - Store A to (HL) then increment HL (opcode 0x22)
 // Z80 uses 0x22 for LD (nn),HL.
 // sdasgb syntax: ld (hl+),a

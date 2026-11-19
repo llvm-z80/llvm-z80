@@ -259,7 +259,7 @@ private:
   bool tryParseRegisterOperand(OperandVector &Operands);
   bool tryParseShadowAF(OperandVector &Operands);
   bool parseOperand(OperandVector &Operands, StringRef Mnemonic);
-  bool parseParenOperand(OperandVector &Operands);
+  bool parseParenOperand(OperandVector &Operands, StringRef Mnemonic);
   bool parseSDASZ80Indexed(OperandVector &Operands, const MCExpr *Disp,
                            SMLoc DispLoc);
   bool parseExpression(const MCExpr *&Expr);
@@ -400,8 +400,10 @@ bool Z80AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
 ///   (nn)     → tokens "(", Imm, ")"
 ///   (ix+d)   → tokens "(", Reg IX, "+", Imm, ")"
 ///   (ix-d)   → tokens "(", Reg IX, "+", Imm(-d), ")"
-///   (ix)     → compound token "(ix)"
-bool Z80AsmParser::parseParenOperand(OperandVector &Operands) {
+///   (ix)     → tokens "(", Reg IX, "+", Imm(0), ")"
+///   jp (ix)  → compound token "(ix)"
+bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
+                                     StringRef Mnemonic) {
   SMLoc LParenLoc = Parser.getTok().getLoc();
   Parser.Lex(); // Eat '('
 
@@ -461,6 +463,18 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands) {
         return Error(Parser.getTok().getLoc(), "expected ')'");
       SMLoc RParenEnd = Parser.getTok().getEndLoc();
       Parser.Lex(); // Eat ')'
+
+      // Read (ix) and (iy) as (ix+0) and (iy+0).
+      if ((Reg == Z80::IX || Reg == Z80::IY) &&
+          !Mnemonic.equals_insensitive("jp")) {
+        Operands.push_back(Z80Operand::CreateToken("(", LParenLoc));
+        Operands.push_back(Z80Operand::CreateReg(Reg, RegLoc, RegEnd));
+        Operands.push_back(Z80Operand::CreateToken("+", RegEnd));
+        Operands.push_back(Z80Operand::CreateImm(
+            MCConstantExpr::create(0, getContext()), RegEnd, RegEnd));
+        Operands.push_back(Z80Operand::CreateToken(")", RParenEnd));
+        return false;
+      }
 
       const char *CompTok = getCompoundToken(Reg);
       if (CompTok) {
@@ -545,7 +559,7 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
 
   // Parenthesized operand: (reg), (expr), (ix+d)
   if (getLexer().is(AsmToken::LParen))
-    return parseParenOperand(Operands);
+    return parseParenOperand(Operands, Mnemonic);
 
   // Try register
   if (getLexer().is(AsmToken::Identifier)) {

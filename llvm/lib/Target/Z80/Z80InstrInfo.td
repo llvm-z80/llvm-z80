@@ -87,6 +87,8 @@ let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def EX_DE_HL : Inst8<"ex de,hl", 0xEB> { let Uses = [DE, HL]; let Defs = [DE, HL]; }
 }
 def EX_AF_AF : Inst8<"ex af,af'", 0x08>;
+// sdasz80 also accepts ex af,af without the apostrophe.
+def : InstAlias<"ex af,af", (EX_AF_AF), 0>;
 def EXX : Inst8<"exx", 0xD9>;
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def EX_SPind_HL : Inst8<"ex (sp),hl", 0xE3> { let Uses = [SP, HL]; let Defs = [HL]; }
@@ -268,6 +270,24 @@ let Predicates = [IsZ80] in {
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def LD_IX_nn : InstDDnn<"ld ix,", 0x21, Imm16At2Mode> { let Defs = [IX]; }
 def LD_IY_nn : InstFDnn<"ld iy,", 0x21, Imm16At2Mode> { let Defs = [IY]; }
+}
+
+// LD IX,(nn) / LD IY,(nn)
+let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
+def LD_IX_nnind : InstDDnn<"ld ix,", 0x2A, DirectAt2Mode> { let Defs = [IX]; }
+def LD_IY_nnind : InstFDnn<"ld iy,", 0x2A, DirectAt2Mode> { let Defs = [IY]; }
+}
+
+// LD (nn),IX / LD (nn),IY
+let mayLoad = 0, mayStore = 1, hasSideEffects = 0 in {
+def LD_nnind_IX : InstDDnn<"ld", 0x22, DirectAt2Mode> {
+  let AsmString = "ld ( $imm ),ix";
+  let Uses = [IX];
+}
+def LD_nnind_IY : InstFDnn<"ld", 0x22, DirectAt2Mode> {
+  let AsmString = "ld ( $imm ),iy";
+  let Uses = [IY];
+}
 }
 
 // PUSH IX / PUSH IY
