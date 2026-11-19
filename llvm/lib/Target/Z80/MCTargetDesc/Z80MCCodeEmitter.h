@@ -26,7 +26,6 @@
 namespace llvm {
 
 class MCContext;
-class MCExpr;
 class MCFixup;
 class MCInst;
 class MCInstrInfo;
