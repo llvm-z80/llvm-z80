@@ -115,7 +115,7 @@ def : InstRW<[SM83Write<8>], (instrs ADC_A_HLind, ADC_A_n, ADD_A_HLind, ADD_A_n,
   LD_BCind_A, LD_DEind_A, LD_HLD_A, LD_HLI_A, LD_HLind_r, LD_SP_HL, LD_r_HLind,
   LD_r_n, OR_HLind, OR_n, RES_b_r, RLC_r, RL_r, RRC_r, RR_r, SBC_A_HLind,
   SBC_A_n, SET_b_r, SLA_r, SM83_LDH_A_Cind, SM83_LDH_Cind_A, SRA_r, SRL_r,
-  SUB_HLind, SUB_n, SWAP_A, XOR_HLind, XOR_n)>;
+  SUB_HLind, SUB_n, SWAP_r, XOR_HLind, XOR_n)>;
 def : InstRW<[SM83Write<12>], (instrs BIT_b_HLind, DEC_HLind, INC_HLind, JR_C_e,
   JR_NC_e, JR_NZ_e, JR_Z_e, JR_e, LDHL_SP_e, LD_HLind_n, LD_SP_nn, LD_rr_nn,
   POP_AF, POP_BC, POP_DE, POP_HL, SM83_LDH_A_nind, SM83_LDH_nind_A)>;
@@ -123,7 +123,7 @@ def : InstRW<[SM83Write<16>], (instrs ADD_SP_e, JP_C_nn, JP_NC_nn, JP_NZ_nn,
   JP_Z_nn, JP_nn, PUSH_AF, PUSH_BC, PUSH_DE, PUSH_HL, RES_b_HLind, RET,
   RLC_HLind, RL_HLind, RRC_HLind, RR_HLind, RST_00, RST_08, RST_10, RST_18,
   RST_20, RST_28, RST_30, RST_38, SET_b_HLind, SLA_HLind, SM83_LD_A_nnind,
-  SM83_LD_nnind_A, SM83_RETI, SRA_HLind, SRL_HLind)>;
+  SM83_LD_nnind_A, SM83_RETI, SRA_HLind, SRL_HLind, SWAP_HLind)>;
 def : InstRW<[SM83Write<20>], (instrs RET_C, RET_NC, RET_NZ, RET_Z,
   SM83_LD_nnind_SP)>;
 def : InstRW<[SM83Write<24>], (instrs CALL_C_nn, CALL_NC_nn, CALL_NZ_nn,

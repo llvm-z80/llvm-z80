@@ -17,13 +17,11 @@ let Predicates = [IsSM83], DecoderNamespace = "SM83" in {
 //  Hardware Instructions
 //===----------------------------------------------------------------------===//
 
-// SWAP A - Swap upper and lower nibbles of A (CB 37)
-// On Z80, this opcode slot (CB 0b110rrr) is the undocumented SLL.
-// SM83 uses it as a nibble swap instruction.
-def SWAP_A : InstCB<"swap a", 0x37> {
-  let Uses = [A];
-  let Defs = [A, F];
-}
+// SWAP r / SWAP (HL)
+let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in
+def SWAP_r : CBRotate<"swap", 0b110>;
+let mayLoad = true, mayStore = true, hasSideEffects = false in
+def SWAP_HLind : InstCB<"swap (hl)", 0x36> { let Uses = [HL]; let Defs = [F]; }
 
 // SM83 RETI - Return from interrupt (opcode 0xD9)
 // Unlike Z80 RETI (ED 4D), SM83 RETI is a single-byte instruction
