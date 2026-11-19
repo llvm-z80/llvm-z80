@@ -38,11 +38,11 @@ unsigned Z80ELFObjectWriter::getRelocType(const MCFixup &Fixup,
     reportError(Fixup.getLoc(), "unsupported PC-relative relocation");
     return ELF::R_Z80_NONE;
   }
-  // For z80_16hi(x)+1, R_Z80_BYTE1 adds 1 to x before taking the high byte.
+  // For ((x) >> 8) + 1, R_Z80_BYTE1 adds 1 to x before taking the high byte.
   // So reject a byte operator inside a larger expression.
   if (Specifier != Z80MCExpr::VK_NONE && !isa<Z80MCExpr>(Fixup.getValue())) {
     reportError(Fixup.getLoc(),
-                "z80_16lo and z80_16hi must enclose the whole expression");
+                "& 0xff and >> 8 must apply to the whole expression");
     return ELF::R_Z80_NONE;
   }
   // A wider field gets the byte zero-extended.

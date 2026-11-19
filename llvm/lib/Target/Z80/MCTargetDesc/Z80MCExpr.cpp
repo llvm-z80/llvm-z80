@@ -17,18 +17,6 @@
 
 namespace llvm {
 
-namespace {
-
-const struct ModifierEntry {
-  const char *const Spelling;
-  Z80MCExpr::VariantKind VariantKind;
-} ModifierNames[] = {
-    {"z80_16lo", Z80MCExpr::VK_ADDR16_LO},
-    {"z80_16hi", Z80MCExpr::VK_ADDR16_HI},
-};
-
-} // end of anonymous namespace
-
 const Z80MCExpr *Z80MCExpr::create(VariantKind Kind, const MCExpr *Expr,
                                    bool Negated, MCContext &Ctx) {
   return new (Ctx) Z80MCExpr(Kind, Expr, Negated);
@@ -41,15 +29,7 @@ void Z80MCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
     OS << '-';
   }
 
-  // Print z80_16lo and z80_16hi as arithmetic for z80asm.
-  if (MAI->isZ88DK()) {
-    OS << '(';
-    MAI->printExpr(OS, *getSubExpr());
-    OS << (Kind == VK_ADDR16_LO ? ") & 0xff" : ") >> 8");
-    return;
-  }
-
-  // Print z80_16lo(x) as <(x) and z80_16hi(x) as >(x) for sdasz80.
+  // sdasz80 selects bytes with <(x) and >(x).
   if (MAI->isSDCC()) {
     OS << (Kind == VK_ADDR16_LO ? "<(" : ">(");
     MAI->printExpr(OS, *getSubExpr());
@@ -57,9 +37,10 @@ void Z80MCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
     return;
   }
 
-  OS << getName() << '(';
+  // GNU as and z80asm select bytes with (x)&0xff and (x)>>8.
+  OS << '(';
   MAI->printExpr(OS, *getSubExpr());
-  OS << ')';
+  OS << (Kind == VK_ADDR16_LO ? ")&0xff" : ")>>8");
 }
 
 bool Z80MCExpr::evaluateAsConstant(int64_t &Result) const {
@@ -129,30 +110,6 @@ Z80::Fixups Z80MCExpr::getFixupKind() const {
 
 void Z80MCExpr::visitUsedExpr(MCStreamer &Streamer) const {
   Streamer.visitUsedExpr(*getSubExpr());
-}
-
-const char *Z80MCExpr::getName() const {
-  const auto &Modifier = std::find_if(
-      std::begin(ModifierNames), std::end(ModifierNames),
-      [this](ModifierEntry const &Mod) { return Mod.VariantKind == Kind; });
-
-  if (Modifier != std::end(ModifierNames)) {
-    return Modifier->Spelling;
-  }
-  return nullptr;
-}
-
-Z80MCExpr::VariantKind Z80MCExpr::getKindByName(StringRef Name) {
-  const auto &Modifier =
-      std::find_if(std::begin(ModifierNames), std::end(ModifierNames),
-                   [&Name](ModifierEntry const &Mod) {
-                     return Name.equals_insensitive(Mod.Spelling);
-                   });
-
-  if (Modifier != std::end(ModifierNames)) {
-    return Modifier->VariantKind;
-  }
-  return VK_NONE;
 }
 
 } // end of namespace llvm

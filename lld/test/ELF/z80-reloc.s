@@ -19,7 +19,7 @@ _start:
 	ld	hl, ext
 
 	.data
-	.byte	z80_16lo(ext), z80_16hi(ext)
+	.byte	ext & 0xff, ext >> 8
 
 ; CHECK:      100: 10 03       djnz $105
 ; CHECK-NEXT: 102: 10 06       djnz $10a

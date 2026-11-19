@@ -33,7 +33,6 @@ public:
   VariantKind getKind() const { return Kind; }
   /// Gets the name of the expression.
   Z80::Fixups getFixupKind() const;
-  const char *getName() const;
   const MCExpr *getSubExpr() const { return SubExpr; }
   /// Gets the fixup which corresponds to the expression.
   /// Evaluates the fixup as a constant value.
@@ -55,8 +54,6 @@ public:
   static bool classof(const MCExpr *E) {
     return E->getKind() == MCExpr::Target;
   }
-
-  static VariantKind getKindByName(StringRef Name);
 
 private:
   int64_t evaluateAsInt64(int64_t Value) const;

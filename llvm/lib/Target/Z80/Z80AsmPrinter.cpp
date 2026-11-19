@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -91,7 +92,15 @@ public:
 const MCExpr *Z80AsmPrinter::lowerConstant(const Constant *CV,
                                            const Constant *BaseCV,
                                            uint64_t Offset) {
-  return AsmPrinter::lowerConstant(CV);
+  // An address cast to i8 is its low byte. Emit it as (address)&0xff.
+  if (const auto *CE = dyn_cast<ConstantExpr>(CV))
+    if ((CE->getOpcode() == Instruction::Trunc ||
+         CE->getOpcode() == Instruction::PtrToInt) &&
+        CE->getType()->isIntegerTy(8))
+      return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO,
+                               lowerConstant(CE->getOperand(0), BaseCV, Offset),
+                               false, OutContext);
+  return AsmPrinter::lowerConstant(CV, BaseCV, Offset);
 }
 
 void Z80AsmPrinter::EmitToStreamer(MCStreamer &S, MCInst &Inst) {

@@ -239,7 +239,7 @@ private:
 
   ParseStatus parseDirective(AsmToken DirectiveID) override;
 
-  bool parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) override;
+  bool parseDataExpr(const MCExpr *&Res) override;
 
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
@@ -258,6 +258,7 @@ private:
   bool tryParseRegisterOperand(OperandVector &Operands);
   bool tryParseShadowAF(OperandVector &Operands);
   bool parseOperand(OperandVector &Operands, StringRef Mnemonic);
+  bool isIndirectOperand();
   bool parseParenOperand(OperandVector &Operands, StringRef Mnemonic);
   bool parseSDASZ80Indexed(OperandVector &Operands, const MCExpr *Disp,
                            SMLoc DispLoc);
@@ -368,29 +369,45 @@ bool Z80AsmParser::tryParseRegisterOperand(OperandVector &Operands) {
   return false;
 }
 
-bool Z80AsmParser::parseExpression(const MCExpr *&Expr) {
-  return getParser().parseExpression(Expr);
+// Turn x & 0xff into the low byte of x and x >> 8 into the high byte.
+static const MCExpr *selectByte(const MCExpr *Expr, MCContext &Ctx) {
+  const auto *BE = dyn_cast<MCBinaryExpr>(Expr);
+  int64_t RHS;
+  if (!BE || !BE->getRHS()->evaluateAsAbsolute(RHS))
+    return Expr;
+  if (BE->getOpcode() == MCBinaryExpr::And && RHS == 0xff)
+    return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO, BE->getLHS(), false, Ctx);
+  if (BE->getOpcode() == MCBinaryExpr::LShr && RHS == 8)
+    return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_HI, BE->getLHS(), false, Ctx);
+  return Expr;
 }
 
-// Parse z80_16lo(expr) and z80_16hi(expr).
-bool Z80AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
-  const AsmToken &Tok = Parser.getTok();
-  Z80MCExpr::VariantKind Kind = Z80MCExpr::VK_NONE;
-  if (Tok.is(AsmToken::Identifier) && getLexer().peekTok().is(AsmToken::LParen))
-    Kind = Z80MCExpr::getKindByName(Tok.getString());
-  if (Kind == Z80MCExpr::VK_NONE)
-    return Parser.parsePrimaryExpr(Res, EndLoc, nullptr);
-
-  Parser.Lex(); // Eat the operator name.
-  Parser.Lex(); // Eat '('.
-  const MCExpr *SubExpr;
-  if (Parser.parseExpression(SubExpr, EndLoc))
+bool Z80AsmParser::parseExpression(const MCExpr *&Expr) {
+  if (getParser().parseExpression(Expr))
     return true;
-  EndLoc = Parser.getTok().getEndLoc();
-  if (Parser.parseToken(AsmToken::RParen, "expected ')'"))
-    return true;
-  Res = Z80MCExpr::create(Kind, SubExpr, false, getContext());
+  Expr = selectByte(Expr, getContext());
   return false;
+}
+
+bool Z80AsmParser::parseDataExpr(const MCExpr *&Res) {
+  return parseExpression(Res);
+}
+
+// Return true when the ')' matching the leading '(' ends the operand.
+bool Z80AsmParser::isIndirectOperand() {
+  AsmToken Toks[32];
+  size_t N = getLexer().peekTokens(Toks);
+  unsigned Depth = 1;
+  for (size_t I = 0; I < N; ++I) {
+    if (Toks[I].is(AsmToken::LParen))
+      ++Depth;
+    else if (Toks[I].is(AsmToken::RParen) && --Depth == 0)
+      return I + 1 == N || Toks[I + 1].is(AsmToken::Comma) ||
+             Toks[I + 1].is(AsmToken::EndOfStatement);
+    else if (Toks[I].is(AsmToken::EndOfStatement))
+      break;
+  }
+  return true;
 }
 
 /// Parse a parenthesized operand: (reg), (expr), (ix+d), (iy+d).
@@ -557,7 +574,7 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
   }
 
   // Parenthesized operand: (reg), (expr), (ix+d)
-  if (getLexer().is(AsmToken::LParen))
+  if (getLexer().is(AsmToken::LParen) && isIndirectOperand())
     return parseParenOperand(Operands, Mnemonic);
 
   // Try register
@@ -604,11 +621,12 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
     return false;
   }
 
-  // Parse an expression that starts with a number, +, -, ~, ! or '.'.
+  // Parse an expression that starts with a number, +, -, ~, !, '.' or '('.
   // '.' is the address of the current instruction.
   if (getLexer().is(AsmToken::Integer) || getLexer().is(AsmToken::Minus) ||
       getLexer().is(AsmToken::Plus) || getLexer().is(AsmToken::Tilde) ||
-      getLexer().is(AsmToken::Exclaim) || getLexer().is(AsmToken::Dot)) {
+      getLexer().is(AsmToken::Exclaim) || getLexer().is(AsmToken::Dot) ||
+      getLexer().is(AsmToken::LParen)) {
     SMLoc S = Parser.getTok().getLoc();
     const MCExpr *Expr;
     if (parseExpression(Expr))
