@@ -295,6 +295,8 @@ public:
                const MCInstrInfo &MII)
       : MCTargetAsmParser(STI, MII), Parser(Parser) {
     MCAsmParserExtension::Initialize(Parser);
+    // Z80 assemblers count .ds in bytes.
+    Parser.addAliasForDirective(".ds", ".skip");
     MRI = getContext().getRegisterInfo();
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
@@ -406,17 +408,15 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands) {
       if ((Reg == Z80::IX || Reg == Z80::IY) &&
           (Parser.getTok().is(AsmToken::Plus) ||
            Parser.getTok().is(AsmToken::Minus))) {
-        bool IsNeg = Parser.getTok().is(AsmToken::Minus);
         SMLoc PlusLoc = Parser.getTok().getLoc();
-        Parser.Lex(); // Eat +/-
+        // Eat only '+'. parseExpression reads a leading '-' as unary minus.
+        if (Parser.getTok().is(AsmToken::Plus))
+          Parser.Lex();
 
         const MCExpr *Disp;
         SMLoc DispLoc = Parser.getTok().getLoc();
         if (parseExpression(Disp))
           return true;
-
-        if (IsNeg)
-          Disp = MCUnaryExpr::createMinus(Disp, getContext());
 
         if (Parser.getTok().isNot(AsmToken::RParen))
           return Error(Parser.getTok().getLoc(), "expected ')'");

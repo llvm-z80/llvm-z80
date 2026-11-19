@@ -218,7 +218,7 @@ execute/pr82210.c                           : skip=gcc
 execute/pr94591.c                           : skip=gcc
 execute/pr98304-2.c                         : skip=gcc
 
-# unsupported (77)
+# unsupported (78)
 compile/20000804-1.c                        : skip=unsupported
 compile/20001205-1.c                        : skip=unsupported
 compile/20011029-1.c                        : skip=unsupported
@@ -237,6 +237,7 @@ compile/pr122588-1.c                        : skip=unsupported
 compile/pr123365.c                          : skip=unsupported
 compile/pr17397.c sm83                      : skip=unsupported
 compile/pr35318.c                           : skip=unsupported
+compile/pr44686.c                           : skip=unsupported
 compile/pr51354.c                           : skip=unsupported
 compile/pr55851.c sm83                      : skip=unsupported
 compile/pr55921.c                           : skip=unsupported

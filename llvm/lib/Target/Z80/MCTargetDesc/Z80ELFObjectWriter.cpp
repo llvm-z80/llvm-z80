@@ -32,6 +32,13 @@ unsigned Z80ELFObjectWriter::getRelocType(const MCFixup &Fixup,
                                           bool IsPCRel) const {
   unsigned Kind = Fixup.getKind();
   auto Specifier = static_cast<Z80MCExpr::VariantKind>(Target.getSpecifier());
+  // Use R_Z80_8_PCREL for a PC-relative .byte and reject the rest.
+  if (IsPCRel && Kind != Z80::PCRel8) {
+    if (Kind == FK_Data_1 && Specifier == Z80MCExpr::VK_NONE)
+      return ELF::R_Z80_8_PCREL;
+    reportError(Fixup.getLoc(), "unsupported PC-relative relocation");
+    return ELF::R_Z80_NONE;
+  }
   switch (Kind) {
   case FK_Data_1:
     switch (Specifier) {
