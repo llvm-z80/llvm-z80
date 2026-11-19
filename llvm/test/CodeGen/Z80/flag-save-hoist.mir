@@ -21,9 +21,9 @@ body:             |
     liveins: $e, $sp
     $a = LD_r_r $e
     CP_n 5, implicit-def $f, implicit $a
-    PUSH_AF implicit $a, implicit $f
+    PUSH_AF implicit $f, implicit $a
     LDHL_SP_e 6, implicit-def $hl, implicit-def $f, implicit $sp
-    POP_AF implicit-def $a, implicit-def $f
+    POP_AF implicit-def $f, implicit-def $a
     $c = LD_r_HLind implicit $hl
     JR_NZ_e %bb.0, implicit $f
 
@@ -48,12 +48,12 @@ body:             |
     liveins: $e, $bc, $sp
     $a = LD_r_r $e
     CP_n 5, implicit-def $f, implicit $a
-    PUSH_BC implicit $bc, implicit-def $sp, implicit $sp
-    PUSH_AF implicit $a, implicit $f
+    PUSH_BC implicit $c, implicit $b, implicit-def $sp, implicit $sp
+    PUSH_AF implicit $f, implicit $a
     LDHL_SP_e 8, implicit-def $hl, implicit-def $f, implicit $sp
-    POP_AF implicit-def $a, implicit-def $f
+    POP_AF implicit-def $f, implicit-def $a
     $d = LD_r_HLind implicit $hl
-    POP_BC implicit-def $bc, implicit-def $sp, implicit $sp
+    POP_BC implicit-def $c, implicit-def $b, implicit-def $sp, implicit $sp
     JR_NZ_e %bb.0, implicit $f
 
   bb.1:
@@ -80,9 +80,9 @@ body:             |
     $a = LD_r_r $e
     CP_n 5, implicit-def $f, implicit $a
     $c = LD_r_r $l
-    PUSH_AF implicit $a, implicit $f
+    PUSH_AF implicit $f, implicit $a
     LDHL_SP_e 6, implicit-def $hl, implicit-def $f, implicit $sp
-    POP_AF implicit-def $a, implicit-def $f
+    POP_AF implicit-def $f, implicit-def $a
     $b = LD_r_HLind implicit $hl
     JR_NZ_e %bb.0, implicit $f
 
@@ -104,9 +104,9 @@ body:             |
     successors: %bb.0, %bb.1
     liveins: $a, $sp
     ADD_SP_e 254, implicit-def $sp, implicit-def $f, implicit $sp
-    PUSH_AF implicit $a, implicit $f
+    PUSH_AF implicit $f, implicit $a
     LDHL_SP_e 6, implicit-def $hl, implicit-def $f, implicit $sp
-    POP_AF implicit-def $a, implicit-def $f
+    POP_AF implicit-def $f, implicit-def $a
     $c = LD_r_HLind implicit $hl
     JR_NZ_e %bb.0, implicit $f
 
@@ -132,8 +132,8 @@ body:             |
     liveins: $e
     $a = LD_r_r $e
     CP_n 5, implicit-def $f, implicit $a
-    PUSH_AF implicit $a, implicit $f
-    POP_AF implicit-def $a, implicit-def $f
+    PUSH_AF implicit $f, implicit $a
+    POP_AF implicit-def $f, implicit-def $a
     JR_NZ_e %bb.0, implicit $f
 
   bb.1:
@@ -153,9 +153,9 @@ body:             |
     liveins: $e, $hl
     $a = LD_r_r $e
     CP_n 5, implicit-def $f, implicit $a
-    PUSH_AF implicit $a, implicit $f
+    PUSH_AF implicit $f, implicit $a
     $hl = INC_rr $hl
-    POP_AF implicit-def $a, implicit-def $f
+    POP_AF implicit-def $f, implicit-def $a
     $c = LD_r_HLind implicit $hl
     JR_NZ_e %bb.0, implicit $f
 
@@ -176,13 +176,13 @@ body:             |
     successors: %bb.0, %bb.1
     liveins: $b, $sp
     $b = DEC_r $b, implicit-def $f
-    PUSH_AF implicit undef $a, implicit $f
+    PUSH_AF implicit $f, implicit undef $a
     LDHL_SP_e 6, implicit-def $hl, implicit-def $f, implicit $sp
-    POP_AF implicit-def $a, implicit-def $f
+    POP_AF implicit-def $f, implicit-def $a
     $c = LD_r_HLind implicit $hl
-    PUSH_AF implicit $a, implicit $f
+    PUSH_AF implicit $f, implicit $a
     LDHL_SP_e 8, implicit-def $hl, implicit-def $f, implicit $sp
-    POP_AF implicit-def $a, implicit-def $f
+    POP_AF implicit-def $f, implicit-def $a
     $d = LD_r_HLind implicit $hl
     JR_NZ_e %bb.0, implicit $f
 
@@ -196,6 +196,6 @@ body:             |
 # CHECK-LABEL: name: empty_a_after_hoist
 # CHECK:      LDHL_SP_e 4
 # CHECK-NEXT: $b = DEC_r
-# CHECK:      PUSH_AF implicit undef $a
+# CHECK:      PUSH_AF implicit $f, implicit undef $a
 
 ...

@@ -258,25 +258,20 @@ bool Z80RegisterInfo::saveScavengerRegister(MachineBasicBlock &MBB,
 
   // Z80 can only PUSH/POP 16-bit register pairs.
   // For 8-bit registers, save the containing pair.
-  unsigned PushOpc, PopOpc;
-  if (Reg == Z80::BC || Reg == Z80::B || Reg == Z80::C) {
-    PushOpc = Z80::PUSH_BC;
-    PopOpc = Z80::POP_BC;
-  } else if (Reg == Z80::DE || Reg == Z80::D || Reg == Z80::E) {
-    PushOpc = Z80::PUSH_DE;
-    PopOpc = Z80::POP_DE;
-  } else if (Reg == Z80::HL || Reg == Z80::H || Reg == Z80::L) {
-    PushOpc = Z80::PUSH_HL;
-    PopOpc = Z80::POP_HL;
-  } else if (Reg == Z80::AF || Reg == Z80::A) {
-    PushOpc = Z80::PUSH_AF;
-    PopOpc = Z80::POP_AF;
-  } else {
+  MCRegister Pair;
+  if (Reg == Z80::BC || Reg == Z80::B || Reg == Z80::C)
+    Pair = Z80::BC;
+  else if (Reg == Z80::DE || Reg == Z80::D || Reg == Z80::E)
+    Pair = Z80::DE;
+  else if (Reg == Z80::HL || Reg == Z80::H || Reg == Z80::L)
+    Pair = Z80::HL;
+  else if (Reg == Z80::AF || Reg == Z80::A)
+    Pair = Z80::AF;
+  else
     return false;
-  }
 
-  BuildMI(MBB, I, DL, TII.get(PushOpc));
-  BuildMI(MBB, std::next(UseMI), DL, TII.get(PopOpc));
+  Z80::emitPairSavePush(MBB, I, DL, TII, Pair);
+  BuildMI(MBB, std::next(UseMI), DL, TII.get(Z80::getPopOpcode(Pair)));
   return true;
 }
 

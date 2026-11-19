@@ -9,7 +9,7 @@
 ...
 ---
 # CHECK-LABEL: name: callee_cleanup
-# CHECK:       PUSH_HL implicit killed $hl
+# CHECK:       PUSH_HL implicit killed $l, implicit killed $h
 # CHECK-NEXT:  $hl = LD_rr_nn 2
 # CHECK-NEXT:  ADD_HL_SP
 # CHECK-NEXT:  $c = LD_r_HLind
@@ -29,7 +29,7 @@ body:             |
     liveins: $de, $hl
     SPILL_GR16 killed $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
-    PUSH_HL implicit killed $hl
+    PUSH_HL implicit killed $l, implicit killed $h
     $bc = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $bc
     $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)

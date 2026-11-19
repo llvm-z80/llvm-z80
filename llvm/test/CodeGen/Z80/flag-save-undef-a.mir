@@ -70,13 +70,13 @@ body:             |
 # CHECK-LABEL: name: kill
 # CHECK:       $b = LD_r_r killed $a
 # CHECK:       $b = DEC_r
-# CHECK-NEXT:  PUSH_AF implicit undef $a, implicit $f
+# CHECK-NEXT:  PUSH_AF implicit $f, implicit undef $a
 # CHECK-NEXT:  LDHL_SP_e
 # CHECK-NEXT:  POP_AF
 
 # CHECK-LABEL: name: dead
 # CHECK:       dead $a = LD_r_n 3
 # CHECK:       $b = DEC_r
-# CHECK-NEXT:  PUSH_AF implicit undef $a, implicit $f
+# CHECK-NEXT:  PUSH_AF implicit $f, implicit undef $a
 # CHECK-NEXT:  LDHL_SP_e
 # CHECK-NEXT:  POP_AF

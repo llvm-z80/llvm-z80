@@ -125,13 +125,13 @@ def LD_SP_HL : Inst8<"ld sp,hl", 0xF9> { let Uses = [HL]; let Defs = [SP]; }
 // PUSH rr
 class PUSHrr<Register rr>
     : Inst8<"push " # rr.AsmName, !or(0xC5, !shl(rr.HWEncoding{1-0}, 4))> {
-  let Uses = [rr];
+  let Uses = rr.SubRegs;
 }
 
 // POP rr
 class POPrr<Register rr>
     : Inst8<"pop " # rr.AsmName, !or(0xC1, !shl(rr.HWEncoding{1-0}, 4))> {
-  let Defs = [rr];
+  let Defs = rr.SubRegs;
 }
 
 // PUSH/POP - stack memory access, no unmodeled side effects.
@@ -142,14 +142,14 @@ let mayLoad = false, mayStore = true, hasSideEffects = false in {
 def PUSH_BC : PUSHrr<BC>;
 def PUSH_DE : PUSHrr<DE>;
 def PUSH_HL : PUSHrr<HL>;
-def PUSH_AF : PUSHrr<AF> { let Uses = [A, F]; }
+def PUSH_AF : PUSHrr<AF>;
 }
 
 let mayLoad = true, mayStore = false, hasSideEffects = false in {
 def POP_BC : POPrr<BC>;
 def POP_DE : POPrr<DE>;
 def POP_HL : POPrr<HL>;
-def POP_AF : POPrr<AF> { let Defs = [A, F]; }
+def POP_AF : POPrr<AF>;
 }
 
 //===----------------------------------------------------------------------===//

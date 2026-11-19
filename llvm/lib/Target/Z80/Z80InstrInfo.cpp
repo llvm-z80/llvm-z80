@@ -301,7 +301,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
           }
         } else {
           Register ScratchReg = SrcIsIndexHi ? Z80::D : Z80::E;
-          BuildMI(MBB, I, DL, get(Z80::PUSH_DE));
+          Z80::emitPairSavePush(MBB, I, DL, *this, Z80::DE);
           BuildMI(MBB, I, DL, get(PushOp));
           BuildMI(MBB, I, DL, get(Z80::POP_DE));
           Z80::buildLD8(MBB, I, DL, *this, DestReg, ScratchReg);
@@ -332,7 +332,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       Register TargetReg = DstIsIndexHi ? Z80::H : Z80::L;
 
       if (SrcReg == Z80::H || SrcReg == Z80::L) {
-        BuildMI(MBB, I, DL, get(Z80::PUSH_AF));
+        Z80::emitPairSavePush(MBB, I, DL, *this, Z80::AF);
         Z80::buildLD8(MBB, I, DL, *this, Z80::A, SrcReg);
         Z80::emitHLSavePush(MBB, I, DL, *this);
         BuildMI(MBB, I, DL, get(PushIR));
@@ -1024,7 +1024,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register Reg = MI.getOperand(0).getReg();
     MachineInstr *Push = BuildMI(MBB, MI, DL, get(Z80::getPushOpcode(Reg)));
     if (MI.getOperand(0).isKill())
-      Push->addRegisterKilled(Reg, TRI);
+      for (MachineOperand &MO : Push->implicit_operands())
+        if (MO.isUse() && TRI->regsOverlap(MO.getReg(), Reg))
+          MO.setIsKill();
     MI.eraseFromParent();
     return true;
   }
@@ -1033,7 +1035,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     Register Reg = MI.getOperand(0).getReg();
     MachineInstr *Pop = BuildMI(MBB, MI, DL, get(Z80::getPopOpcode(Reg)));
     if (MI.getOperand(0).isDead())
-      Pop->addRegisterDead(Reg, TRI);
+      for (MachineOperand &MO : Pop->implicit_operands())
+        if (MO.isDef() && TRI->regsOverlap(MO.getReg(), Reg))
+          MO.setIsDead();
     MI.eraseFromParent();
     return true;
   }

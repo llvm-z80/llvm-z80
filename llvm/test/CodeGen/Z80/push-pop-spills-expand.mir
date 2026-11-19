@@ -9,14 +9,14 @@
 ---
 # The kill and dead flags stay on the lowered PUSH and POP.
 # CHECK-LABEL: name: lower
-# CHECK:       PUSH_BC implicit killed $bc
-# CHECK-NEXT:  PUSH_DE implicit $de
+# CHECK:       PUSH_BC implicit killed $c, implicit killed $b
+# CHECK-NEXT:  PUSH_DE implicit $e, implicit $d
 # CHECK-NEXT:  PUSH_IX implicit killed $ix
 # CHECK-NEXT:  PUSH_IY implicit killed $iy
-# CHECK-NEXT:  POP_HL implicit-def $hl
+# CHECK-NEXT:  POP_HL implicit-def $l, implicit-def $h
 # CHECK-NEXT:  POP_IX implicit-def $ix
 # CHECK-NEXT:  POP_IY implicit-def dead $iy
-# CHECK-NEXT:  POP_BC implicit-def $bc
+# CHECK-NEXT:  POP_BC implicit-def $c, implicit-def $b
 name: lower
 tracksRegLiveness: true
 body: |

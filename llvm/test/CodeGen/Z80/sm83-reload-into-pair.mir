@@ -44,7 +44,7 @@ body:             |
     $l = LD_r_r killed $a
     $c = LD_r_r $l
     $b = LD_r_r $h
-    PUSH_HL implicit $hl, implicit-def $sp, implicit $sp
+    PUSH_HL implicit $l, implicit $h, implicit-def $sp, implicit $sp
     RET implicit killed $bc
 
 # The rewrite stops writing HL, so a reader of it downstream rules the fold

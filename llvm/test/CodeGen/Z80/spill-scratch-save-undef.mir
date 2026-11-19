@@ -25,4 +25,4 @@ body:             |
 ...
 ---
 # CHECK-LABEL: name: scratch_pair_empty
-# CHECK: PUSH_BC implicit undef $bc
+# CHECK: PUSH_BC implicit undef $c, implicit undef $b

@@ -57,7 +57,7 @@ body:             |
 # Inside a call sequence, SPAdj counts the argument PUSH and the SPILL_PUSH
 # is added on top: SP+2 on entry becomes SP+6.
 # CHECK-LABEL: name: call_under_push
-# CHECK:       PUSH_HL implicit killed $hl
+# CHECK:       PUSH_HL implicit killed $l, implicit killed $h
 # CHECK-NEXT:  $hl = LD_rr_nn 6
 # CHECK-NEXT:  ADD_HL_SP
 # CHECK-NEXT:  $c = LD_r_HLind
@@ -73,7 +73,7 @@ body:             |
     liveins: $de, $hl
     SPILL_PUSH killed $de
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
-    PUSH_HL implicit killed $hl
+    PUSH_HL implicit killed $l, implicit killed $h
     $c = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
     CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $c
     ADJCALLSTACKUP 2, 2, implicit-def $sp, implicit $sp
@@ -141,7 +141,7 @@ body:             |
 # A push inside a call sequence. The stack argument is at SP+6 under the push
 # and the argument, SP+4 under the push, and SP+2 after the pop.
 # CHECK-LABEL: name: push_in_call_seq
-# CHECK:       PUSH_HL implicit killed $hl
+# CHECK:       PUSH_HL implicit killed $l, implicit killed $h
 # CHECK-NEXT:  $hl = LD_rr_nn 6
 # CHECK-NEXT:  ADD_HL_SP
 # CHECK-NEXT:  $c = LD_r_HLind
@@ -164,7 +164,7 @@ body:             |
     liveins: $de, $hl
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
     SPILL_PUSH killed $de
-    PUSH_HL implicit killed $hl
+    PUSH_HL implicit killed $l, implicit killed $h
     $c = RELOAD_GR8 %fixed-stack.0, 0 :: (load (s8) from %fixed-stack.0)
     CALL_nn @f, implicit-def dead $a, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $c
     ADJCALLSTACKUP 2, 2, implicit-def $sp, implicit $sp
