@@ -13,7 +13,6 @@
 #include "Z80InstPrinter.h"
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
-#include "Z80MCExpr.h"
 
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
@@ -222,13 +221,6 @@ void Z80InstPrinterSDCC::printOperand(const MCInst *MI, unsigned OpNo,
     assert(Op.isExpr() && "Unknown operand kind in printOperand");
     if (NeedsHash)
       OS << '#';
-    // Print z80_16lo(x) as <(x) and z80_16hi(x) as >(x) for sdasz80.
-    if (const auto *MME = dyn_cast<Z80MCExpr>(Op.getExpr())) {
-      OS << (MME->getKind() == Z80MCExpr::VK_ADDR16_LO ? "<(" : ">(");
-      MAI.printExpr(OS, *MME->getSubExpr());
-      OS << ')';
-      return;
-    }
     MAI.printExpr(OS, *Op.getExpr());
   }
 }

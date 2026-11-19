@@ -49,6 +49,14 @@ void Z80MCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
     return;
   }
 
+  // Print z80_16lo(x) as <(x) and z80_16hi(x) as >(x) for sdasz80.
+  if (MAI->isSDCC()) {
+    OS << (Kind == VK_ADDR16_LO ? "<(" : ">(");
+    MAI->printExpr(OS, *getSubExpr());
+    OS << ')';
+    return;
+  }
+
   OS << getName() << '(';
   MAI->printExpr(OS, *getSubExpr());
   OS << ')';
