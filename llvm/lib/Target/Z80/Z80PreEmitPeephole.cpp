@@ -344,7 +344,7 @@ public:
 // The offset is tracked relative to SP, so SP movement (PUSH/POP/ADD SP)
 // shifts it; a call ends tracking, since callee cleanup leaves SP
 // unknowable here (the same reason the push ix/pop hl rewrite was
-// abandoned). LDHL also defines FLAGS, so a rewrite needs FLAGS dead.
+// abandoned). LDHL also defines F, so a rewrite needs F dead.
 static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
                              const TargetRegisterInfo *TRI);
 
@@ -376,7 +376,7 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
 
     if (Register Src = getZeroNeutralAluSrcReg(MI);
         Src.isValid() && Zero.count(Src.asMCReg()) &&
-        isRegDeadAfter(std::next(MII), MBB, TRI, Z80::FLAGS)) {
+        isRegDeadAfter(std::next(MII), MBB, TRI, Z80::F)) {
       LLVM_DEBUG(dbgs() << "  Zero operand, no effect: " << MI);
       MII = MBB.erase(MII);
       ++NumZeroLogicElided;
@@ -389,7 +389,7 @@ static bool elideZeroOperandLogic(MachineBasicBlock &MBB,
     // the peepholes below take both.
     if (Register Src = getAccumulatorNeutralAluSrcReg(MI);
         Src.isValid() && Zero.count(Z80::A) &&
-        isRegDeadAfter(std::next(MII), MBB, TRI, Z80::FLAGS)) {
+        isRegDeadAfter(std::next(MII), MBB, TRI, Z80::F)) {
       LLVM_DEBUG(dbgs() << "  Zero accumulator, is a move: " << MI);
       Z80::buildLD8(MBB, MII, MI.getDebugLoc(), *TII, Z80::A, Src);
       MII = MBB.erase(MII);
@@ -735,10 +735,8 @@ static bool elidePushPopAcrossStretch(MachineBasicBlock &MBB,
     for (const auto &P : Pairs) {
       if (MII->getOpcode() != P.PushOpc)
         continue;
-      // FLAGS is not a subregister of AF.
       auto Clobbers = [&](const MachineInstr &J) {
-        return J.modifiesRegister(P.Reg, TRI) ||
-               (P.Reg == Z80::AF && J.modifiesRegister(Z80::FLAGS, TRI));
+        return J.modifiesRegister(P.Reg, TRI);
       };
       SmallVector<MachineInstr *, 8> Rebase;
       unsigned Budget = 16;
@@ -906,7 +904,7 @@ static bool materializeConstantStores(MachineBasicBlock &MBB,
       auto FirstIt = *llvm::find_if(Stores, [&](auto It) {
         return (It->getOperand(0).getImm() & 0xFF) == Value;
       });
-      bool FlagsDead = isRegDeadAfter(FirstIt, MBB, TRI, Z80::FLAGS);
+      bool FlagsDead = isRegDeadAfter(FirstIt, MBB, TRI, Z80::F);
       unsigned Cost = (Value == 0 && FlagsDead) ? 1 : 2;
       if (Saving <= Cost)
         continue;
@@ -993,7 +991,7 @@ static bool materializeIXConstantStores(MachineBasicBlock &MBB,
     auto FirstIt = *llvm::find_if(Stores, [&](auto It) {
       return (It->getOperand(1).getImm() & 0xFF) == Value;
     });
-    bool FlagsDead = isRegDeadAfter(FirstIt, MBB, TRI, Z80::FLAGS);
+    bool FlagsDead = isRegDeadAfter(FirstIt, MBB, TRI, Z80::F);
     unsigned Cost = (Value == 0 && FlagsDead) ? 1 : 2;
     if (Saving <= Cost)
       continue;
@@ -1060,7 +1058,7 @@ static bool hoistLDHLOutOfFlagSave(MachineBasicBlock &MBB,
       Live.stepBackward(Prev);
       Disp -= Adj;
       --At;
-      if (!Live.contains(Z80::FLAGS)) {
+      if (!Live.contains(Z80::F)) {
         Found = true;
         break;
       }
@@ -1140,7 +1138,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
       continue;
     }
     if (isZeroA(MI) && AKnown && (AVal & 0xFF) == 0 &&
-        isRegDeadAfter(Next, MBB, TRI, Z80::FLAGS)) {
+        isRegDeadAfter(Next, MBB, TRI, Z80::F)) {
       LLVM_DEBUG(dbgs() << "  A reuse: erasing xor a " << MI);
       MII = MBB.erase(MII);
       ++NumLDHLReused;
@@ -1165,7 +1163,7 @@ static bool reuseLDHLAddress(MachineBasicBlock &MBB, const TargetInstrInfo *TII,
     if (Opc == Z80::LDHL_SP_e) {
       // The immediate is a signed 8-bit displacement.
       int64_t N = SignExtend64<8>(MI.getOperand(0).getImm() & 0xFF);
-      if (Known && isRegDeadAfter(Next, MBB, TRI, Z80::FLAGS)) {
+      if (Known && isRegDeadAfter(Next, MBB, TRI, Z80::F)) {
         int64_t D = N - Off;
         if (D == 0) {
           LLVM_DEBUG(dbgs() << "  LDHL reuse: erasing " << MI);
@@ -1319,14 +1317,14 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
 
     // --- Peephole: LD A,#0 → XOR A ---
     // XOR A (1 byte) sets A to 0 just like LD A,#0 (2 bytes), but also
-    // sets FLAGS (Z=1, S=0, H=0, P=1, N=0, C=0). Safe when FLAGS is dead.
+    // sets F (Z=1, S=0, H=0, P=1, N=0, C=0). Safe when F is dead.
     for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
          MII != MIE;) {
       MachineInstr &MI = *MII;
       if (getLD8nDst(MI) == Z80::A && MI.getOperand(1).isImm() &&
           MI.getOperand(1).getImm() == 0) {
         auto After = std::next(MII);
-        if (isRegDeadAfter(After, MBB, TRI, Z80::FLAGS)) {
+        if (isRegDeadAfter(After, MBB, TRI, Z80::F)) {
           LLVM_DEBUG(dbgs() << "  LD A,#0 → XOR A: " << MI);
           Z80::buildZeroA(MBB, MI, MI.getDebugLoc(), *TII);
           MII = MBB.erase(MII);
@@ -1343,7 +1341,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // When a 16-bit constant is stored to the stack via a register pair,
     // replace with immediate stores to (HL). Saves 1 byte (8B → 7B) per
     // occurrence and frees the register pair.
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE;) {
         MachineInstr &MI = *MII;
@@ -1422,7 +1420,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // non-HL-modifying instructions between them, replace the second LDHL
     // with INC HL or DEC HL. Saves 1 byte (2B → 1B) per occurrence.
     // Common in consecutive byte-at-a-time stack initialization.
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE; ++MII) {
         if (MII->getOpcode() != Z80::LDHL_SP_e)
@@ -1483,8 +1481,8 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
         int64_t Diff = Offset2 - Offset1;
         if (Diff != 1 && Diff != -1)
           continue;
-        // LDHL sets FLAGS (H,C), INC/DEC HL does not. Verify FLAGS is dead.
-        if (!isRegDeadAfter(std::next(It), MBB, TRI, Z80::FLAGS))
+        // LDHL sets F (H,C), INC/DEC HL does not. Verify F is dead.
+        if (!isRegDeadAfter(std::next(It), MBB, TRI, Z80::F))
           continue;
 
         LLVM_DEBUG(dbgs() << "  LDHL SP,#" << Offset2 << " → "
@@ -1510,7 +1508,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     //   LD r,(HL); INC HL → LD A,(HL+); LD r,A   (2B → 2B, saves 4T)
     //   LD (HL),r; INC HL → LD A,r; LD (HL+),A   (2B → 2B, saves 4T)
     //   (same for DEC HL variants with HL-/HL-)
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
            MII != MIE;) {
         MachineInstr &MI = *MII;
@@ -1705,7 +1703,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // On SM83, stack access uses LDHL SP,#N; LD (HL),r / LD (HL),#imm.
     // Track what values (register or immediate) are at each stack offset,
     // then forward to subsequent loads to eliminate redundant LDHL sequences.
-    if (MF.getSubtarget<Z80Subtarget>().hasSM83()) {
+    if (MF.getSubtarget<Z80Subtarget>().isSM83()) {
       // Each slot can hold either a register value or an immediate.
       struct SlotVal {
         bool IsImm = false;
@@ -1822,10 +1820,10 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
             if (!slotMatches(AvLo->second, LoIsImm, LoReg, LoImm) ||
                 !slotMatches(AvHi->second, HiIsImm, HiReg, HiImm))
               return false;
-            // Values match. Safe to remove if HL and FLAGS are dead after.
+            // Values match. Safe to remove if HL and F are dead after.
             auto AfterStore = std::next(S2);
             if (!isRegDeadAfter(AfterStore, MBB, TRI, Z80::HL) ||
-                !isRegDeadAfter(AfterStore, MBB, TRI, Z80::FLAGS))
+                !isRegDeadAfter(AfterStore, MBB, TRI, Z80::F))
               return false;
             LLVM_DEBUG(dbgs() << "  SM83 eliminating redundant store SP+"
                               << AbsOff << "\n");
@@ -1956,11 +1954,11 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
                   if (AvLo != SPSlots.end() && AvHi != SPSlots.end()) {
                     SlotVal &SLo = AvLo->second;
                     SlotVal &SHi = AvHi->second;
-                    // Forwarding removes LDHL which sets HL and FLAGS.
+                    // Forwarding removes LDHL which sets HL and F.
                     // Verify both are dead after the load sequence.
                     auto AfterLoad = std::next(It3);
                     if (!isRegDeadAfter(AfterLoad, MBB, TRI, Z80::HL) ||
-                        !isRegDeadAfter(AfterLoad, MBB, TRI, Z80::FLAGS)) {
+                        !isRegDeadAfter(AfterLoad, MBB, TRI, Z80::F)) {
                       // Can't forward — fall through to tracking update.
                       invalidateSlotReg(TRI, LoadDst1);
                       invalidateSlotReg(TRI, LoadDst2);
@@ -2085,10 +2083,10 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
               }
             }
             // 8-bit load: LDHL; LD r,(HL)
-            // Forwarding removes LDHL (sets HL/FLAGS), so both must be dead.
+            // Forwarding removes LDHL (sets HL/F), so both must be dead.
             auto After8 = std::next(It1);
             if (!isRegDeadAfter(After8, MBB, TRI, Z80::HL) ||
-                !isRegDeadAfter(After8, MBB, TRI, Z80::FLAGS)) {
+                !isRegDeadAfter(After8, MBB, TRI, Z80::F)) {
               invalidateSlotReg(TRI, LoadDst1);
               SPSlots[AbsOff] = {false, MCPhysReg(LoadDst1), 0};
               MII = std::next(It1);
@@ -2270,7 +2268,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
   // (redundant store elimination keys slot identity on them), so the
   // address-reuse rewrite must not obscure those first.
   for (MachineBasicBlock &MBB : MF) {
-    if (STI.hasSM83()) {
+    if (STI.isSM83()) {
       Changed |= hoistLDHLOutOfFlagSave(MBB, TII, TRI);
       Changed |= reuseLDHLAddress(MBB, TII, TRI);
       // After address reuse: it creates the INC HL neighbors these fuse with.
@@ -2283,7 +2281,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // The store itself costs the same either way, so the LD A,n that pays
     // for the shorter stores is pure added time: a size-for-speed trade,
     // which is the level that takes those.
-    if (!STI.hasSM83() && MF.getFunction().hasMinSize())
+    if (!STI.isSM83() && MF.getFunction().hasMinSize())
       Changed |= materializeIXConstantStores(MBB, TII, TRI);
     Changed |= elidePopPushAcrossStretch(MBB, TII, TRI);
     Changed |= elidePushPopAcrossStretch(MBB, TII, TRI);

@@ -487,7 +487,7 @@ inline bool readsUndef(const MachineInstr &MI, Register Reg) {
 ///
 /// Reserved registers are asked about by membership: LivePhysRegs reports them
 /// as unavailable whether or not they carry anything, so only that answer is
-/// meaningful for FLAGS. For everything else availability is the right test,
+/// meaningful for F. For everything else availability is the right test,
 /// since a pair matters as soon as either half does.
 inline bool isLiveAt(MachineBasicBlock &MBB, MachineBasicBlock::iterator At,
                      MCRegister Reg, const TargetRegisterInfo *TRI) {
@@ -530,31 +530,27 @@ inline void extendLiveRangeTo(MachineBasicBlock &MBB,
   }
 }
 
-/// Emit the PUSH of a pair saved across an inserted sequence. The read is
-/// placed after register allocation settled the pair's liveness, so a value it
-/// still carries has a kill (or a dead definition) that now ends too early,
-/// and a pair carrying nothing must say so rather than name a value that was
-/// never produced.
+/// Emit a PUSH that saves \p Pair after register allocation. A register with a
+/// live value gets a live range that reaches the push. A register without a
+/// live value is marked undef.
 inline void emitPairSavePush(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator At, const DebugLoc &DL,
                              const TargetInstrInfo &TII, MCRegister Pair) {
   const TargetRegisterInfo *TRI =
       MBB.getParent()->getSubtarget().getRegisterInfo();
-  // Settle the question before the push exists, or the scan back from the
-  // insertion point reads the push's own operand as the answer. Either half
-  // carrying something is enough, since the save covers the whole pair.
-  bool Carries = false;
-  for (MCPhysReg Half : TRI->subregs(Pair))
-    if (hasLiveValue(MBB, At, Half, TRI)) {
-      Carries = true;
-      break;
-    }
-  MachineInstrBuilder Push =
-      BuildMI(MBB, At, DL, TII.get(Z80::getPushOpcode(Pair)));
-  if (Carries)
-    extendLiveRangeTo(MBB, Push->getIterator(), Pair, TRI);
-  else
-    markUndefUse(Push, Pair);
+  const MCInstrDesc &Desc = TII.get(Z80::getPushOpcode(Pair));
+  // Check liveness before the push exists.
+  // Otherwise the backward scan from At sees the new push as a read.
+  SmallVector<std::pair<MCPhysReg, bool>, 2> Reads;
+  for (MCPhysReg Reg : Desc.implicit_uses())
+    Reads.push_back({Reg, hasLiveValue(MBB, At, Reg, TRI)});
+  MachineInstrBuilder Push = BuildMI(MBB, At, DL, Desc);
+  for (auto [Reg, Carries] : Reads) {
+    if (Carries)
+      extendLiveRangeTo(MBB, Push->getIterator(), Reg, TRI);
+    else
+      markUndefUse(Push, Reg);
+  }
 }
 
 /// Emit the PUSH HL of a sequence that borrows HL, on the same terms.

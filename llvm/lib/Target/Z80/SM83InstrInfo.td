@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-let Predicates = [HasSM83], DecoderNamespace = "SM83" in {
+let Predicates = [IsSM83], DecoderNamespace = "SM83" in {
 
 //===----------------------------------------------------------------------===//
 //  Hardware Instructions
@@ -22,20 +22,21 @@ let Predicates = [HasSM83], DecoderNamespace = "SM83" in {
 // SM83 uses it as a nibble swap instruction.
 def SWAP_A : InstCB<"swap a", 0x37> {
   let Uses = [A];
-  let Defs = [A, FLAGS];
+  let Defs = [A, F];
 }
 
 // SM83 RETI - Return from interrupt (opcode 0xD9)
 // Unlike Z80 RETI (ED 4D), SM83 RETI is a single-byte instruction
 // that atomically enables interrupts (IME=1) and returns.
 // No conflict: SM83 DecoderNamespace separates from Z80's EXX (also 0xD9).
-def SM83_RETI : Inst8<"reti", 0xD9>, InstReturn;
+let isReturn = true, isTerminator = true, isBarrier = true in
+def SM83_RETI : Inst8<"reti", 0xD9>;
 
 // LDHL SP,e - Load SP + signed 8-bit offset into HL (opcode 0xF8)
 // sdasgb syntax: ldhl sp,#imm
-def LDHL_SP_e : Inst16SImm<"ldhl sp,", 0xF8> {
+def LDHL_SP_e : Inst16<"ldhl sp,", 0xF8, SImm8Mode> {
   let Uses = [SP];
-  let Defs = [HL, FLAGS];
+  let Defs = [HL, F];
   let mayLoad = 0;
   let mayStore = 0;
   let hasSideEffects = 0;
@@ -43,9 +44,9 @@ def LDHL_SP_e : Inst16SImm<"ldhl sp,", 0xF8> {
 
 // ADD SP,e - Add signed 8-bit immediate to SP (opcode 0xE8)
 // sdasgb syntax: add sp,#imm
-def ADD_SP_e : Inst16SImm<"add sp,", 0xE8> {
+def ADD_SP_e : Inst16<"add sp,", 0xE8, SImm8Mode> {
   let Uses = [SP];
-  let Defs = [SP, FLAGS];
+  let Defs = [SP, F];
 }
 
 // LD (nn),A - Store A to direct address (opcode 0xEA)
@@ -108,11 +109,13 @@ def LD_A_HLD : Inst8<"ld a, (hl-)", 0x3A> {
 //===----------------------------------------------------------------------===//
 
 // Indirect call through HL via __call_hl trampoline.
-let isPseudo = true in
-def CALL_HL : Z80Inst<"call\t__call_hl">, InstCall {
-  let InOperandList = (ins);
+def CALL_HL : Z80Pseudo<(outs), (ins)> {
+  let isCall = true;
   let Uses = [HL];
-  let Defs = [A, BC, DE, HL, FLAGS];
+  let Defs = [A, BC, DE, HL, F];
+  let mayLoad = true;
+  let mayStore = true;
+  let hasSideEffects = true;
 }
 
 //===----------------------------------------------------------------------===//
@@ -121,27 +124,14 @@ def CALL_HL : Z80Inst<"call\t__call_hl">, InstCall {
 
 // LDH (n),A - Store A to high page address 0xFF00+n (opcode 0xE0)
 let mayLoad = false, mayStore = true, hasSideEffects = true in
-def SM83_LDH_nind_A : Z80Inst<"ldh"> {
-  let Size = 2;
-  bits<8> port;
-  bits<16> Inst;
-  let Inst{7-0} = 0xE0;
-  let Inst{15-8} = port;
-  let InOperandList = (ins hram8:$port);
-  let AsmString = "ldh ( $port ), a";
+def SM83_LDH_nind_A : Inst16<"ldh", 0xE0, HRAMMode> {
+  let AsmString = "ldh ( $imm ), a";
   let Uses = [A];
 }
 
 // LDH A,(n) - Load A from high page address 0xFF00+n (opcode 0xF0)
 let mayLoad = true, mayStore = false, hasSideEffects = true in
-def SM83_LDH_A_nind : Z80Inst<"ldh a,"> {
-  let Size = 2;
-  bits<8> port;
-  bits<16> Inst;
-  let Inst{7-0} = 0xF0;
-  let Inst{15-8} = port;
-  let InOperandList = (ins hram8:$port);
-  let AsmString = "ldh a, ( $port )";
+def SM83_LDH_A_nind : Inst16<"ldh a,", 0xF0, HRAMMode> {
   let Defs = [A];
 }
 
@@ -162,4 +152,4 @@ def SM83_LDH_A_Cind : Inst8<"ldh a, (c)", 0xF2> {
   let hasSideEffects = true;
 }
 
-} // Predicates = [HasSM83]
+} // Predicates = [IsSM83]

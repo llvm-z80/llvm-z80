@@ -8,7 +8,7 @@
 ; frame accesses between the pushes need not save them.
 
 ; MIR-LABEL: name: scroll
-; MIR:       PUSH_AF implicit $a, implicit undef $flags
+; MIR:       PUSH_AF implicit undef $f, implicit $a
 
 ; SM83-LABEL: _scroll:
 ; SM83-NOT:   pop af

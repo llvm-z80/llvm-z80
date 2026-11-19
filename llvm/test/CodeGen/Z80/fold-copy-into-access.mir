@@ -103,7 +103,7 @@ body:             |
   bb.0:
     liveins: $a, $c, $hl
     $e = LD_r_HLind implicit $hl :: (load (s8))
-    OUT8_C $a, implicit $c
+    OUT_C_r $a, implicit $c
     $d = LD_r_r killed $e
     RET implicit $d
 
@@ -112,7 +112,7 @@ body:             |
 
 # CHECK-LABEL: name: load_stays_before_out
 # CHECK:      $e = LD_r_HLind
-# CHECK-NEXT: OUT8_C
+# CHECK-NEXT: OUT_C_r
 # CHECK-NEXT: $d = LD_r_r killed $e
 
 ...

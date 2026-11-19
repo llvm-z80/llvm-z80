@@ -30,11 +30,11 @@ body:             |
     %0:gr8 = COPY $a
     %1:gr8 = COPY $b
     %2:ac = COPY %0
-    %3:ac = XOR_Ac_r %2, %1, implicit-def $flags
+    %3:ac = XOR_Ac_r %2, %1, implicit-def $f
     %4:gr8 = COPY %3
     %5:ac = COPY %4
-    TST_Ac %5, implicit-def $flags
-    JP_NZ_nn %bb.1, implicit $flags
+    TST_Ac %5, implicit-def $f
+    JP_NZ_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.1:
@@ -57,10 +57,10 @@ body:             |
     liveins: $b
 
     %0:gr8 = COPY $b
-    %1:gr8 = DEC_r %0, implicit-def $flags
+    %1:gr8 = DEC_r %0, implicit-def $f
     %2:ac = COPY %1
-    TST_Ac %2, implicit-def $flags
-    JP_NZ_nn %bb.1, implicit $flags
+    TST_Ac %2, implicit-def $f
+    JP_NZ_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.1:
@@ -81,10 +81,10 @@ body:             |
     liveins: $b
 
     %0:gr8 = COPY $b
-    %1:gr8 = DEC_r %0, implicit-def $flags
+    %1:gr8 = DEC_r %0, implicit-def $f
     %2:ac = COPY %1
-    TST_Ac %2, implicit-def $flags
-    JP_C_nn %bb.1, implicit $flags
+    TST_Ac %2, implicit-def $f
+    JP_C_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.1:
@@ -107,13 +107,13 @@ body:             |
     %0:gr8 = COPY $a
     %1:gr8 = COPY $b
     %2:ac = COPY %0
-    %3:ac = XOR_Ac_r %2, %1, implicit-def $flags
+    %3:ac = XOR_Ac_r %2, %1, implicit-def $f
     %4:gr8 = COPY %3
     %5:ac = COPY %1
-    CP_Ac_n %5, 5, implicit-def $flags
+    CP_Ac_n %5, 5, implicit-def $f
     %6:ac = COPY %4
-    TST_Ac %6, implicit-def $flags
-    JP_NZ_nn %bb.1, implicit $flags
+    TST_Ac %6, implicit-def $f
+    JP_NZ_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.1:
@@ -137,11 +137,11 @@ body:             |
 
     %0:gr8 = COPY $a
     %1:ac = COPY %0
-    %2:ac = CPL_Ac %1, implicit-def $flags
+    %2:ac = CPL_Ac %1, implicit-def $f
     %3:gr8 = COPY %2
     %4:ac = COPY %3
-    TST_Ac %4, implicit-def $flags
-    JP_Z_nn %bb.1, implicit $flags
+    TST_Ac %4, implicit-def $f
+    JP_Z_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.1:
@@ -167,8 +167,8 @@ body:             |
     %0:gr8 = COPY $b
     %1:gr8 = RES_b_r 7, %0
     %2:ac = COPY %1
-    TST_Ac %2, implicit-def $flags
-    JP_NZ_nn %bb.1, implicit $flags
+    TST_Ac %2, implicit-def $f
+    JP_NZ_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.1:
@@ -192,12 +192,12 @@ body:             |
     %0:gr8 = COPY $a
     %1:gr8 = COPY $b
     %2:ac = COPY %0
-    CP_Ac_n %2, 5, implicit-def $flags
+    CP_Ac_n %2, 5, implicit-def $f
     %3:gr8 = RES_b_r 7, %1
-    %4:ac = SBC_Ac_Ac implicit-def $flags, implicit $flags
+    %4:ac = SBC_Ac_Ac implicit-def $f, implicit $f
     %5:ac = COPY %3
-    TST_Ac %5, implicit-def $flags
-    JP_NZ_nn %bb.1, implicit $flags
+    TST_Ac %5, implicit-def $f
+    JP_NZ_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.1:

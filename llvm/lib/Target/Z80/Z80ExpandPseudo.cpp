@@ -249,7 +249,7 @@ bool Z80ExpandPseudo::expandVarShift(MachineBasicBlock &MBB, MachineInstr &MI,
     break;
   }
 
-  if (STI.hasSM83()) {
+  if (STI.isSM83()) {
     // SM83 lacks DJNZ; use DEC B + JR NZ instead.
     Z80::buildIncDec8(LoopMBB, DL, TII, Z80::DEC_r, Z80::B);
     BuildMI(LoopMBB, DL, TII.get(Z80::JR_NZ_e)).addMBB(LoopMBB);
@@ -324,7 +324,7 @@ bool Z80ExpandPseudo::expandMul8(MachineBasicBlock &MBB, MachineInstr &MI,
   AddMBB->addSuccessor(SkipMBB);
 
   // SkipMBB: loop back
-  if (STI.hasSM83()) {
+  if (STI.isSM83()) {
     Z80::buildIncDec8(SkipMBB, DL, TII, Z80::DEC_r, Z80::B);
     BuildMI(SkipMBB, DL, TII.get(Z80::JR_NZ_e)).addMBB(LoopMBB);
   } else {
@@ -405,7 +405,7 @@ bool Z80ExpandPseudo::expandUDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
   SubMBB->addSuccessor(SkipMBB);
 
   // SkipMBB: loop back
-  if (STI.hasSM83()) {
+  if (STI.isSM83()) {
     Z80::buildIncDec8(SkipMBB, DL, TII, Z80::DEC_r, Z80::B);
     BuildMI(SkipMBB, DL, TII.get(Z80::JR_NZ_e)).addMBB(LoopMBB);
   } else {
@@ -470,7 +470,7 @@ bool Z80ExpandPseudo::expandSDivMod8(MachineBasicBlock &MBB, MachineInstr &MI,
   MachineFunction *MF = MBB.getParent();
   const auto &STI = MF->getSubtarget<Z80Subtarget>();
   DebugLoc DL = MI.getDebugLoc();
-  bool IsSM83 = STI.hasSM83();
+  bool IsSM83 = STI.isSM83();
 
   MachineBasicBlock *NegDvdMBB = MF->CreateMachineBasicBlock();
   MachineBasicBlock *DvdPosMBB = MF->CreateMachineBasicBlock();
@@ -762,7 +762,7 @@ bool Z80ExpandPseudo::expandMul16(MachineBasicBlock &MBB, MachineInstr &MI,
   MachineFunction *MF = MBB.getParent();
   const auto &STI = MF->getSubtarget<Z80Subtarget>();
   DebugLoc DL = MI.getDebugLoc();
-  bool IsSM83 = STI.hasSM83();
+  bool IsSM83 = STI.isSM83();
 
   MachineBasicBlock *LoopMBB = MF->CreateMachineBasicBlock();
   MachineBasicBlock *AddMBB = MF->CreateMachineBasicBlock();
@@ -882,7 +882,7 @@ bool Z80ExpandPseudo::expandUDivMod16(MachineBasicBlock &MBB, MachineInstr &MI,
   MachineFunction *MF = MBB.getParent();
   const auto &STI = MF->getSubtarget<Z80Subtarget>();
   DebugLoc DL = MI.getDebugLoc();
-  bool IsSM83 = STI.hasSM83();
+  bool IsSM83 = STI.isSM83();
 
   MachineBasicBlock *LoopMBB = MF->CreateMachineBasicBlock();
   MachineBasicBlock *RestoreMBB = MF->CreateMachineBasicBlock();
@@ -1034,7 +1034,7 @@ bool Z80ExpandPseudo::expandSDivMod16(MachineBasicBlock &MBB, MachineInstr &MI,
   MachineFunction *MF = MBB.getParent();
   const auto &STI = MF->getSubtarget<Z80Subtarget>();
   DebugLoc DL = MI.getDebugLoc();
-  bool IsSM83 = STI.hasSM83();
+  bool IsSM83 = STI.isSM83();
 
   // Create all basic blocks
   MachineBasicBlock *NegDvdMBB = MF->CreateMachineBasicBlock();

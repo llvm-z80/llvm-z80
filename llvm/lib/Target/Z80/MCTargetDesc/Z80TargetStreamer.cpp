@@ -120,17 +120,10 @@ void Z80TargetAsmStreamer::stronglyReference(MCSymbol *Sym) {
   getStreamer().emitSymbolAttribute(Sym, MCSA_Global);
 }
 
-/// Picks the e_flags CPU value for the subtarget. Z180, R800 and eZ80 also set
-/// the Z80 feature, so they are checked before falling back to Z80.
+/// Picks the e_flags CPU value for the subtarget.
 static unsigned getEFlagsForFeatureSet(const FeatureBitset &Features) {
   if (Features[Z80::FeatureSM83])
     return ELF::EF_Z80_MACH_SM83;
-  if (Features[Z80::FeatureEZ80])
-    return ELF::EF_Z80_MACH_EZ80_Z80;
-  if (Features[Z80::FeatureR800])
-    return ELF::EF_Z80_MACH_R800;
-  if (Features[Z80::FeatureZ180])
-    return ELF::EF_Z80_MACH_Z180;
   return ELF::EF_Z80_MACH_Z80;
 }
 

@@ -68,7 +68,7 @@ Z80TargetLowering::Z80TargetLowering(const Z80TargetMachine &TM,
   // eight cases), while on Z80 the generic threshold of four is already
   // the size optimum, so only SM83 moves. Raising either past sixteen
   // costs hundreds of bytes on interpreter-style dense switches.
-  if (STI.hasSM83())
+  if (STI.isSM83())
     setMinimumJumpTableEntries(8);
 
   // Z80 has no conditional move instruction, so SELECT is always expanded

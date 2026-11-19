@@ -30,9 +30,9 @@ body:             |
 
     $a = LD_r_n 3
     $b = LD_r_r killed $a
-    $b = DEC_r killed $b, implicit-def $flags
+    $b = DEC_r killed $b, implicit-def $f
     SPILL_GR8 killed $b, %stack.0, 0 :: (store (s8) into %stack.0)
-    JP_NZ_nn %bb.1, implicit $flags
+    JP_NZ_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.2:
@@ -58,9 +58,9 @@ body:             |
 
     dead $a = LD_r_n 3
     $b = LD_r_n 3
-    $b = DEC_r killed $b, implicit-def $flags
+    $b = DEC_r killed $b, implicit-def $f
     SPILL_GR8 killed $b, %stack.0, 0 :: (store (s8) into %stack.0)
-    JP_NZ_nn %bb.1, implicit $flags
+    JP_NZ_nn %bb.1, implicit $f
     JP_nn %bb.2
 
   bb.2:
@@ -70,13 +70,13 @@ body:             |
 # CHECK-LABEL: name: kill
 # CHECK:       $b = LD_r_r killed $a
 # CHECK:       $b = DEC_r
-# CHECK-NEXT:  PUSH_AF implicit undef $a, implicit $flags
+# CHECK-NEXT:  PUSH_AF implicit $f, implicit undef $a
 # CHECK-NEXT:  LDHL_SP_e
 # CHECK-NEXT:  POP_AF
 
 # CHECK-LABEL: name: dead
 # CHECK:       dead $a = LD_r_n 3
 # CHECK:       $b = DEC_r
-# CHECK-NEXT:  PUSH_AF implicit undef $a, implicit $flags
+# CHECK-NEXT:  PUSH_AF implicit $f, implicit undef $a
 # CHECK-NEXT:  LDHL_SP_e
 # CHECK-NEXT:  POP_AF

@@ -665,7 +665,7 @@ Z80LegalizerInfo::Z80LegalizerInfo(const Z80Subtarget &STI) {
   // i16+: lower to add/sub + overflow check + select
   // SM83 has no P/V overflow flag, so signed i8 sat must also be lowered there.
   getActionDefinitionsBuilder({G_UADDSAT, G_USUBSAT}).legalFor({S8}).lower();
-  if (STI.hasSM83()) {
+  if (STI.isSM83()) {
     getActionDefinitionsBuilder({G_SADDSAT, G_SSUBSAT}).lower();
   } else {
     getActionDefinitionsBuilder({G_SADDSAT, G_SSUBSAT}).legalFor({S8}).lower();
@@ -993,7 +993,7 @@ static bool legalizeDivRem(LegalizerHelper &Helper, MachineInstr &MI,
   if (MRI.getType(Dst) != S16) {
     // The call is shorter but slower than the inline loop, so only minsize
     // takes it, except for unsigned division on SM83, where it wins on both.
-    if (!MinSize && (IsSigned || !STI.hasSM83()))
+    if (!MinSize && (IsSigned || !STI.isSM83()))
       return true;
     if (!IsSigned)
       return Helper.libcall(MI, LocObserver) == LegalizerHelper::Legalized;
@@ -1132,7 +1132,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
   case TargetOpcode::G_DYN_STACKALLOC: {
     // SM83 has no frame pointer register, so the frame is reached relative to
     // SP and cannot survive SP moving by an amount known only at run time.
-    if (MIRBuilder.getMF().getSubtarget<Z80Subtarget>().hasSM83()) {
+    if (MIRBuilder.getMF().getSubtarget<Z80Subtarget>().isSM83()) {
       const Function &F = MIRBuilder.getMF().getFunction();
       F.getContext().diagnose(DiagnosticInfoUnsupported(
           F,
@@ -1604,7 +1604,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     Register Size = MI.getOperand(2).getReg();
 
     const auto &STI = MIRBuilder.getMF().getSubtarget<Z80Subtarget>();
-    if (!STI.hasZ80()) {
+    if (!STI.isZ80()) {
       // SM83 has no block-move instruction.
       auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
       if (Result != LegalizerHelper::Legalized)
@@ -1643,7 +1643,7 @@ bool Z80LegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
     Register Size = MI.getOperand(2).getReg();
 
     const auto &STI = MIRBuilder.getMF().getSubtarget<Z80Subtarget>();
-    if (!STI.hasZ80()) {
+    if (!STI.isZ80()) {
       auto Result = Helper.createMemLibcall(MRI, MI, LocObserver);
       if (Result != LegalizerHelper::Legalized)
         return false;

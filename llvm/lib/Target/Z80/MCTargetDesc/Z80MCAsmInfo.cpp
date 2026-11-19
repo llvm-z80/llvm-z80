@@ -18,7 +18,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/MC/MCSection.h"
-#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/TargetParser/Triple.h"
@@ -57,28 +56,9 @@ Z80MCAsmInfo::Z80MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   SeparatorString = "\n";
   CommentString = ";";
   UseMotorolaIntegers = true;
-  // Maximum instruction length across all supported subtargets.
-  MaxInstLength = 7;
   SupportsDebugInformation = true;
 
   initializeAtSpecifiers(AtSpecifiers);
-}
-
-static unsigned getZ80MaxInstLength(const MCSubtargetInfo *STI,
-                                    unsigned Default) {
-  if (!STI)
-    return Default;
-
-  // Z80 max instruction length:
-  // - Basic Z80: 4 bytes (prefix + opcode + 2 bytes operand)
-  // - eZ80: 6 bytes (ADL prefix + DD/FD + CB + displacement + opcode + operand)
-  if (STI->hasFeature(Z80::FeatureEZ80))
-    return 6;
-  return 4;
-}
-
-unsigned Z80MCAsmInfo::getMaxInstLength(const MCSubtargetInfo *STI) const {
-  return getZ80MaxInstLength(STI, MaxInstLength);
 }
 
 //===----------------------------------------------------------------------===//
@@ -130,10 +110,6 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
   InternalSymbolPrefix = ".L";
 
   initializeAtSpecifiers(AtSpecifiers);
-}
-
-unsigned Z80MCAsmInfoSDCC::getMaxInstLength(const MCSubtargetInfo *STI) const {
-  return getZ80MaxInstLength(STI, MaxInstLength);
 }
 
 StringRef Z80MCAsmInfoSDCC::getAreaName(StringRef Name) {
@@ -214,10 +190,6 @@ StringRef Z80MCAsmInfoZ88DK::getSectionName(StringRef Name) {
       !all_of(Name, [](char C) { return isAlnum(C) || C == '_'; }))
     return "";
   return Name;
-}
-
-unsigned Z80MCAsmInfoZ88DK::getMaxInstLength(const MCSubtargetInfo *STI) const {
-  return getZ80MaxInstLength(STI, MaxInstLength);
 }
 
 void Z80MCAsmInfoZ88DK::printSwitchToSection(const MCSection &Section,

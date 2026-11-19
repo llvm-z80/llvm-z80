@@ -208,14 +208,10 @@ void Z80InstPrinterSDCC::printOperand(const MCInst *MI, unsigned OpNo,
   const MCOperand &Op = MI->getOperand(OpNo);
 
   // Check if this operand is an immediate that needs # prefix in sdasz80.
-  // Branch/call targets should NOT get # even if typed as IMM16.
   bool NeedsHash = false;
   const MCInstrDesc &Desc = MII.get(MI->getOpcode());
-  if (OpNo < Desc.getNumOperands() && !Desc.isCall() && !Desc.isBranch()) {
-    uint8_t OpType = Desc.operands()[OpNo].OperandType;
-    NeedsHash =
-        (OpType == Z80Op::OPERAND_IMM8 || OpType == Z80Op::OPERAND_IMM16);
-  }
+  if (OpNo < Desc.getNumOperands())
+    NeedsHash = Desc.operands()[OpNo].OperandType == Z80Op::OPERAND_IMM_DATA;
 
   if (Op.isReg()) {
     printRegName(OS, Op.getReg());

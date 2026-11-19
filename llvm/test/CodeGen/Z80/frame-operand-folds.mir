@@ -15,7 +15,7 @@ body:             |
   bb.0:
     liveins: $a, $ix
     $c = LD_r_IXd -4, implicit $ix
-    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    XOR_r killed $c, implicit-def $a, implicit-def $f, implicit $a
     RET implicit $a
 
 # The Z80 can take an ALU operand straight from the slot, so the register
@@ -34,7 +34,7 @@ body:             |
     liveins: $a, $ix, $d
     $c = LD_r_IXd -4, implicit $ix
     LD_IXd_r -9, $d, implicit $ix
-    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    XOR_r killed $c, implicit-def $a, implicit-def $f, implicit $a
     RET implicit $a
 
 # The use does not have to come next. A store to another slot is provably a
@@ -53,7 +53,7 @@ body:             |
     liveins: $a, $ix, $d
     $c = LD_r_IXd -4, implicit $ix
     LD_IXd_r -4, $d, implicit $ix
-    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    XOR_r killed $c, implicit-def $a, implicit-def $f, implicit $a
     RET implicit $a
 
 # Same slot, so moving the read past the store would read the new value.
@@ -72,7 +72,7 @@ body:             |
     liveins: $a, $ix, $hl, $d
     $c = LD_r_IXd -4, implicit $ix
     LD_HLind_r $d, implicit $hl
-    XOR_r killed $c, implicit-def $a, implicit-def $flags, implicit $a
+    XOR_r killed $c, implicit-def $a, implicit-def $f, implicit $a
     RET implicit $a
 
 # A store through a pointer could be pointing at this very local.
@@ -91,7 +91,7 @@ body:             |
     liveins: $e, $h
     $l = LD_r_n 0
     $a = LD_r_r killed $l
-    XOR_r $e, implicit-def $a, implicit-def $flags, implicit $a
+    XOR_r $e, implicit-def $a, implicit-def $f, implicit $a
     $e = LD_r_r killed $a
     RET implicit $e, implicit $h
 

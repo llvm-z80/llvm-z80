@@ -61,7 +61,7 @@ bool Z80FrameLowering::hasFPImpl(const MachineFunction &MF) const {
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
 
   // SM83 has no IX register — always use SP-relative addressing.
-  if (STI.hasSM83())
+  if (STI.isSM83())
     return false;
 
   // A static frame leaves nothing for a frame pointer to point at; this
@@ -90,7 +90,7 @@ bool Z80FrameLowering::usesStaticFrame(const MachineFunction &MF) const {
   // address is defined in terms of the stack.
   return static_cast<const Z80TargetMachine &>(MF.getTarget())
              .useStaticFrames() &&
-         MF.getSubtarget<Z80Subtarget>().hasStaticFrame() &&
+         MF.getSubtarget<Z80Subtarget>().staticFrame() &&
          MF.getFunction().hasFnAttribute("nonreentrant") &&
          !MF.getFunction().hasOptNone() &&
          !MF.getFrameInfo().hasVarSizedObjects() &&
@@ -156,7 +156,7 @@ void Z80FrameLowering::processFunctionBeforeFrameFinalized(
     // 2. The wide slots move only while the extra byte of each wide access
     //    adds up to no more than the stack pointer adjustment.
     bool KeepWideOnStack = false;
-    if (MF.getSubtarget<Z80Subtarget>().hasSM83()) {
+    if (MF.getSubtarget<Z80Subtarget>().isSM83()) {
       const unsigned PrologueBytes = 4;
       KeepWideOnStack = countWideFrameAccesses(MF) > PrologueBytes;
     }
@@ -286,7 +286,7 @@ MachineBasicBlock::iterator Z80FrameLowering::eliminateCallFramePseudoInstr(
   // must agree with callFrameDestroyScratch below, which is how call
   // lowering and liveness queries predict what this expansion touches.
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
-  if (STI.hasSM83() && Amount <= 127) {
+  if (STI.isSM83() && Amount <= 127) {
     // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
     assert(callFrameDestroyScratch(STI, Amount) == Register());
     BuildMI(MBB, MI, DL, TII.get(Z80::ADD_SP_e)).addImm(Amount);
@@ -314,7 +314,7 @@ Register Z80FrameLowering::callFrameDestroyScratch(const Z80Subtarget &STI,
                                                    int64_t CallerPopBytes) {
   if (CallerPopBytes == 0)
     return Register(); // erased entirely
-  if (STI.hasSM83() && CallerPopBytes <= 127)
+  if (STI.isSM83() && CallerPopBytes <= 127)
     return Register(); // ADD SP,e
   if (CallerPopBytes <= 16)
     return Z80::A; // POP AF per two bytes
@@ -385,7 +385,7 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
     }
 
     const auto &STI = MF.getSubtarget<Z80Subtarget>();
-    if (STI.hasSM83() && LocalSize <= 128) {
+    if (STI.isSM83() && LocalSize <= 128) {
       // SM83: ADD SP,e (2 bytes, doesn't clobber HL)
       BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_SP_e))
           .addImm(-(int64_t)LocalSize);

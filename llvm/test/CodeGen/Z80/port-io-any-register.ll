@@ -8,8 +8,8 @@ declare i8 @llvm.z80.in(i8)
 declare void @llvm.z80.out(i8, i8)
 
 ; MIR-LABEL: name: echo
-; MIR:       [[V:%[0-9]+]]:gr8 = IN8_C
-; MIR:       OUT8_C [[V]]
+; MIR:       [[V:%[0-9]+]]:gr8 = IN_r_C
+; MIR:       OUT_C_r [[V]]
 ; CHECK-LABEL: _echo:
 ; CHECK:       ld c,a
 ; CHECK-NEXT:  in [[R:[a-z]]],(c)

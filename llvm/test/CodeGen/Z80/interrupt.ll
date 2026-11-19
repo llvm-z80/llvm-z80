@@ -4,6 +4,7 @@
 ; Test: interrupt handler saves registers and returns with reti
 
 @g = global i8 0
+@w = global i16 0
 
 define void @isr() #0 {
 ; Z80-LABEL: _isr:
@@ -52,6 +53,25 @@ define void @isr_complex() #0 {
   %e = load volatile i8, ptr @g
   %f = add i8 %e, 3
   store volatile i8 %f, ptr @g
+  ret void
+}
+
+; Test: interrupt handler saves AF when only the flags change
+define void @isr_flags_only() #0 {
+; Z80-LABEL: _isr_flags_only:
+; Z80:       push af
+; Z80:       add hl,bc
+; Z80:       pop af
+; Z80:       reti
+
+; SM83-LABEL: _isr_flags_only:
+; SM83:       push af
+; SM83:       add hl,bc
+; SM83:       pop af
+; SM83:       reti
+  %v = load volatile i16, ptr @w
+  %s = add i16 %v, 300
+  store volatile i16 %s, ptr @w
   ret void
 }
 

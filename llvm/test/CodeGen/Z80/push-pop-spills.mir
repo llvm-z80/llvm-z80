@@ -133,7 +133,7 @@ body: |
     liveins: $hl
     ADJCALLSTACKDOWN 0, 0, implicit-def $sp, implicit $sp
     SPILL_GR16 $hl, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
-    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags
+    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $f
     $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
     RET implicit $de
@@ -153,8 +153,8 @@ body: |
     liveins: $de, $hl
     SPILL_GR16 killed $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
-    PUSH_HL implicit killed $hl
-    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags
+    PUSH_HL implicit killed $l, implicit killed $h
+    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $f
     $bc = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     ADJCALLSTACKUP 2, 0, implicit-def $sp, implicit $sp, implicit-def $a
     RET implicit $bc
@@ -173,9 +173,9 @@ body: |
   bb.0:
     liveins: $de, $hl
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
-    PUSH_HL implicit killed $hl
+    PUSH_HL implicit killed $l, implicit killed $h
     SPILL_GR16 killed $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
-    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags
+    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $f
     $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     ADJCALLSTACKUP 2, 0, implicit-def $sp, implicit $sp, implicit-def $a
     RET implicit $de
@@ -198,9 +198,9 @@ body: |
     liveins: $bc, $de, $hl
     SPILL_GR16 killed $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
-    PUSH_HL implicit killed $hl
+    PUSH_HL implicit killed $l, implicit killed $h
     SPILL_GR16 killed $bc, %stack.1, 0 :: (store (s16) into %stack.1, align 1)
-    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags
+    CALL_nn @ext, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $f
     $bc = RELOAD_GR16 %stack.1, 0 :: (load (s16) from %stack.1, align 1)
     ADJCALLSTACKUP 2, 0, implicit-def $sp, implicit $sp, implicit-def dead $a
     $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
@@ -224,8 +224,8 @@ body: |
     liveins: $de, $hl
     SPILL_GR16 killed $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
     ADJCALLSTACKDOWN 2, 0, implicit-def $sp, implicit $sp
-    PUSH_HL implicit killed $hl
-    CALL_nn @ext, implicit-def dead $a, implicit-def $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags
+    PUSH_HL implicit killed $l, implicit killed $h
+    CALL_nn @ext, implicit-def dead $a, implicit-def $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $f
     SPILL_GR16 killed $bc, %stack.1, 0 :: (store (s16) into %stack.1, align 1)
     ADJCALLSTACKUP 2, 0, implicit-def $sp, implicit $sp, implicit-def dead $a
     $bc = RELOAD_GR16 %stack.1, 0 :: (load (s16) from %stack.1, align 1)
@@ -291,7 +291,7 @@ body: |
     liveins: $de, $hl
     SPILL_GR16 $de, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
     ADJCALLSTACKDOWN 0, 0, implicit-def $sp, implicit $sp
-    CALL_nn @setjmp, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $flags, implicit $hl
+    CALL_nn @setjmp, implicit-def dead $a, implicit-def dead $bc, implicit-def dead $de, implicit-def dead $hl, implicit-def $iy, implicit-def $f, implicit $hl
     ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
     $hl = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     RET implicit $hl
@@ -318,9 +318,9 @@ body: |
     SPILL_GR16 $de, %stack.1, 0 :: (store (s16) into %stack.1, align 1)
     $hl = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
     $bc = RELOAD_GR16 %stack.1, 0 :: (load (s16) from %stack.1, align 1)
-    PUSH_BC implicit $bc
+    PUSH_BC implicit $c, implicit $b
     $de = RELOAD_GR16 %stack.0, 0 :: (load (s16) from %stack.0, align 1)
-    POP_BC implicit-def $bc
+    POP_BC implicit-def $c, implicit-def $b
     RET implicit $hl, implicit $bc, implicit $de
 ...
 ---

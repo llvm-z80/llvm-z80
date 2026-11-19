@@ -137,7 +137,7 @@ bool Z80NonReentrantImpl::run(Module &M) {
   for (Function &F : M.functions()) {
     if (F.isDeclaration())
       continue;
-    if (!TM.getSubtargetImpl(F)->hasStaticFrame() ||
+    if (!TM.getSubtargetImpl(F)->staticFrame() ||
         F.hasFnAttribute("interrupt")) {
       HasForeignContext = true;
       markReentrantReachable(*CG[&F]);

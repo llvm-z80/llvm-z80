@@ -6,9 +6,6 @@
 // would be dropped and leave the attribute doing nothing.
 
 __attribute__((target("z80"))) void f_z80(void) {}
-__attribute__((target("z180"))) void f_z180(void) {}
-__attribute__((target("r800"))) void f_r800(void) {}
-__attribute__((target("ez80"))) void f_ez80(void) {}
 __attribute__((target("sm83"))) void f_sm83(void) {}
 __attribute__((target("undocumented"))) void f_undoc(void) {}
 __attribute__((target("static-frame"))) void f_frame(void) {}

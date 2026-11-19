@@ -99,47 +99,69 @@ public:
   bool isMem() const override { return false; }
 
   // Immediate predicates for different sizes
-  bool isImm3() const {
+  DiagnosticPredicate isImm8() const {
     if (!isImm())
-      return false;
+      return DiagnosticPredicate::NoMatch;
     if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return CE->getValue() >= 0 && CE->getValue() <= 7;
-    return true;
+      return DiagnosticPredicate(CE->getValue() >= -128 &&
+                                 CE->getValue() <= 255);
+    return DiagnosticPredicate::Match;
   }
 
-  bool isImm8() const {
+  DiagnosticPredicate isImm16() const {
     if (!isImm())
-      return false;
+      return DiagnosticPredicate::NoMatch;
     if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return CE->getValue() >= -128 && CE->getValue() <= 255;
-    return true;
+      return DiagnosticPredicate(CE->getValue() >= -32768 &&
+                                 CE->getValue() <= 65535);
+    return DiagnosticPredicate::Match;
   }
 
-  bool isImm16() const {
+  DiagnosticPredicate isPCRel8() const {
     if (!isImm())
-      return false;
+      return DiagnosticPredicate::NoMatch;
     if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return CE->getValue() >= -32768 && CE->getValue() <= 65535;
-    return true;
+      return DiagnosticPredicate(CE->getValue() >= -128 &&
+                                 CE->getValue() <= 127);
+    return DiagnosticPredicate::Match;
   }
 
-  bool isPCRel8() const { return isImm(); }
-  bool isAddr16() const { return isImm(); }
+  DiagnosticPredicate isAddr16() const { return isImm16(); }
 
-  bool isDisp8() const {
+  DiagnosticPredicate isSImm8() const {
     if (!isImm())
-      return false;
+      return DiagnosticPredicate::NoMatch;
     if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return CE->getValue() >= -128 && CE->getValue() <= 127;
-    return true;
+      return DiagnosticPredicate(CE->getValue() >= -128 &&
+                                 CE->getValue() <= 127);
+    return DiagnosticPredicate::Match;
   }
 
-  bool isPort8() const {
+  DiagnosticPredicate isPort8() const {
     if (!isImm())
-      return false;
+      return DiagnosticPredicate::NoMatch;
     if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return CE->getValue() >= 0 && CE->getValue() <= 255;
-    return true;
+      return DiagnosticPredicate(CE->getValue() >= 0 && CE->getValue() <= 255);
+    return DiagnosticPredicate::Match;
+  }
+
+  DiagnosticPredicate isHRAM8() const {
+    if (!isImm())
+      return DiagnosticPredicate::NoMatch;
+    if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
+      return DiagnosticPredicate(
+          (CE->getValue() >= 0 && CE->getValue() <= 255) ||
+          (CE->getValue() >= 0xFF00 && CE->getValue() <= 0xFFFF));
+    return DiagnosticPredicate::Match;
+  }
+
+  // A bit number has no fixup, so it must be a constant.
+  DiagnosticPredicate isImm3() const {
+    if (!isImm())
+      return DiagnosticPredicate::NoMatch;
+    if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
+      return DiagnosticPredicate(CE->getValue() >= 0 && CE->getValue() <= 7);
+    return DiagnosticPredicate::NoMatch;
   }
 
   StringRef getToken() const {
@@ -170,28 +192,6 @@ public:
     assert(Kind == k_Immediate && "Unexpected operand kind");
     assert(N == 1 && "Invalid number of operands!");
     addExpr(Inst, ImmVal);
-  }
-
-  void addImm3Operands(MCInst &Inst, unsigned N) const {
-    addImmOperands(Inst, N);
-  }
-  void addImm8Operands(MCInst &Inst, unsigned N) const {
-    addImmOperands(Inst, N);
-  }
-  void addImm16Operands(MCInst &Inst, unsigned N) const {
-    addImmOperands(Inst, N);
-  }
-  void addPCRel8Operands(MCInst &Inst, unsigned N) const {
-    addImmOperands(Inst, N);
-  }
-  void addAddr16Operands(MCInst &Inst, unsigned N) const {
-    addImmOperands(Inst, N);
-  }
-  void addDisp8Operands(MCInst &Inst, unsigned N) const {
-    addImmOperands(Inst, N);
-  }
-  void addPort8Operands(MCInst &Inst, unsigned N) const {
-    addImmOperands(Inst, N);
   }
 
   void addExpr(MCInst &Inst, const MCExpr *Expr) const {
@@ -227,8 +227,6 @@ class Z80AsmParser : public MCTargetAsmParser {
 public:
   enum Z80MatchResultTy {
     Match_immediate = FIRST_TARGET_MATCH_RESULT_TY,
-    Match_InvalidPCRel8,
-    Match_InvalidAddr16,
   };
 
 private:
@@ -309,7 +307,6 @@ public:
 
 // Auto-generated Match Functions from TableGen
 static MCRegister MatchRegisterName(StringRef Name);
-static MCRegister MatchRegisterAltName(StringRef Name);
 
 MCRegister Z80AsmParser::parseRegisterName(StringRef Name) {
   if (Name.contains('\''))
@@ -319,23 +316,7 @@ MCRegister Z80AsmParser::parseRegisterName(StringRef Name) {
   if (Reg)
     return Reg;
 
-  Reg = MatchRegisterAltName(Name);
-  if (Reg)
-    return Reg;
-
-  Reg = MatchRegisterName(Name.lower());
-  if (Reg)
-    return Reg;
-
-  Reg = MatchRegisterAltName(Name.lower());
-  if (Reg)
-    return Reg;
-
-  Reg = MatchRegisterName(Name.upper());
-  if (Reg)
-    return Reg;
-
-  return MatchRegisterAltName(Name.upper());
+  return MatchRegisterName(Name.lower());
 }
 
 MCRegister Z80AsmParser::tryParseRegisterName() {
@@ -766,8 +747,6 @@ bool Z80AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_MissingFeature:
     return missingFeature(IDLoc, ErrorInfo);
   case Match_InvalidOperand:
-  case Match_InvalidPCRel8:
-  case Match_InvalidAddr16:
     return invalidOperand(IDLoc, Operands, ErrorInfo);
   case Match_MnemonicFail:
     return Error(IDLoc, "invalid instruction");

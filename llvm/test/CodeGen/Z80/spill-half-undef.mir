@@ -45,7 +45,7 @@ stack:
 body:             |
   bb.0:
     liveins: $a, $bc
-    ADD_HL_rr killed renamable $bc, implicit-def $hl, implicit-def $flags, implicit undef $hl
+    ADD_HL_rr killed renamable $bc, implicit-def $hl, implicit-def $f, implicit undef $hl
     renamable $c = COPY $a
     SPILL_GR16 renamable $bc, %stack.0, 0 :: (store (s16) into %stack.0, align 1)
     RET

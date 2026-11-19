@@ -86,11 +86,11 @@ const MCPhysReg *
 Z80RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   const auto &STI = MF->getSubtarget<Z80Subtarget>();
   if (MF->getFunction().hasFnAttribute("interrupt")) {
-    if (STI.hasSM83())
+    if (STI.isSM83())
       return SM83_Interrupt_CSR_SaveList;
     return Z80_Interrupt_CSR_SaveList;
   }
-  if (STI.hasSM83())
+  if (STI.isSM83())
     return SM83_CSR_SaveList;
   return Z80_CSR_SaveList;
 }
@@ -99,7 +99,7 @@ const uint32_t *
 Z80RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                       CallingConv::ID CallingConv) const {
   const auto &STI = MF.getSubtarget<Z80Subtarget>();
-  if (STI.hasSM83())
+  if (STI.isSM83())
     return SM83_CSR_RegMask;
   return Z80_CSR_RegMask;
 }
@@ -111,8 +111,8 @@ BitVector Z80RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // Reserve the stack pointer
   Reserved.set(Z80::SP);
 
-  // Reserve FLAGS: non-allocatable status register for dependency tracking
-  Reserved.set(Z80::FLAGS);
+  // Reserve F. Instructions use it only to track the flags.
+  Reserved.set(Z80::F);
 
   // Always reserve IX and IY (16-bit).
   // IX is the frame pointer when hasFP, and stack frame code uses it
@@ -123,14 +123,14 @@ BitVector Z80RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
   // IXH/IXL/IYH/IYL are undocumented Z80 half-index registers.
   // Only available when FeatureUndocumented is enabled; absent on SM83.
-  if (!STI.hasUndocumented() || STI.hasSM83()) {
+  if (!STI.hasUndocumented() || STI.isSM83()) {
     Reserved.set(Z80::IXH);
     Reserved.set(Z80::IXL);
     Reserved.set(Z80::IYH);
     Reserved.set(Z80::IYL);
   }
 
-  if (STI.hasSM83()) {
+  if (STI.isSM83()) {
     // SM83 has no I/R or shadow registers.
     Reserved.set(Z80::I);
     Reserved.set(Z80::R);
@@ -258,40 +258,35 @@ bool Z80RegisterInfo::saveScavengerRegister(MachineBasicBlock &MBB,
 
   // Z80 can only PUSH/POP 16-bit register pairs.
   // For 8-bit registers, save the containing pair.
-  unsigned PushOpc, PopOpc;
-  if (Reg == Z80::BC || Reg == Z80::B || Reg == Z80::C) {
-    PushOpc = Z80::PUSH_BC;
-    PopOpc = Z80::POP_BC;
-  } else if (Reg == Z80::DE || Reg == Z80::D || Reg == Z80::E) {
-    PushOpc = Z80::PUSH_DE;
-    PopOpc = Z80::POP_DE;
-  } else if (Reg == Z80::HL || Reg == Z80::H || Reg == Z80::L) {
-    PushOpc = Z80::PUSH_HL;
-    PopOpc = Z80::POP_HL;
-  } else if (Reg == Z80::AF || Reg == Z80::A) {
-    PushOpc = Z80::PUSH_AF;
-    PopOpc = Z80::POP_AF;
-  } else {
+  MCRegister Pair;
+  if (Reg == Z80::BC || Reg == Z80::B || Reg == Z80::C)
+    Pair = Z80::BC;
+  else if (Reg == Z80::DE || Reg == Z80::D || Reg == Z80::E)
+    Pair = Z80::DE;
+  else if (Reg == Z80::HL || Reg == Z80::H || Reg == Z80::L)
+    Pair = Z80::HL;
+  else if (Reg == Z80::AF || Reg == Z80::A)
+    Pair = Z80::AF;
+  else
     return false;
-  }
 
-  BuildMI(MBB, I, DL, TII.get(PushOpc));
-  BuildMI(MBB, std::next(UseMI), DL, TII.get(PopOpc));
+  Z80::emitPairSavePush(MBB, I, DL, TII, Pair);
+  BuildMI(MBB, std::next(UseMI), DL, TII.get(Z80::getPopOpcode(Pair)));
   return true;
 }
 
 //===----------------------------------------------------------------------===//
-// FLAGS liveness helper
+// F liveness helper
 //===----------------------------------------------------------------------===//
 
-// Check if the FLAGS register is live after MI.
-// Scans forward: if an instruction reads FLAGS before any instruction writes
-// FLAGS, then FLAGS is live. Conditional branches (JP cc, JR cc) are
-// terminators with Uses = [FLAGS], so they are caught by readsRegister.
-// Also checks successor blocks for FLAGS live-in.
+// Check if the F register is live after MI.
+// Scans forward: if an instruction reads F before any instruction writes
+// F, then F is live. Conditional branches (JP cc, JR cc) are
+// terminators with Uses = [F], so they are caught by readsRegister.
+// Also checks successor blocks for F live-in.
 static bool isFlagsLiveAfter(MachineBasicBlock::iterator MI,
                              const TargetRegisterInfo *TRI) {
-  return Z80::isLiveAt(*MI->getParent(), std::next(MI), Z80::FLAGS, TRI);
+  return Z80::isLiveAt(*MI->getParent(), std::next(MI), Z80::F, TRI);
 }
 
 //===----------------------------------------------------------------------===//
@@ -318,7 +313,7 @@ using Z80::emitHLSavePush;
 // Emit: PUSH IX; POP HL; LD <TempReg>,offset; ADD HL,<TempReg>
 // After this, HL = IX + offset. TempReg must be BC or DE.
 // If PreserveFlags is true, wraps ADD HL with PUSH AF/POP AF to preserve
-// the FLAGS register. This is safe because no instruction between PUSH AF
+// the F register. This is safe because no instruction between PUSH AF
 // and POP AF modifies A (PUSH IX, POP HL, LD rr,nn don't touch A).
 static void emitLargeOffsetAddr(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator InsertBefore,
@@ -604,9 +599,9 @@ static void expandReloadGR16LargeOffset(MachineBasicBlock &MBB,
 // Emit code to compute HL = SP_at_instruction + Offset.
 // SPDelta accounts for PUSHes emitted by the CALLER before this point.
 // PreserveFlags adds a SEPARATE PUSH AF/POP AF inside this function to
-// protect FLAGS from ADD HL,SP. These are independent SP shifts:
+// protect F from ADD HL,SP. These are independent SP shifts:
 //   - SPDelta: caller's PUSHes (e.g., NeedSaveAF, NeedSaveHL)
-//   - PreserveFlags +2: this function's own PUSH AF for FLAGS preservation
+//   - PreserveFlags +2: this function's own PUSH AF for F preservation
 //
 // SM83 optimization: uses LDHL SP,e (0xF8) when the adjusted offset fits
 // in a signed 8-bit range (-128..+127). This replaces the 2-instruction
@@ -623,7 +618,7 @@ static void emitSPRelativeAddr(MachineBasicBlock &MBB,
   // SM83: use LDHL SP,e if adjusted offset fits in signed 8-bit.
   // This replaces 2-instruction LD HL,nn + ADD HL,SP with a single LDHL SP,e.
   const auto &STI = MBB.getParent()->getSubtarget<Z80Subtarget>();
-  if (STI.hasSM83() && AdjOffset >= -128 && AdjOffset <= 127) {
+  if (STI.isSM83() && AdjOffset >= -128 && AdjOffset <= 127) {
     if (PreserveFlags)
       emitFlagSavePush(MBB, InsertBefore, DL, TII);
     BuildMI(MBB, InsertBefore, DL, TII.get(Z80::LDHL_SP_e))
@@ -980,7 +975,7 @@ static bool rewriteStaticSlotAccess(MachineBasicBlock::iterator MI,
   MachineBasicBlock &MBB = *MI->getParent();
   MachineFunction &MF = *MI->getMF();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
-  const bool IsSM83 = MF.getSubtarget<Z80Subtarget>().hasSM83();
+  const bool IsSM83 = MF.getSubtarget<Z80Subtarget>().isSM83();
   DebugLoc DL = MI->getDebugLoc();
   unsigned Opc = MI->getOpcode();
   auto NextIt = std::next(MI);
@@ -1269,7 +1264,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
         emitSlotAddr(MBB, MI, DL, TII, false, Offset, SPDelta, PreserveFlags);
         if (DstReg == Z80::DE) {
           const auto &STI = MF.getSubtarget<Z80Subtarget>();
-          if (STI.hasSM83()) {
+          if (STI.isSM83()) {
             Z80::buildLD8(MBB, MI, DL, TII, Z80::D, Z80::H);
             Z80::buildLD8(MBB, MI, DL, TII, Z80::E, Z80::L);
           } else {
