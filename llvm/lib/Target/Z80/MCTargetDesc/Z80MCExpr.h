@@ -27,7 +27,7 @@ public:
 
   /// Creates an Z80 machine code expression.
   static const Z80MCExpr *create(VariantKind Kind, const MCExpr *Expr,
-                                 bool IsNegated, MCContext &Ctx);
+                                 MCContext &Ctx);
 
   /// Gets the type of the expression.
   VariantKind getKind() const { return Kind; }
@@ -37,9 +37,6 @@ public:
   /// Gets the fixup which corresponds to the expression.
   /// Evaluates the fixup as a constant value.
   bool evaluateAsConstant(int64_t &Result) const;
-
-  bool isNegated() const { return Negated; }
-  void setNegated(bool NegatedIn = true) { Negated = NegatedIn; }
 
   void printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const override;
   bool evaluateAsRelocatableImpl(MCValue &Res,
@@ -60,10 +57,9 @@ private:
 
   const VariantKind Kind;
   const MCExpr *SubExpr;
-  bool Negated;
 
-  explicit Z80MCExpr(VariantKind Kind, const MCExpr *Expr, bool Negated)
-      : Kind(Kind), SubExpr(Expr), Negated(Negated) {}
+  explicit Z80MCExpr(VariantKind Kind, const MCExpr *Expr)
+      : Kind(Kind), SubExpr(Expr) {}
 };
 
 } // end namespace llvm

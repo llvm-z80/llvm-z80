@@ -111,10 +111,10 @@ MCOperand Z80MCInstLower::lowerSymbolOperand(const MachineOperand &MO,
   case Z80::MO_NO_FLAGS:
     break;
   case Z80::MO_ADDR16_LO:
-    Expr = Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO, Expr, false, Ctx);
+    Expr = Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO, Expr, Ctx);
     break;
   case Z80::MO_ADDR16_HI:
-    Expr = Z80MCExpr::create(Z80MCExpr::VK_ADDR16_HI, Expr, false, Ctx);
+    Expr = Z80MCExpr::create(Z80MCExpr::VK_ADDR16_HI, Expr, Ctx);
     break;
   default:
     llvm_unreachable("Unknown target flag on symbol operand");

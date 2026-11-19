@@ -376,9 +376,9 @@ static const MCExpr *selectByte(const MCExpr *Expr, MCContext &Ctx) {
   if (!BE || !BE->getRHS()->evaluateAsAbsolute(RHS))
     return Expr;
   if (BE->getOpcode() == MCBinaryExpr::And && RHS == 0xff)
-    return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO, BE->getLHS(), false, Ctx);
+    return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO, BE->getLHS(), Ctx);
   if (BE->getOpcode() == MCBinaryExpr::LShr && RHS == 8)
-    return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_HI, BE->getLHS(), false, Ctx);
+    return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_HI, BE->getLHS(), Ctx);
   return Expr;
 }
 

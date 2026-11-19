@@ -18,16 +18,12 @@
 namespace llvm {
 
 const Z80MCExpr *Z80MCExpr::create(VariantKind Kind, const MCExpr *Expr,
-                                   bool Negated, MCContext &Ctx) {
-  return new (Ctx) Z80MCExpr(Kind, Expr, Negated);
+                                   MCContext &Ctx) {
+  return new (Ctx) Z80MCExpr(Kind, Expr);
 }
 
 void Z80MCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
   assert(Kind != VK_NONE);
-
-  if (isNegated()) {
-    OS << '-';
-  }
 
   // sdasz80 selects bytes with <(x) and >(x).
   if (MAI->isSDCC()) {
@@ -73,10 +69,6 @@ bool Z80MCExpr::evaluateAsRelocatableImpl(MCValue &Result,
 }
 
 int64_t Z80MCExpr::evaluateAsInt64(int64_t Value) const {
-  if (Negated) {
-    Value *= -1;
-  }
-
   switch (Kind) {
   case Z80MCExpr::VK_ADDR16_LO:
     Value &= 0xff;

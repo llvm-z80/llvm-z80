@@ -99,7 +99,7 @@ const MCExpr *Z80AsmPrinter::lowerConstant(const Constant *CV,
         CE->getType()->isIntegerTy(8))
       return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO,
                                lowerConstant(CE->getOperand(0), BaseCV, Offset),
-                               false, OutContext);
+                               OutContext);
   return AsmPrinter::lowerConstant(CV, BaseCV, Offset);
 }
 
