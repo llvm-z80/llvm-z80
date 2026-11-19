@@ -703,6 +703,7 @@ bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
 ///   .area _CODE  → .section .text
 ///   .area _DATA  → .section .data
 ///   .area _BSS   → .section .bss
+///   .area _X     → .section _X
 ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
   StringRef IDVal = DirectiveID.getString();
   if (IDVal.lower() != ".area")
@@ -717,22 +718,21 @@ ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
 
   // Ignore optional flags like "(ABS)" or "(REL,CON)"
   if (getLexer().is(AsmToken::LParen)) {
-    while (getLexer().isNot(AsmToken::EndOfStatement))
+    while (getLexer().isNot(AsmToken::RParen) &&
+           getLexer().isNot(AsmToken::EndOfStatement))
       Parser.Lex();
+    if (Parser.parseToken(AsmToken::RParen, "expected ')'"))
+      return ParseStatus::Failure;
   }
+  if (Parser.parseEOL())
+    return ParseStatus::Failure;
 
   // Map sdasz80 area names to ELF sections
-  StringRef Section;
-  if (AreaName == "_CODE" || AreaName == "_HOME")
-    Section = ".text";
-  else if (AreaName == "_DATA" || AreaName == "_INITIALIZED")
-    Section = ".data";
-  else if (AreaName == "_BSS")
-    Section = ".bss";
-  else if (AreaName == "_GSINIT" || AreaName == "_GSFINAL")
-    Section = ".init";
-  else
-    Section = ".text"; // default fallback
+  StringRef Section = StringSwitch<StringRef>(AreaName)
+                          .Cases({"_CODE", "_HOME"}, ".text")
+                          .Cases({"_DATA", "_INITIALIZED"}, ".data")
+                          .Case("_BSS", ".bss")
+                          .Default(AreaName);
 
   getStreamer().switchSection(getContext().getELFSection(
       Section, Section == ".bss" ? ELF::SHT_NOBITS : ELF::SHT_PROGBITS,
