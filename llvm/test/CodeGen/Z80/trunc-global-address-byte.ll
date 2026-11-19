@@ -12,7 +12,7 @@
 @__bank_music = external global i8
 
 ; CHECK-LABEL: get_bank:
-; CHECK: ld a,z80_16lo(___bank_music)
+; CHECK: ld a,(___bank_music)&0xff
 ; CHECK-NOT: ld hl
 ; SDCC-LABEL: _get_bank:
 ; SDCC: ld a,#<(___bank_music)
@@ -23,7 +23,7 @@ define i8 @get_bank() {
 }
 
 ; CHECK-LABEL: get_bank_hi:
-; CHECK: ld a,z80_16hi(___bank_music)
+; CHECK: ld a,(___bank_music)>>8
 ; SDCC-LABEL: _get_bank_hi:
 ; SDCC: ld a,#>(___bank_music)
 define i8 @get_bank_hi() {
@@ -35,7 +35,7 @@ define i8 @get_bank_hi() {
 
 ; A ptrtoint straight to i8 legalizes through the same trunc.
 ; CHECK-LABEL: get_bank_direct:
-; CHECK: ld a,z80_16lo(___bank_music)
+; CHECK: ld a,(___bank_music)&0xff
 define i8 @get_bank_direct() {
   %bank = ptrtoint ptr @__bank_music to i8
   ret i8 %bank
@@ -44,7 +44,7 @@ define i8 @get_bank_direct() {
 ; The symbol also used as a real address: the full materialization must
 ; survive next to the folded byte load.
 ; CHECK-LABEL: bank_and_load:
-; CHECK-DAG: z80_16lo(___bank_music)
+; CHECK-DAG: (___bank_music)&0xff
 ; CHECK-DAG: ld {{hl|bc|de}},___bank_music
 define i8 @bank_and_load() {
   %addr = ptrtoint ptr @__bank_music to i16

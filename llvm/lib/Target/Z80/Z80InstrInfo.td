@@ -43,11 +43,11 @@ def LD_nnind_A : Inst24<"ld", 0x32, DirectMode> {
   let Uses = [A];
 }
 
-// LD A,I / LD A,R / LD I,A / LD R,A - Special registers (ED prefix)
-def LD_A_I : InstED<"ld a,i", 0x57>;
-def LD_A_R : InstED<"ld a,r", 0x5F>;
-def LD_I_A : InstED<"ld i,a", 0x47>;
-def LD_R_A : InstED<"ld r,a", 0x4F>;
+// LD A,I / LD A,R / LD I,A / LD R,A
+def LD_A_I : InstED<"ld a,i", 0x57> { let Uses = [I]; let Defs = [A, F]; }
+def LD_A_R : InstED<"ld a,r", 0x5F> { let Uses = [R]; let Defs = [A, F]; }
+def LD_I_A : InstED<"ld i,a", 0x47> { let Uses = [A]; let Defs = [I]; }
+def LD_R_A : InstED<"ld r,a", 0x4F> { let Uses = [A]; let Defs = [R]; }
 
 //===----------------------------------------------------------------------===//
 //  16-bit Load Group (Z80-only)
@@ -85,9 +85,14 @@ def LD_nnind_SP : InstEDnn<"ld", 0x73, DirectAt2Mode> { let AsmString = "ld ( $i
 
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def EX_DE_HL : Inst8<"ex de,hl", 0xEB> { let Uses = [DE, HL]; let Defs = [DE, HL]; }
+def EX_AF_AF : Inst8<"ex af,af'", 0x08> { let Uses = [AF, AFp]; let Defs = [AF, AFp]; }
+def EXX : Inst8<"exx", 0xD9> {
+  let Uses = [BC, DE, HL, BCp, DEp, HLp];
+  let Defs = [BC, DE, HL, BCp, DEp, HLp];
 }
-def EX_AF_AF : Inst8<"ex af,af'", 0x08>;
-def EXX : Inst8<"exx", 0xD9>;
+}
+// sdasz80 also accepts ex af,af without the apostrophe.
+def : InstAlias<"ex af,af", (EX_AF_AF), 0>;
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def EX_SPind_HL : Inst8<"ex (sp),hl", 0xE3> { let Uses = [SP, HL]; let Defs = [HL]; }
 
@@ -214,11 +219,12 @@ def RETN : InstED<"retn", 0x45>;
 //===----------------------------------------------------------------------===//
 
 // IN A,(n)
-def IN_A_n : Inst16<"in a,", 0xDB, PortMode>;
+def IN_A_n : Inst16<"in a,", 0xDB, PortMode> { let Defs = [A]; }
 
 // OUT (n),A
 def OUT_n_A : Inst16<"out", 0xD3, PortMode> {
   let AsmString = "out ( $imm ), a";
+  let Uses = [A];
 }
 
 // IN r,(C)
@@ -245,16 +251,18 @@ def OUT_C_r : Z80Inst16<"out (c), $src"> {
   let InOperandList = (ins GR8:$src);
 }
 
-// Block I/O (set flags)
-def INI  : InstED<"ini",  0xA2> { let Defs = [F]; }
-def INIR : InstED<"inir", 0xB2> { let Defs = [F]; }
-def IND  : InstED<"ind",  0xAA> { let Defs = [F]; }
-def INDR : InstED<"indr", 0xBA> { let Defs = [F]; }
+// Block I/O: port (C), byte at (HL), count in B
+let Uses = [B, C, HL], Defs = [B, HL, F] in {
+def INI  : InstED<"ini",  0xA2>;
+def INIR : InstED<"inir", 0xB2>;
+def IND  : InstED<"ind",  0xAA>;
+def INDR : InstED<"indr", 0xBA>;
 
-def OUTI : InstED<"outi", 0xA3> { let Defs = [F]; }
-def OTIR : InstED<"otir", 0xB3> { let Defs = [F]; }
-def OUTD : InstED<"outd", 0xAB> { let Defs = [F]; }
-def OTDR : InstED<"otdr", 0xBB> { let Defs = [F]; }
+def OUTI : InstED<"outi", 0xA3>;
+def OTIR : InstED<"otir", 0xB3>;
+def OUTD : InstED<"outd", 0xAB>;
+def OTDR : InstED<"otdr", 0xBB>;
+}
 
 } // Predicates = [IsZ80]
 
@@ -268,6 +276,24 @@ let Predicates = [IsZ80] in {
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def LD_IX_nn : InstDDnn<"ld ix,", 0x21, Imm16At2Mode> { let Defs = [IX]; }
 def LD_IY_nn : InstFDnn<"ld iy,", 0x21, Imm16At2Mode> { let Defs = [IY]; }
+}
+
+// LD IX,(nn) / LD IY,(nn)
+let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
+def LD_IX_nnind : InstDDnn<"ld ix,", 0x2A, DirectAt2Mode> { let Defs = [IX]; }
+def LD_IY_nnind : InstFDnn<"ld iy,", 0x2A, DirectAt2Mode> { let Defs = [IY]; }
+}
+
+// LD (nn),IX / LD (nn),IY
+let mayLoad = 0, mayStore = 1, hasSideEffects = 0 in {
+def LD_nnind_IX : InstDDnn<"ld", 0x22, DirectAt2Mode> {
+  let AsmString = "ld ( $imm ),ix";
+  let Uses = [IX];
+}
+def LD_nnind_IY : InstFDnn<"ld", 0x22, DirectAt2Mode> {
+  let AsmString = "ld ( $imm ),iy";
+  let Uses = [IY];
+}
 }
 
 // PUSH IX / PUSH IY
@@ -324,7 +350,7 @@ def EX_SPind_IY : InstFD<"ex (sp),iy", 0xE3> { let Uses = [SP, IY]; let Defs = [
 
 // LD r,(IX+d) and LD r,(IY+d)
 class LDrIdxd<string mnemonic, bits<8> prefix, string idx>
-    : Z80Inst24<mnemonic # " $dst, ( " # idx # " + $imm )"> {
+    : Z80Inst24<mnemonic # " $dst, ( " # idx # " $imm )"> {
   bits<3> dst;
   bits<8> imm;
   let Inst{7-0} = prefix;
@@ -351,7 +377,7 @@ def LD_r_IYd : LDrIdxd<"ld", 0xFD, "iy">;
 
 // LD (IX+d),r and LD (IY+d),r
 class LDIdxdr<string mnemonic, bits<8> prefix, string idx>
-    : Z80Inst24<mnemonic # " ( " # idx # " + $imm ), $src"> {
+    : Z80Inst24<mnemonic # " ( " # idx # " $imm ), $src"> {
   bits<3> src;
   bits<8> imm;
   let Inst{7-0} = prefix;
@@ -406,26 +432,26 @@ let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
     let Uses = [A, IX, F]; let Defs = [A, F];
   }
   def SUB_IXd : InstDDd<"sub", 0x96> {
-    let AsmString = "sub ( ix + $imm )";
+    let AsmString = "sub ( ix $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
   def SBC_A_IXd : InstDDd<"sbc a,", 0x9E> {
     let Uses = [A, IX, F]; let Defs = [A, F];
   }
   def AND_IXd : InstDDd<"and", 0xA6> {
-    let AsmString = "and ( ix + $imm )";
+    let AsmString = "and ( ix $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
   def XOR_IXd : InstDDd<"xor", 0xAE> {
-    let AsmString = "xor ( ix + $imm )";
+    let AsmString = "xor ( ix $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
   def OR_IXd : InstDDd<"or", 0xB6> {
-    let AsmString = "or ( ix + $imm )";
+    let AsmString = "or ( ix $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
   def CP_IXd : InstDDd<"cp", 0xBE> {
-    let AsmString = "cp ( ix + $imm )";
+    let AsmString = "cp ( ix $imm )";
     let Uses = [A, IX]; let Defs = [F];
   }
 }
@@ -442,26 +468,26 @@ let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
     let Uses = [A, IY, F]; let Defs = [A, F];
   }
   def SUB_IYd : InstFDd<"sub", 0x96> {
-    let AsmString = "sub ( iy + $imm )";
+    let AsmString = "sub ( iy $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
   def SBC_A_IYd : InstFDd<"sbc a,", 0x9E> {
     let Uses = [A, IY, F]; let Defs = [A, F];
   }
   def AND_IYd : InstFDd<"and", 0xA6> {
-    let AsmString = "and ( iy + $imm )";
+    let AsmString = "and ( iy $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
   def XOR_IYd : InstFDd<"xor", 0xAE> {
-    let AsmString = "xor ( iy + $imm )";
+    let AsmString = "xor ( iy $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
   def OR_IYd : InstFDd<"or", 0xB6> {
-    let AsmString = "or ( iy + $imm )";
+    let AsmString = "or ( iy $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
   def CP_IYd : InstFDd<"cp", 0xBE> {
-    let AsmString = "cp ( iy + $imm )";
+    let AsmString = "cp ( iy $imm )";
     let Uses = [A, IY]; let Defs = [F];
   }
 }
@@ -472,19 +498,19 @@ let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
 
 let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
   def INC_IXd : InstDDd<"inc", 0x34> {
-    let AsmString = "inc ( ix + $imm )";
+    let AsmString = "inc ( ix $imm )";
     let Uses = [IX]; let Defs = [F];
   }
   def DEC_IXd : InstDDd<"dec", 0x35> {
-    let AsmString = "dec ( ix + $imm )";
+    let AsmString = "dec ( ix $imm )";
     let Uses = [IX]; let Defs = [F];
   }
   def INC_IYd : InstFDd<"inc", 0x34> {
-    let AsmString = "inc ( iy + $imm )";
+    let AsmString = "inc ( iy $imm )";
     let Uses = [IY]; let Defs = [F];
   }
   def DEC_IYd : InstFDd<"dec", 0x35> {
-    let AsmString = "dec ( iy + $imm )";
+    let AsmString = "dec ( iy $imm )";
     let Uses = [IY]; let Defs = [F];
   }
 }
@@ -521,7 +547,7 @@ let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
 
 // BIT/RES/SET b,(IX+d)
 class BitOpIXd<string mnemonic, bits<2> op>
-    : Z80Inst32<mnemonic # " $b, ( ix + $imm )"> {
+    : Z80Inst32<mnemonic # " $b, ( ix $imm )"> {
   bits<3> b;
   bits<8> imm;
   let Inst{7-0} = 0xDD;
@@ -535,7 +561,7 @@ class BitOpIXd<string mnemonic, bits<2> op>
 
 // BIT/RES/SET b,(IY+d)
 class BitOpIYd<string mnemonic, bits<2> op>
-    : Z80Inst32<mnemonic # " $b, ( iy + $imm )"> {
+    : Z80Inst32<mnemonic # " $b, ( iy $imm )"> {
   bits<3> b;
   bits<8> imm;
   let Inst{7-0} = 0xFD;

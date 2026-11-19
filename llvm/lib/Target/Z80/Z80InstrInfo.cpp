@@ -756,8 +756,8 @@ namespace {
 struct AccPseudo {
   unsigned Pseudo;
   unsigned Real;
-  // The operand the real instruction takes besides A.
-  enum { Operand, SelfA, NoOperand } Form;
+  // The explicit operands of the real instruction.
+  enum { Operand, SelfA, NoOperand, RegA } Form;
 };
 } // namespace
 
@@ -780,7 +780,7 @@ static const AccPseudo AccPseudos[] = {
     {Z80::CPL_Ac, Z80::CPL, AccPseudo::NoOperand},
     {Z80::RLCA_Ac, Z80::RLCA, AccPseudo::NoOperand},
     {Z80::RRCA_Ac, Z80::RRCA, AccPseudo::NoOperand},
-    {Z80::SWAP_Ac, Z80::SWAP_A, AccPseudo::NoOperand},
+    {Z80::SWAP_Ac, Z80::SWAP_r, AccPseudo::RegA},
     {Z80::SM83_LD_Ac_nnind, Z80::SM83_LD_A_nnind, AccPseudo::Operand},
     {Z80::SM83_LDH_Ac_nind, Z80::SM83_LDH_A_nind, AccPseudo::Operand},
     {Z80::SM83_LD_nnind_Ac, Z80::SM83_LD_nnind_A, AccPseudo::Operand},
@@ -1003,6 +1003,10 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       MIB.add(MI.getOperand(MI.getNumExplicitOperands() - 1));
     else if (P->Form == AccPseudo::SelfA)
       MIB.addReg(Z80::A, getUndefRegState(Undef));
+    else if (P->Form == AccPseudo::RegA)
+      MIB.addReg(Z80::A, RegState::Define |
+                             getDeadRegState(MI.registerDefIsDead(Z80::A, TRI)))
+          .addReg(Z80::A, getUndefRegState(Undef));
     for (MachineOperand &MO : MIB->implicit_operands()) {
       if (MO.isDef())
         MO.setIsDead(MI.registerDefIsDead(MO.getReg(), TRI));

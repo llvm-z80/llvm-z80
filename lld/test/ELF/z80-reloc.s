@@ -19,11 +19,11 @@ _start:
 	ld	hl, ext
 
 	.data
-	.byte	ext@z80_16lo, ext@z80_16hi
+	.byte	ext & 0xff, ext >> 8
 
 ; CHECK:      100: 10 03       djnz $105
 ; CHECK-NEXT: 102: 10 06       djnz $10a
-; CHECK-NEXT: 104: dd 7e fd    ld a,(ix+-$3)
+; CHECK-NEXT: 104: dd 7e fd    ld a,(ix-$3)
 ; CHECK-NEXT: 107: 3e 80       ld a,$80
 ; CHECK-NEXT: 109: 21 05 01    ld hl,$105
 

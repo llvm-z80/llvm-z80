@@ -16,3 +16,7 @@
 	jr	nz, (ix+2)
 ; CHECK: [[#@LINE+1]]:{{[0-9]+}}: error: invalid operand for instruction
 	djnz	(ix)
+; CHECK: [[#@LINE+1]]:{{[0-9]+}}: error: invalid operand for instruction
+	jr	ext & 0xff
+; CHECK: [[#@LINE+1]]:{{[0-9]+}}: error: invalid operand for instruction
+	djnz	ext >> 8

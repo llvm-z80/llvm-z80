@@ -114,7 +114,7 @@ define void @bits(ptr %p, i8 %x) {
 
 ; Z80-LABEL: _spill_fold:
 ; Z80:       call _clobber
-; Z80:       add a,(ix+-1)
+; Z80:       add a,(ix-1)
 declare void @clobber()
 
 define i8 @spill_fold(i8 %a, i8 %b) "frame-pointer"="all" {

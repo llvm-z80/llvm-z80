@@ -13,7 +13,6 @@
 #include "Z80InstPrinter.h"
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
-#include "Z80MCExpr.h"
 
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
@@ -65,15 +64,6 @@ void Z80InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     OS << formatImm(Op.getImm());
   } else {
     assert(Op.isExpr() && "Unknown operand kind in printOperand");
-    // Format z80_16 immediates using formatImm.
-    if (const auto *MME = dyn_cast<Z80MCExpr>(Op.getExpr())) {
-      int64_t Value = 0;
-      if (MME->getKind() == Z80MCExpr::VK_IMM16 &&
-          MME->getSubExpr()->evaluateAsAbsolute(Value)) {
-        OS << "z80_16(" << formatImm(Value) << ')';
-        return;
-      }
-    }
     MAI.printExpr(OS, *Op.getExpr());
   }
 }
@@ -83,24 +73,28 @@ void Z80InstPrinter::printBranchOperand(const MCInst *MI, uint64_t Address,
   const MCOperand &Op = MI->getOperand(OpNo);
   if (!Op.isImm())
     return printOperand(MI, OpNo, OS);
-  uint64_t Target = Op.getImm();
-  OS << formatImm(PrintBranchImmAsAddress ? (int8_t)Target + Address + 2
-                                          : Target);
+  // The displacement counts from the end of the 2-byte instruction.
+  int64_t Offset = static_cast<int8_t>(Op.getImm()) + 2;
+  if (PrintBranchImmAsAddress) {
+    OS << formatImm(Address + Offset);
+    return;
+  }
+  // A bare number is an address, so print relative to '.'.
+  OS << '.';
+  if (Offset >= 0)
+    OS << '+';
+  OS << formatImm(Offset);
 }
 
 void Z80InstPrinter::printIndexedOperand(const MCInst *MI, unsigned OpNo,
                                          raw_ostream &OS) {
-  // Print indexed addressing operand displacement
-  // The AsmString already includes "( ix + " or "( iy + ", so we just print
-  // the displacement value. For negative values, we print the absolute value
-  // since we need to change "ix + -3" to "ix - 3".
-  const MCOperand &Op = MI->getOperand(OpNo);
-  if (Op.isImm()) {
-    int64_t Disp = Op.getImm();
-    OS << formatImm(Disp);
-  } else if (Op.isExpr()) {
-    MAI.printExpr(OS, *Op.getExpr());
-  }
+  // Print the displacement with its sign, as in (ix+5) and (ix-3).
+  std::string Disp;
+  raw_string_ostream DispOS(Disp);
+  printOperand(MI, OpNo, DispOS);
+  if (!StringRef(Disp).starts_with("-"))
+    OS << '+';
+  OS << Disp;
 }
 
 void Z80InstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) {
@@ -144,7 +138,7 @@ format_object<uint64_t> Z80InstPrinter::formatHex(uint64_t Value) const {
 //===----------------------------------------------------------------------===//
 
 /// Convert indexed addressing from Zilog format to sdasz80 format.
-/// Transforms (ix+N) → N(ix), (ix+-N) → -N(ix), same for iy.
+/// Transforms (ix+N) → N(ix), (ix-N) → -N(ix), same for iy.
 static std::string convertIndexedAddressing(const std::string &Input) {
   std::string Result;
   size_t i = 0;
@@ -157,12 +151,9 @@ static std::string convertIndexedAddressing(const std::string &Input) {
       // Find the closing ')'
       size_t Close = Input.find(')', i + 4);
       if (Close != std::string::npos) {
-        // Extract displacement (everything after the sign)
+        // Keep a '-' sign and drop a '+' sign.
         std::string Disp = Input.substr(i + 3, Close - (i + 3));
-        // Handle "+-N" → "-N", "+N" → "N"
-        if (Disp.size() >= 2 && Disp[0] == '+' && Disp[1] == '-')
-          Disp = Disp.substr(1);
-        else if (!Disp.empty() && Disp[0] == '+')
+        if (Disp[0] == '+')
           Disp = Disp.substr(1);
         // Output: disp(ix) or disp(iy)
         Result += Disp;
@@ -223,23 +214,6 @@ void Z80InstPrinterSDCC::printOperand(const MCInst *MI, unsigned OpNo,
     assert(Op.isExpr() && "Unknown operand kind in printOperand");
     if (NeedsHash)
       OS << '#';
-    // Format z80_16 immediates using formatImm.
-    if (const auto *MME = dyn_cast<Z80MCExpr>(Op.getExpr())) {
-      int64_t Value = 0;
-      if (MME->getKind() == Z80MCExpr::VK_IMM16 &&
-          MME->getSubExpr()->evaluateAsAbsolute(Value)) {
-        OS << "z80_16(" << formatImm(Value) << ')';
-        return;
-      }
-      // sdasz80 spells the byte-of-address operators as unary < and >.
-      if (MME->getKind() == Z80MCExpr::VK_ADDR16_LO ||
-          MME->getKind() == Z80MCExpr::VK_ADDR16_HI) {
-        OS << (MME->getKind() == Z80MCExpr::VK_ADDR16_LO ? "<(" : ">(");
-        MAI.printExpr(OS, *MME->getSubExpr());
-        OS << ')';
-        return;
-      }
-    }
     MAI.printExpr(OS, *Op.getExpr());
   }
 }

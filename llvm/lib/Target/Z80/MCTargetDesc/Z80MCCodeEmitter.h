@@ -26,7 +26,6 @@
 namespace llvm {
 
 class MCContext;
-class MCExpr;
 class MCFixup;
 class MCInst;
 class MCInstrInfo;
@@ -52,10 +51,6 @@ private:
   uint64_t getBinaryCodeForInstr(const MCInst &MI,
                                  SmallVectorImpl<MCFixup> &Fixups,
                                  const MCSubtargetInfo &STI) const;
-
-  unsigned getExprOpValue(const MCExpr *Expr, SmallVectorImpl<MCFixup> &Fixups,
-                          const MCSubtargetInfo &STI,
-                          unsigned int Offset) const;
 
   /// Returns the binary encoding of operand.
   ///

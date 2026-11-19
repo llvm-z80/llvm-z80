@@ -23,8 +23,8 @@
 	.byte	ext
 	.short	ext
 	.long	ext
-	.byte	ext@z80_16lo
-	.byte	ext@z80_16hi
+	.byte	ext & 0xff
+	.byte	ext >> 8
 .endif
 .endif
 

@@ -28,6 +28,12 @@ class ImmAsmOperand<string name> : AsmOperandClass {
   let DiagnosticType = "immediate";
 }
 
+// JR/DJNZ target. A constant is an address.
+def PCRel8AsmOperand : AsmOperandClass {
+  let Name = "PCRel8";
+  let RenderMethod = "addPCRelOperands";
+}
+
 class Z80Op<ValueType vt> : Operand<vt> {
   let OperandNamespace = "Z80Op";
 }
@@ -79,7 +85,7 @@ def target16 : Operand<i16> {
 
 // 8-bit signed PC-relative offset for JR/DJNZ
 def pcrel8 : Operand<OtherVT> {
-  let ParserMatchClass = ImmAsmOperand<"PCRel8">;
+  let ParserMatchClass = PCRel8AsmOperand;
   let EncoderMethod = "encodeImm<Z80::PCRel8, 1>";
   let DecoderMethod = "decodeSImmOperand<8>";
   let PrintMethod = "printBranchOperand";
@@ -282,7 +288,7 @@ class InstDD<string asmstr, bits<8> opcode> : Z80Inst16<asmstr> {
 
 /// 3-byte DD-prefixed instruction with 8-bit operand (IX+d addressing)
 class InstDDd<string asmstr, bits<8> opcode>
-    : Z80Inst24<asmstr # " ( ix + $imm )"> {
+    : Z80Inst24<asmstr # " ( ix $imm )"> {
   bits<8> imm;
   let Inst{7-0} = 0xDD;
   let Inst{15-8} = opcode;
@@ -292,7 +298,7 @@ class InstDDd<string asmstr, bits<8> opcode>
 
 /// 4-byte DD-prefixed instruction with displacement and 8-bit operand
 class InstDDdn<string asmstr, bits<8> opcode>
-    : Z80Inst32<asmstr # " ( ix + $disp ), $val"> {
+    : Z80Inst32<asmstr # " ( ix $disp ), $val"> {
   bits<8> disp;
   bits<8> val;
   let Inst{7-0} = 0xDD;
@@ -326,7 +332,7 @@ class InstFD<string asmstr, bits<8> opcode> : Z80Inst16<asmstr> {
 
 /// 3-byte FD-prefixed instruction with 8-bit operand (IY+d addressing)
 class InstFDd<string asmstr, bits<8> opcode>
-    : Z80Inst24<asmstr # " ( iy + $imm )"> {
+    : Z80Inst24<asmstr # " ( iy $imm )"> {
   bits<8> imm;
   let Inst{7-0} = 0xFD;
   let Inst{15-8} = opcode;
@@ -336,7 +342,7 @@ class InstFDd<string asmstr, bits<8> opcode>
 
 /// 4-byte FD-prefixed instruction with displacement and 8-bit operand
 class InstFDdn<string asmstr, bits<8> opcode>
-    : Z80Inst32<asmstr # " ( iy + $disp ), $val"> {
+    : Z80Inst32<asmstr # " ( iy $disp ), $val"> {
   bits<8> disp;
   bits<8> val;
   let Inst{7-0} = 0xFD;
@@ -385,7 +391,7 @@ class InstEDnn<string asmstr, bits<8> opcode, AddressingMode mode>
 
 /// 4-byte DD CB indexed bit instruction
 class InstDDCB<string asmstr, bits<8> opcode>
-    : Z80Inst32<asmstr # " ( ix + $imm )"> {
+    : Z80Inst32<asmstr # " ( ix $imm )"> {
   bits<8> imm;
   let Inst{7-0} = 0xDD;
   let Inst{15-8} = 0xCB;
@@ -396,7 +402,7 @@ class InstDDCB<string asmstr, bits<8> opcode>
 
 /// 4-byte FD CB indexed bit instruction
 class InstFDCB<string asmstr, bits<8> opcode>
-    : Z80Inst32<asmstr # " ( iy + $imm )"> {
+    : Z80Inst32<asmstr # " ( iy $imm )"> {
   bits<8> imm;
   let Inst{7-0} = 0xFD;
   let Inst{15-8} = 0xCB;

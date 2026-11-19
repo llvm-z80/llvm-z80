@@ -11,10 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "Z80MCAsmInfo.h"
-#include "MCTargetDesc/Z80MCExpr.h"
 #include "Z80MCTargetDesc.h"
 
-#include "llvm/ADT/Enum.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/MC/MCSection.h"
@@ -32,21 +30,6 @@ cl::opt<Z80AsmFormatTy> Z80AsmFormat(
         clEnumValN(Z80AsmFormat_SDASZ80, "sdasz80", "SDCC sdasz80 compatible"),
         clEnumValN(Z80AsmFormat_Z88DK, "z88dk", "z88dk (z80asm) compatible")));
 
-constexpr EnumStringDef<MCAsmInfo::AtSpecifierKind> AtSpecifierDefs[] = {
-    {{"z80_imm8"}, Z80MCExpr::VK_IMM8},
-    {{"z80_imm16"}, Z80MCExpr::VK_IMM16},
-    {{"z80_8"}, Z80MCExpr::VK_ADDR8},
-    {{"z80_16"}, Z80MCExpr::VK_ADDR16},
-    {{"z80_16lo"}, Z80MCExpr::VK_ADDR16_LO},
-    {{"z80_16hi"}, Z80MCExpr::VK_ADDR16_HI},
-    {{"z80_24"}, Z80MCExpr::VK_ADDR24},
-    {{"z80_24bank"}, Z80MCExpr::VK_ADDR24_BANK},
-    {{"z80_24segment"}, Z80MCExpr::VK_ADDR24_SEGMENT},
-    {{"z80_24segmentlo"}, Z80MCExpr::VK_ADDR24_SEGMENT_LO},
-    {{"z80_24segmenthi"}, Z80MCExpr::VK_ADDR24_SEGMENT_HI},
-};
-constexpr auto AtSpecifiers = BUILD_ENUM_STRINGS(AtSpecifierDefs);
-
 Z80MCAsmInfo::Z80MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
     : MCAsmInfoELF(Options) {
   // While the platform uses 2-byte pointers, the ELF files use 4-byte ones;
@@ -57,8 +40,6 @@ Z80MCAsmInfo::Z80MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   CommentString = ";";
   UseMotorolaIntegers = true;
   SupportsDebugInformation = true;
-
-  initializeAtSpecifiers(AtSpecifiers);
 }
 
 //===----------------------------------------------------------------------===//
@@ -108,8 +89,6 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
   // Labels
   GlobalDirective = "\t.globl\t";
   InternalSymbolPrefix = ".L";
-
-  initializeAtSpecifiers(AtSpecifiers);
 }
 
 StringRef Z80MCAsmInfoSDCC::getAreaName(StringRef Name) {
@@ -167,8 +146,6 @@ Z80MCAsmInfoZ88DK::Z80MCAsmInfoZ88DK(const Triple &TT,
   // weak-reference directive also keeps local aliases local.
   WeakDirective = "\tGLOBAL\t";
   WeakRefDirective = "\tGLOBAL\t";
-
-  initializeAtSpecifiers(AtSpecifiers);
 }
 
 StringRef Z80MCAsmInfoZ88DK::getSectionName(StringRef Name) {

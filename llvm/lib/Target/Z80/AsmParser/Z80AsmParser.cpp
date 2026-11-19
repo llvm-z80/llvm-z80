@@ -17,6 +17,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/Z80MCExpr.h"
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "TargetInfo/Z80TargetInfo.h"
 #include "Z80.h"
@@ -117,14 +118,8 @@ public:
     return DiagnosticPredicate::Match;
   }
 
-  DiagnosticPredicate isPCRel8() const {
-    if (!isImm())
-      return DiagnosticPredicate::NoMatch;
-    if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return DiagnosticPredicate(CE->getValue() >= -128 &&
-                                 CE->getValue() <= 127);
-    return DiagnosticPredicate::Match;
-  }
+  // Reject x & 0xff and x >> 8 as a JR/DJNZ target.
+  bool isPCRel8() const { return isImm() && !isa<Z80MCExpr>(ImmVal); }
 
   DiagnosticPredicate isAddr16() const { return isImm16(); }
 
@@ -194,6 +189,14 @@ public:
     addExpr(Inst, ImmVal);
   }
 
+  // A JR immediate operand holds the displacement. So pass a constant target
+  // as an expression with a PC-relative fixup.
+  void addPCRelOperands(MCInst &Inst, unsigned N) const {
+    assert(Kind == k_Immediate && "Unexpected operand kind");
+    assert(N == 1 && "Invalid number of operands!");
+    Inst.addOperand(MCOperand::createExpr(ImmVal));
+  }
+
   void addExpr(MCInst &Inst, const MCExpr *Expr) const {
     if (!Expr)
       Inst.addOperand(MCOperand::createImm(0));
@@ -239,6 +242,8 @@ private:
 
   ParseStatus parseDirective(AsmToken DirectiveID) override;
 
+  bool parseDataExpr(const MCExpr *&Res) override;
+
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
 
@@ -256,7 +261,8 @@ private:
   bool tryParseRegisterOperand(OperandVector &Operands);
   bool tryParseShadowAF(OperandVector &Operands);
   bool parseOperand(OperandVector &Operands, StringRef Mnemonic);
-  bool parseParenOperand(OperandVector &Operands);
+  bool isIndirectOperand();
+  bool parseParenOperand(OperandVector &Operands, StringRef Mnemonic);
   bool parseSDASZ80Indexed(OperandVector &Operands, const MCExpr *Disp,
                            SMLoc DispLoc);
   bool parseExpression(const MCExpr *&Expr);
@@ -287,7 +293,7 @@ private:
 
   bool emit(MCInst &Inst, SMLoc const &Loc, MCStreamer &Out) const;
   bool invalidOperand(SMLoc const &Loc, OperandVector const &Operands,
-                      uint64_t const &ErrorInfo);
+                      uint64_t const &ErrorInfo, const Twine &Msg);
   bool missingFeature(SMLoc const &Loc, uint64_t const &ErrorInfo);
 
 public:
@@ -295,6 +301,8 @@ public:
                const MCInstrInfo &MII)
       : MCTargetAsmParser(STI, MII), Parser(Parser) {
     MCAsmParserExtension::Initialize(Parser);
+    // Z80 assemblers count .ds in bytes.
+    Parser.addAliasForDirective(".ds", ".skip");
     MRI = getContext().getRegisterInfo();
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
@@ -364,18 +372,57 @@ bool Z80AsmParser::tryParseRegisterOperand(OperandVector &Operands) {
   return false;
 }
 
+// Turn x & 0xff into the low byte of x and x >> 8 into the high byte.
+static const MCExpr *selectByte(const MCExpr *Expr, MCContext &Ctx) {
+  const auto *BE = dyn_cast<MCBinaryExpr>(Expr);
+  int64_t RHS;
+  if (!BE || !BE->getRHS()->evaluateAsAbsolute(RHS))
+    return Expr;
+  if (BE->getOpcode() == MCBinaryExpr::And && RHS == 0xff)
+    return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_LO, BE->getLHS(), Ctx);
+  if (BE->getOpcode() == MCBinaryExpr::LShr && RHS == 8)
+    return Z80MCExpr::create(Z80MCExpr::VK_ADDR16_HI, BE->getLHS(), Ctx);
+  return Expr;
+}
+
 bool Z80AsmParser::parseExpression(const MCExpr *&Expr) {
-  return getParser().parseExpression(Expr);
+  if (getParser().parseExpression(Expr))
+    return true;
+  Expr = selectByte(Expr, getContext());
+  return false;
+}
+
+bool Z80AsmParser::parseDataExpr(const MCExpr *&Res) {
+  return parseExpression(Res);
+}
+
+// Return true when the ')' matching the leading '(' ends the operand.
+bool Z80AsmParser::isIndirectOperand() {
+  AsmToken Toks[32];
+  size_t N = getLexer().peekTokens(Toks);
+  unsigned Depth = 1;
+  for (size_t I = 0; I < N; ++I) {
+    if (Toks[I].is(AsmToken::LParen))
+      ++Depth;
+    else if (Toks[I].is(AsmToken::RParen) && --Depth == 0)
+      return I + 1 == N || Toks[I + 1].is(AsmToken::Comma) ||
+             Toks[I + 1].is(AsmToken::EndOfStatement);
+    else if (Toks[I].is(AsmToken::EndOfStatement))
+      break;
+  }
+  return true;
 }
 
 /// Parse a parenthesized operand: (reg), (expr), (ix+d), (iy+d).
 /// Produces token sequences matching the AsmMatcher expectations:
 ///   (hl)     → compound token "(hl)"
 ///   (nn)     → tokens "(", Imm, ")"
-///   (ix+d)   → tokens "(", Reg IX, "+", Imm, ")"
-///   (ix-d)   → tokens "(", Reg IX, "+", Imm(-d), ")"
-///   (ix)     → compound token "(ix)"
-bool Z80AsmParser::parseParenOperand(OperandVector &Operands) {
+///   (ix+d)   → tokens "(", Reg IX, Imm, ")"
+///   (ix-d)   → tokens "(", Reg IX, Imm(-d), ")"
+///   (ix)     → tokens "(", Reg IX, Imm(0), ")"
+///   jp (ix)  → compound token "(ix)"
+bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
+                                     StringRef Mnemonic) {
   SMLoc LParenLoc = Parser.getTok().getLoc();
   Parser.Lex(); // Eat '('
 
@@ -406,27 +453,23 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands) {
       if ((Reg == Z80::IX || Reg == Z80::IY) &&
           (Parser.getTok().is(AsmToken::Plus) ||
            Parser.getTok().is(AsmToken::Minus))) {
-        bool IsNeg = Parser.getTok().is(AsmToken::Minus);
-        SMLoc PlusLoc = Parser.getTok().getLoc();
-        Parser.Lex(); // Eat +/-
+        // Eat only '+'. parseExpression reads a leading '-' as unary minus.
+        if (Parser.getTok().is(AsmToken::Plus))
+          Parser.Lex();
 
         const MCExpr *Disp;
         SMLoc DispLoc = Parser.getTok().getLoc();
         if (parseExpression(Disp))
           return true;
 
-        if (IsNeg)
-          Disp = MCUnaryExpr::createMinus(Disp, getContext());
-
         if (Parser.getTok().isNot(AsmToken::RParen))
           return Error(Parser.getTok().getLoc(), "expected ')'");
         SMLoc RParenLoc = Parser.getTok().getLoc();
         Parser.Lex(); // Eat ')'
 
-        // Emit: "(" IX "+" disp ")"
+        // Emit: "(" IX disp ")"
         Operands.push_back(Z80Operand::CreateToken("(", LParenLoc));
         Operands.push_back(Z80Operand::CreateReg(Reg, RegLoc, RegEnd));
-        Operands.push_back(Z80Operand::CreateToken("+", PlusLoc));
         Operands.push_back(Z80Operand::CreateImm(Disp, DispLoc, RParenLoc));
         Operands.push_back(Z80Operand::CreateToken(")", RParenLoc));
         return false;
@@ -437,6 +480,17 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands) {
         return Error(Parser.getTok().getLoc(), "expected ')'");
       SMLoc RParenEnd = Parser.getTok().getEndLoc();
       Parser.Lex(); // Eat ')'
+
+      // Read (ix) and (iy) as (ix+0) and (iy+0).
+      if ((Reg == Z80::IX || Reg == Z80::IY) &&
+          !Mnemonic.equals_insensitive("jp")) {
+        Operands.push_back(Z80Operand::CreateToken("(", LParenLoc));
+        Operands.push_back(Z80Operand::CreateReg(Reg, RegLoc, RegEnd));
+        Operands.push_back(Z80Operand::CreateImm(
+            MCConstantExpr::create(0, getContext()), RegEnd, RegEnd));
+        Operands.push_back(Z80Operand::CreateToken(")", RParenEnd));
+        return false;
+      }
 
       const char *CompTok = getCompoundToken(Reg);
       if (CompTok) {
@@ -474,7 +528,7 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands) {
 /// Parse sdasz80 indexed addressing: d(ix) or d(iy).
 /// The displacement expression has already been parsed.
 /// Emits the same token sequence as LLVM format (ix+d):
-///   "(" IX "+" disp ")"
+///   "(" IX disp ")"
 bool Z80AsmParser::parseSDASZ80Indexed(OperandVector &Operands,
                                        const MCExpr *Disp, SMLoc DispLoc) {
   SMLoc LParenLoc = Parser.getTok().getLoc();
@@ -493,10 +547,9 @@ bool Z80AsmParser::parseSDASZ80Indexed(OperandVector &Operands,
   SMLoc RParenLoc = Parser.getTok().getLoc();
   Parser.Lex(); // Eat ')'
 
-  // Emit as: "(" IX "+" disp ")"
+  // Emit as: "(" IX disp ")"
   Operands.push_back(Z80Operand::CreateToken("(", LParenLoc));
   Operands.push_back(Z80Operand::CreateReg(Reg, RegLoc, RegEnd));
-  Operands.push_back(Z80Operand::CreateToken("+", DispLoc));
   Operands.push_back(Z80Operand::CreateImm(Disp, DispLoc, RParenLoc));
   Operands.push_back(Z80Operand::CreateToken(")", RParenLoc));
   return false;
@@ -520,8 +573,8 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
   }
 
   // Parenthesized operand: (reg), (expr), (ix+d)
-  if (getLexer().is(AsmToken::LParen))
-    return parseParenOperand(Operands);
+  if (getLexer().is(AsmToken::LParen) && isIndirectOperand())
+    return parseParenOperand(Operands, Mnemonic);
 
   // Try register
   if (getLexer().is(AsmToken::Identifier)) {
@@ -559,7 +612,7 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
       return true;
     SMLoc E = SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer() - 1);
 
-    // Check for sdasz80 indexed format: expr(ix) or expr(iy)
+    // sdasz80 puts the displacement before the register: d(ix) is (ix+d).
     if (getLexer().is(AsmToken::LParen))
       return parseSDASZ80Indexed(Operands, Expr, S);
 
@@ -567,16 +620,19 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
     return false;
   }
 
-  // Numeric immediate or expression (possibly followed by sdasz80 indexed)
+  // Parse an expression that starts with a number, +, -, ~, !, '.' or '('.
+  // '.' is the address of the current instruction.
   if (getLexer().is(AsmToken::Integer) || getLexer().is(AsmToken::Minus) ||
-      getLexer().is(AsmToken::Plus)) {
+      getLexer().is(AsmToken::Plus) || getLexer().is(AsmToken::Tilde) ||
+      getLexer().is(AsmToken::Exclaim) || getLexer().is(AsmToken::Dot) ||
+      getLexer().is(AsmToken::LParen)) {
     SMLoc S = Parser.getTok().getLoc();
     const MCExpr *Expr;
     if (parseExpression(Expr))
       return true;
     SMLoc E = SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer() - 1);
 
-    // Check for sdasz80 indexed format: 5(ix) or -3(iy)
+    // sdasz80 puts the displacement before the register: 5(ix) is (ix+5).
     if (getLexer().is(AsmToken::LParen))
       return parseSDASZ80Indexed(Operands, Expr, S);
 
@@ -664,6 +720,7 @@ bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
 ///   .area _CODE  → .section .text
 ///   .area _DATA  → .section .data
 ///   .area _BSS   → .section .bss
+///   .area _X     → .section _X
 ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
   StringRef IDVal = DirectiveID.getString();
   if (IDVal.lower() != ".area")
@@ -678,22 +735,21 @@ ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
 
   // Ignore optional flags like "(ABS)" or "(REL,CON)"
   if (getLexer().is(AsmToken::LParen)) {
-    while (getLexer().isNot(AsmToken::EndOfStatement))
+    while (getLexer().isNot(AsmToken::RParen) &&
+           getLexer().isNot(AsmToken::EndOfStatement))
       Parser.Lex();
+    if (Parser.parseToken(AsmToken::RParen, "expected ')'"))
+      return ParseStatus::Failure;
   }
+  if (Parser.parseEOL())
+    return ParseStatus::Failure;
 
   // Map sdasz80 area names to ELF sections
-  StringRef Section;
-  if (AreaName == "_CODE" || AreaName == "_HOME")
-    Section = ".text";
-  else if (AreaName == "_DATA" || AreaName == "_INITIALIZED")
-    Section = ".data";
-  else if (AreaName == "_BSS")
-    Section = ".bss";
-  else if (AreaName == "_GSINIT" || AreaName == "_GSFINAL")
-    Section = ".init";
-  else
-    Section = ".text"; // default fallback
+  StringRef Section = StringSwitch<StringRef>(AreaName)
+                          .Cases({"_CODE", "_HOME"}, ".text")
+                          .Cases({"_DATA", "_INITIALIZED"}, ".data")
+                          .Case("_BSS", ".bss")
+                          .Default(AreaName);
 
   getStreamer().switchSection(getContext().getELFSection(
       Section, Section == ".bss" ? ELF::SHT_NOBITS : ELF::SHT_PROGBITS,
@@ -712,10 +768,10 @@ bool Z80AsmParser::emit(MCInst &Inst, SMLoc const &Loc, MCStreamer &Out) const {
 
 bool Z80AsmParser::invalidOperand(SMLoc const &Loc,
                                   OperandVector const &Operands,
-                                  uint64_t const &ErrorInfo) {
+                                  uint64_t const &ErrorInfo, const Twine &Msg) {
   SMLoc ErrorLoc = Loc;
 
-  if (ErrorInfo != ~0U) {
+  if (ErrorInfo != ~0ULL) {
     if (ErrorInfo >= Operands.size()) {
       return Error(ErrorLoc, "too few operands for instruction");
     } else {
@@ -726,7 +782,7 @@ bool Z80AsmParser::invalidOperand(SMLoc const &Loc,
     }
   }
 
-  return Error(ErrorLoc, "invalid operand for instruction");
+  return Error(ErrorLoc, Msg);
 }
 
 bool Z80AsmParser::missingFeature(SMLoc const &Loc, uint64_t const &ErrorInfo) {
@@ -747,11 +803,13 @@ bool Z80AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_MissingFeature:
     return missingFeature(IDLoc, ErrorInfo);
   case Match_InvalidOperand:
-    return invalidOperand(IDLoc, Operands, ErrorInfo);
+    return invalidOperand(IDLoc, Operands, ErrorInfo,
+                          "invalid operand for instruction");
   case Match_MnemonicFail:
     return Error(IDLoc, "invalid instruction");
   case Match_immediate:
-    return Error(IDLoc, "immediate operand out of range");
+    return invalidOperand(IDLoc, Operands, ErrorInfo,
+                          "immediate operand out of range");
   default:
     return Error(IDLoc, "invalid instruction");
   }

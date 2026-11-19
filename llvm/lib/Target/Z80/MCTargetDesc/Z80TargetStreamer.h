@@ -20,17 +20,6 @@ class MCStreamer;
 class Z80TargetStreamer : public MCTargetStreamer {
 public:
   explicit Z80TargetStreamer(MCStreamer &S);
-
-  void finish() override;
-
-protected:
-  virtual bool hasBSS() = 0;
-  virtual bool hasData() = 0;
-  virtual bool hasInitArray() = 0;
-  virtual bool hasFiniArray() = 0;
-
-  void stronglyReference(StringRef Name, StringRef Comment);
-  virtual void stronglyReference(MCSymbol *Sym) = 0;
 };
 
 /// A target streamer for textual Z80 assembly code.
@@ -45,18 +34,6 @@ private:
                      uint32_t SubSection, raw_ostream &OS) override;
 
   void emitRawBytes(StringRef Data) override;
-
-  bool hasBSS() override { return HasBSS; }
-  bool hasData() override { return HasData; }
-  bool hasInitArray() override { return HasInitArray; }
-  bool hasFiniArray() override { return HasFiniArray; }
-
-  void stronglyReference(MCSymbol *Sym) override;
-
-  bool HasBSS = false;
-  bool HasData = false;
-  bool HasInitArray = false;
-  bool HasFiniArray = false;
 };
 
 inline Z80TargetAsmStreamer::Z80TargetAsmStreamer(MCStreamer &S,
@@ -70,21 +47,6 @@ public:
 
 private:
   MCELFStreamer &getStreamer();
-
-  void changeSection(const MCSection *CurSection, MCSection *Section,
-                     uint32_t Subsection, raw_ostream &OS) override;
-
-  bool hasBSS() override { return HasBSS; }
-  bool hasData() override { return HasData; }
-  bool hasInitArray() override { return HasInitArray; }
-  bool hasFiniArray() override { return HasFiniArray; }
-
-  void stronglyReference(MCSymbol *Sym) override;
-
-  bool HasBSS = false;
-  bool HasData = false;
-  bool HasInitArray = false;
-  bool HasFiniArray = false;
 };
 
 } // end namespace llvm
