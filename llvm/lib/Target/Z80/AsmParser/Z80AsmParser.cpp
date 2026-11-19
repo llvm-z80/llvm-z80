@@ -316,11 +316,7 @@ MCRegister Z80AsmParser::parseRegisterName(StringRef Name) {
   if (Reg)
     return Reg;
 
-  Reg = MatchRegisterName(Name.lower());
-  if (Reg)
-    return Reg;
-
-  return MatchRegisterName(Name.upper());
+  return MatchRegisterName(Name.lower());
 }
 
 MCRegister Z80AsmParser::tryParseRegisterName() {

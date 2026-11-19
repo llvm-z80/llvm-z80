@@ -75,10 +75,6 @@ namespace Z80Op {
 
 enum OperandType : unsigned {
   OPERAND_IMM_DATA = MCOI::OPERAND_FIRST_TARGET,
-  OPERAND_ADDR8,
-  OPERAND_ADDR24,
-  OPERAND_IMM24,
-  OPERAND_IMM4,
 };
 
 } // namespace Z80Op
