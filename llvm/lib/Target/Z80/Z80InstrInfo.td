@@ -43,11 +43,11 @@ def LD_nnind_A : Inst24<"ld", 0x32, DirectMode> {
   let Uses = [A];
 }
 
-// LD A,I / LD A,R / LD I,A / LD R,A - Special registers (ED prefix)
-def LD_A_I : InstED<"ld a,i", 0x57>;
-def LD_A_R : InstED<"ld a,r", 0x5F>;
-def LD_I_A : InstED<"ld i,a", 0x47>;
-def LD_R_A : InstED<"ld r,a", 0x4F>;
+// LD A,I / LD A,R / LD I,A / LD R,A
+def LD_A_I : InstED<"ld a,i", 0x57> { let Uses = [I]; let Defs = [A, F]; }
+def LD_A_R : InstED<"ld a,r", 0x5F> { let Uses = [R]; let Defs = [A, F]; }
+def LD_I_A : InstED<"ld i,a", 0x47> { let Uses = [A]; let Defs = [I]; }
+def LD_R_A : InstED<"ld r,a", 0x4F> { let Uses = [A]; let Defs = [R]; }
 
 //===----------------------------------------------------------------------===//
 //  16-bit Load Group (Z80-only)
@@ -85,11 +85,14 @@ def LD_nnind_SP : InstEDnn<"ld", 0x73, DirectAt2Mode> { let AsmString = "ld ( $i
 
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def EX_DE_HL : Inst8<"ex de,hl", 0xEB> { let Uses = [DE, HL]; let Defs = [DE, HL]; }
+def EX_AF_AF : Inst8<"ex af,af'", 0x08> { let Uses = [AF, AFp]; let Defs = [AF, AFp]; }
+def EXX : Inst8<"exx", 0xD9> {
+  let Uses = [BC, DE, HL, BCp, DEp, HLp];
+  let Defs = [BC, DE, HL, BCp, DEp, HLp];
 }
-def EX_AF_AF : Inst8<"ex af,af'", 0x08>;
+}
 // sdasz80 also accepts ex af,af without the apostrophe.
 def : InstAlias<"ex af,af", (EX_AF_AF), 0>;
-def EXX : Inst8<"exx", 0xD9>;
 let mayLoad = true, mayStore = true, hasSideEffects = false in
 def EX_SPind_HL : Inst8<"ex (sp),hl", 0xE3> { let Uses = [SP, HL]; let Defs = [HL]; }
 
@@ -216,11 +219,12 @@ def RETN : InstED<"retn", 0x45>;
 //===----------------------------------------------------------------------===//
 
 // IN A,(n)
-def IN_A_n : Inst16<"in a,", 0xDB, PortMode>;
+def IN_A_n : Inst16<"in a,", 0xDB, PortMode> { let Defs = [A]; }
 
 // OUT (n),A
 def OUT_n_A : Inst16<"out", 0xD3, PortMode> {
   let AsmString = "out ( $imm ), a";
+  let Uses = [A];
 }
 
 // IN r,(C)
@@ -247,16 +251,18 @@ def OUT_C_r : Z80Inst16<"out (c), $src"> {
   let InOperandList = (ins GR8:$src);
 }
 
-// Block I/O (set flags)
-def INI  : InstED<"ini",  0xA2> { let Defs = [F]; }
-def INIR : InstED<"inir", 0xB2> { let Defs = [F]; }
-def IND  : InstED<"ind",  0xAA> { let Defs = [F]; }
-def INDR : InstED<"indr", 0xBA> { let Defs = [F]; }
+// Block I/O: port (C), byte at (HL), count in B
+let Uses = [B, C, HL], Defs = [B, HL, F] in {
+def INI  : InstED<"ini",  0xA2>;
+def INIR : InstED<"inir", 0xB2>;
+def IND  : InstED<"ind",  0xAA>;
+def INDR : InstED<"indr", 0xBA>;
 
-def OUTI : InstED<"outi", 0xA3> { let Defs = [F]; }
-def OTIR : InstED<"otir", 0xB3> { let Defs = [F]; }
-def OUTD : InstED<"outd", 0xAB> { let Defs = [F]; }
-def OTDR : InstED<"otdr", 0xBB> { let Defs = [F]; }
+def OUTI : InstED<"outi", 0xA3>;
+def OTIR : InstED<"otir", 0xB3>;
+def OUTD : InstED<"outd", 0xAB>;
+def OTDR : InstED<"otdr", 0xBB>;
+}
 
 } // Predicates = [IsZ80]
 
