@@ -289,7 +289,7 @@ private:
 
   bool emit(MCInst &Inst, SMLoc const &Loc, MCStreamer &Out) const;
   bool invalidOperand(SMLoc const &Loc, OperandVector const &Operands,
-                      uint64_t const &ErrorInfo);
+                      uint64_t const &ErrorInfo, const Twine &Msg);
   bool missingFeature(SMLoc const &Loc, uint64_t const &ErrorInfo);
 
 public:
@@ -751,10 +751,10 @@ bool Z80AsmParser::emit(MCInst &Inst, SMLoc const &Loc, MCStreamer &Out) const {
 
 bool Z80AsmParser::invalidOperand(SMLoc const &Loc,
                                   OperandVector const &Operands,
-                                  uint64_t const &ErrorInfo) {
+                                  uint64_t const &ErrorInfo, const Twine &Msg) {
   SMLoc ErrorLoc = Loc;
 
-  if (ErrorInfo != ~0U) {
+  if (ErrorInfo != ~0ULL) {
     if (ErrorInfo >= Operands.size()) {
       return Error(ErrorLoc, "too few operands for instruction");
     } else {
@@ -765,7 +765,7 @@ bool Z80AsmParser::invalidOperand(SMLoc const &Loc,
     }
   }
 
-  return Error(ErrorLoc, "invalid operand for instruction");
+  return Error(ErrorLoc, Msg);
 }
 
 bool Z80AsmParser::missingFeature(SMLoc const &Loc, uint64_t const &ErrorInfo) {
@@ -786,11 +786,13 @@ bool Z80AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_MissingFeature:
     return missingFeature(IDLoc, ErrorInfo);
   case Match_InvalidOperand:
-    return invalidOperand(IDLoc, Operands, ErrorInfo);
+    return invalidOperand(IDLoc, Operands, ErrorInfo,
+                          "invalid operand for instruction");
   case Match_MnemonicFail:
     return Error(IDLoc, "invalid instruction");
   case Match_immediate:
-    return Error(IDLoc, "immediate operand out of range");
+    return invalidOperand(IDLoc, Operands, ErrorInfo,
+                          "immediate operand out of range");
   default:
     return Error(IDLoc, "invalid instruction");
   }

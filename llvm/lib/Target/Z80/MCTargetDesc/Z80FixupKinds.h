@@ -25,13 +25,13 @@ namespace Z80 {
 enum Fixups {
   Imm8 = FirstTargetFixupKind, // An 8-bit immediate value.
   Imm16,                       // A 16-bit immediate value.
-  Addr8,                       // An 8-bit zero page address.
+  Addr8,                       // An 8-bit I/O port number.
   Addr16,                      // A 16-bit address.
   Addr16_Low,                  // The low byte of a 16-bit address.
   Addr16_High,                 // The high byte of a 16-bit address.
-  PCRel8,              // An 8-bit PC relative value.
-  Disp8,               // An 8-bit signed displacement for indexed addressing.
-  LDH8,                // SM83 LDH operand: 8-bit offset from 0xFF00.
+  PCRel8,                      // An 8-bit PC relative value.
+  Disp8,                       // A signed 8-bit (ix+d) or SP offset.
+  LDH8,                        // An 8-bit offset from 0xFF00 for LDH.
   LastTargetFixupKind,
   NumTargetFixupKinds = LastTargetFixupKind - FirstTargetFixupKind
 };

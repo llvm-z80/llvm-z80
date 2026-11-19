@@ -116,7 +116,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
       break;
     case Z80::Disp8:
       InRange = isInt<8>(SVal);
-      Msg = "index displacement out of range";
+      Msg = "signed 8-bit offset out of range";
       break;
     case Z80::LDH8:
       InRange = isUInt<8>(Value);
