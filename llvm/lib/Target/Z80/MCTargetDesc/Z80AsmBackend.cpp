@@ -124,8 +124,10 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
       break;
     case FK_Data_1:
     case Z80::Imm8:
-    case Z80::Addr8:
       InRange = isInt<8>(SVal) || isUInt<8>(Value);
+      break;
+    case Z80::Addr8:
+      InRange = isUInt<8>(Value);
       break;
     case FK_Data_2:
     case Z80::Imm16:

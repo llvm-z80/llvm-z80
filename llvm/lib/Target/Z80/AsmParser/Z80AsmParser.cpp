@@ -597,7 +597,7 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
       return true;
     SMLoc E = SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer() - 1);
 
-    // Check for sdasz80 indexed format: expr(ix) or expr(iy)
+    // sdasz80 puts the displacement before the register: d(ix) is (ix+d).
     if (getLexer().is(AsmToken::LParen))
       return parseSDASZ80Indexed(Operands, Expr, S);
 
@@ -605,16 +605,18 @@ bool Z80AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
     return false;
   }
 
-  // Numeric immediate or expression (possibly followed by sdasz80 indexed)
+  // Parse an expression that starts with a number, +, -, ~, ! or '.'.
+  // '.' is the address of the current instruction.
   if (getLexer().is(AsmToken::Integer) || getLexer().is(AsmToken::Minus) ||
-      getLexer().is(AsmToken::Plus)) {
+      getLexer().is(AsmToken::Plus) || getLexer().is(AsmToken::Tilde) ||
+      getLexer().is(AsmToken::Exclaim) || getLexer().is(AsmToken::Dot)) {
     SMLoc S = Parser.getTok().getLoc();
     const MCExpr *Expr;
     if (parseExpression(Expr))
       return true;
     SMLoc E = SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer() - 1);
 
-    // Check for sdasz80 indexed format: 5(ix) or -3(iy)
+    // sdasz80 puts the displacement before the register: 5(ix) is (ix+5).
     if (getLexer().is(AsmToken::LParen))
       return parseSDASZ80Indexed(Operands, Expr, S);
 
