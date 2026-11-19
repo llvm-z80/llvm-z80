@@ -105,7 +105,7 @@ unsigned Z80MCCodeEmitter::getExprOpValue(const MCExpr *Expr,
   if (Kind == Z80MCExpr::Target) {
     Z80MCExpr const *Z80Expr = cast<Z80MCExpr>(Expr);
     int64_t Result;
-    if (Z80Expr->evaluateAsConstant(Result)) {
+    if (Z80Expr->evaluateAsAbsolute(Result)) {
       return Result;
     }
 

@@ -7,10 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "Z80MCExpr.h"
-#include "Z80FixupKinds.h"
 
 #include "llvm/MC/MCAsmInfo.h"
-#include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCValue.h"
@@ -39,23 +37,6 @@ void Z80MCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
   OS << (Kind == VK_ADDR16_LO ? ")&0xff" : ")>>8");
 }
 
-bool Z80MCExpr::evaluateAsConstant(int64_t &Result) const {
-  MCValue Value;
-
-  bool IsRelocatable = getSubExpr()->evaluateAsRelocatable(Value, nullptr);
-
-  if (!IsRelocatable) {
-    return false;
-  }
-
-  if (Value.isAbsolute()) {
-    Result = evaluateAsInt64(Value.getConstant());
-    return true;
-  }
-
-  return false;
-}
-
 bool Z80MCExpr::evaluateAsRelocatableImpl(MCValue &Result,
                                           const MCAssembler *Asm) const {
   if (!SubExpr->evaluateAsRelocatable(Result, Asm))
@@ -80,7 +61,7 @@ int64_t Z80MCExpr::evaluateAsInt64(int64_t Value) const {
   case Z80MCExpr::VK_NONE:
     llvm_unreachable("Uninitialized expression.");
   }
-  return static_cast<uint64_t>(Value);
+  return Value;
 }
 
 Z80::Fixups Z80MCExpr::getFixupKind() const {
