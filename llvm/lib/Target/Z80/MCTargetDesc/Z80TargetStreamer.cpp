@@ -23,54 +23,12 @@
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Format.h"
 
 namespace llvm {
 
 Z80TargetStreamer::Z80TargetStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
-
-void Z80TargetStreamer::finish() {
-  // Non-ELF targets (sdasz80 and z88dk) have their own CRT initialization.
-  const MCAsmInfo &MAI = Streamer.getContext().getAsmInfo();
-  if (MAI.isSDCC() || MAI.isZ88DK())
-    return;
-  if (hasBSS())
-    stronglyReference("__do_zero_bss",
-                      "Declaring this symbol tells the CRT that there is "
-                      "something in .bss, so it may need to be zeroed.");
-
-  if (hasData())
-    stronglyReference(
-        "__do_copy_data",
-        "Declaring this symbol tells the CRT that there is something in .data, "
-        "so it may need to be copied from LMA to VMA.");
-
-  if (hasInitArray())
-    stronglyReference("__do_init_array",
-                      "Declaring this symbol tells the CRT that there are "
-                      "initialization routines to be run in .init_array");
-
-  if (hasFiniArray())
-    stronglyReference("__do_fini_array",
-                      "Declaring this symbol tells the CRT that there are "
-                      "finalization routines to be run in .fini_array");
-}
-
-void Z80TargetStreamer::stronglyReference(StringRef Name, StringRef Comment) {
-  MCStreamer &OS = getStreamer();
-  MCContext &Context = OS.getContext();
-  MCSymbol *Sym = Context.getOrCreateSymbol(Name);
-  OS.emitRawComment(Comment);
-  stronglyReference(Sym);
-}
-
-static bool HasPrefix(StringRef Name, StringRef Prefix) {
-  SmallString<32> PrefixDot = Prefix;
-  PrefixDot += ".";
-  return Name == Prefix || Name.starts_with(PrefixDot);
-}
 
 void Z80TargetAsmStreamer::changeSection(const MCSection *CurSection,
                                          MCSection *Section,
@@ -89,10 +47,6 @@ void Z80TargetAsmStreamer::changeSection(const MCSection *CurSection,
                                  "start the name with '_' to use it as an "
                                  "area name");
   MCTargetStreamer::changeSection(CurSection, Section, SubSection, OS);
-  HasBSS |= HasPrefix(Section->getName(), ".bss");
-  HasData |= HasPrefix(Section->getName(), ".data");
-  HasInitArray |= HasPrefix(Section->getName(), ".init_array");
-  HasFiniArray |= HasPrefix(Section->getName(), ".fini_array");
 }
 
 void Z80TargetAsmStreamer::emitRawBytes(StringRef Data) {
@@ -116,10 +70,6 @@ void Z80TargetAsmStreamer::emitRawBytes(StringRef Data) {
   }
 }
 
-void Z80TargetAsmStreamer::stronglyReference(MCSymbol *Sym) {
-  getStreamer().emitSymbolAttribute(Sym, MCSA_Global);
-}
-
 /// Picks the e_flags CPU value for the subtarget.
 static unsigned getEFlagsForFeatureSet(const FeatureBitset &Features) {
   if (Features[Z80::FeatureSM83])
@@ -134,26 +84,6 @@ Z80TargetELFStreamer::Z80TargetELFStreamer(MCStreamer &S,
   unsigned EFlags = W.getELFHeaderEFlags() & ~ELF::EF_Z80_MACH_MSK;
   EFlags |= getEFlagsForFeatureSet(STI.getFeatureBits());
   W.setELFHeaderEFlags(EFlags);
-}
-
-void Z80TargetELFStreamer::changeSection(const MCSection *CurSection,
-                                         MCSection *Section,
-                                         uint32_t Subsection, raw_ostream &OS) {
-  MCTargetStreamer::changeSection(CurSection, Section, Subsection, OS);
-  HasBSS |= HasPrefix(Section->getName(), ".bss");
-  HasData |= HasPrefix(Section->getName(), ".data");
-  HasInitArray |= HasPrefix(Section->getName(), ".init_array");
-  HasFiniArray |= HasPrefix(Section->getName(), ".fini_array");
-}
-
-void Z80TargetELFStreamer::stronglyReference(MCSymbol *Sym) {
-  MCELFStreamer &ELFStreamer = getStreamer();
-
-  ELFStreamer.emitSymbolAttribute(Sym, MCSA_Global);
-
-  // Mark the symbol as strongly referenced.
-  MCSymbolELF &SymELF = static_cast<MCSymbolELF &>(*Sym);
-  SymELF.setOther(ELF::STO_Z80_STRONG_REF);
 }
 
 MCELFStreamer &Z80TargetELFStreamer::getStreamer() {

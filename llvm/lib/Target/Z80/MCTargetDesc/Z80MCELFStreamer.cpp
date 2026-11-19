@@ -26,20 +26,10 @@ void Z80MCELFStreamer::initSections(const MCSubtargetInfo &STI) {
   emitCodeAlignment(Align(1), STI);
 }
 
-static bool HasPrefix(StringRef Name, StringRef Prefix) {
-  SmallString<32> PrefixDot = Prefix;
-  PrefixDot += ".";
-  return Name == Prefix || Name.starts_with(PrefixDot);
-}
-
 void Z80MCELFStreamer::changeSection(MCSection *Section, uint32_t Subsection) {
   LastMappingKinds[getCurrentSection().first] = LastMappingKind;
   LastMappingKind = LastMappingKinds.lookup(Section);
   MCELFStreamer::changeSection(Section, Subsection);
-  HasBSS |= HasPrefix(Section->getName(), ".bss");
-  HasData |= HasPrefix(Section->getName(), ".data");
-  HasInitArray |= HasPrefix(Section->getName(), ".init_array");
-  HasFiniArray |= HasPrefix(Section->getName(), ".fini_array");
 }
 
 void Z80MCELFStreamer::reset() {

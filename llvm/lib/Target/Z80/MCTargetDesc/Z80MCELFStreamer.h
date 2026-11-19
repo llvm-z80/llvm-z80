@@ -39,20 +39,10 @@ public:
   void emitFill(const MCExpr &NumBytes, uint64_t FillValue, SMLoc Loc) override;
   void emitValueImpl(const MCExpr *Value, unsigned Size, SMLoc Loc) override;
 
-  bool hasBSS() const { return HasBSS; }
-  bool hasData() const { return HasData; }
-  bool hasInitArray() const { return HasInitArray; }
-  bool hasFiniArray() const { return HasFiniArray; }
-
 private:
   enum MappingKind { MK_None, MK_Code, MK_Data };
 
   void emitMappingSymbol(MappingKind Kind);
-
-  bool HasBSS = false;
-  bool HasData = false;
-  bool HasInitArray = false;
-  bool HasFiniArray = false;
 
   DenseMap<const MCSection *, MappingKind> LastMappingKinds;
   MappingKind LastMappingKind = MK_None;
