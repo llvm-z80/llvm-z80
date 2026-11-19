@@ -118,15 +118,6 @@ public:
     return DiagnosticPredicate::Match;
   }
 
-  DiagnosticPredicate isPCRel8() const {
-    if (!isImm())
-      return DiagnosticPredicate::NoMatch;
-    if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return DiagnosticPredicate(CE->getValue() >= -128 &&
-                                 CE->getValue() <= 127);
-    return DiagnosticPredicate::Match;
-  }
-
   DiagnosticPredicate isAddr16() const { return isImm16(); }
 
   DiagnosticPredicate isSImm8() const {
@@ -193,6 +184,14 @@ public:
     assert(Kind == k_Immediate && "Unexpected operand kind");
     assert(N == 1 && "Invalid number of operands!");
     addExpr(Inst, ImmVal);
+  }
+
+  // A JR immediate operand holds the displacement. So pass a constant target
+  // as an expression with a PC-relative fixup.
+  void addPCRelOperands(MCInst &Inst, unsigned N) const {
+    assert(Kind == k_Immediate && "Unexpected operand kind");
+    assert(N == 1 && "Invalid number of operands!");
+    Inst.addOperand(MCOperand::createExpr(ImmVal));
   }
 
   void addExpr(MCInst &Inst, const MCExpr *Expr) const {

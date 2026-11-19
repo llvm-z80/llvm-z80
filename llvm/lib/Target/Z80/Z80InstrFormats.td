@@ -28,6 +28,13 @@ class ImmAsmOperand<string name> : AsmOperandClass {
   let DiagnosticType = "immediate";
 }
 
+// JR/DJNZ target. A constant is an address.
+def PCRel8AsmOperand : AsmOperandClass {
+  let Name = "PCRel8";
+  let PredicateMethod = "isImm";
+  let RenderMethod = "addPCRelOperands";
+}
+
 class Z80Op<ValueType vt> : Operand<vt> {
   let OperandNamespace = "Z80Op";
 }
@@ -79,7 +86,7 @@ def target16 : Operand<i16> {
 
 // 8-bit signed PC-relative offset for JR/DJNZ
 def pcrel8 : Operand<OtherVT> {
-  let ParserMatchClass = ImmAsmOperand<"PCRel8">;
+  let ParserMatchClass = PCRel8AsmOperand;
   let EncoderMethod = "encodeImm<Z80::PCRel8, 1>";
   let DecoderMethod = "decodeSImmOperand<8>";
   let PrintMethod = "printBranchOperand";

@@ -74,9 +74,17 @@ void Z80InstPrinter::printBranchOperand(const MCInst *MI, uint64_t Address,
   const MCOperand &Op = MI->getOperand(OpNo);
   if (!Op.isImm())
     return printOperand(MI, OpNo, OS);
-  uint64_t Target = Op.getImm();
-  OS << formatImm(PrintBranchImmAsAddress ? (int8_t)Target + Address + 2
-                                          : Target);
+  // The displacement counts from the end of the 2-byte instruction.
+  int64_t Offset = static_cast<int8_t>(Op.getImm()) + 2;
+  if (PrintBranchImmAsAddress) {
+    OS << formatImm(Address + Offset);
+    return;
+  }
+  // A bare number is an address, so print relative to '.'.
+  OS << '.';
+  if (Offset >= 0)
+    OS << '+';
+  OS << formatImm(Offset);
 }
 
 void Z80InstPrinter::printIndexedOperand(const MCInst *MI, unsigned OpNo,
