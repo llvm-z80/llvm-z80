@@ -17,12 +17,32 @@
 //  8-bit Load Group
 //===----------------------------------------------------------------------===//
 
-// LD r,r' - Load register to register
-// Opcode: 0b01dddsss where ddd=dest, sss=src
+// LD r,r'
+class LDrr<string mnemonic> : Z80Inst8<mnemonic # " $dst, $src"> {
+  bits<3> dst;
+  bits<3> src;
+  let Inst{7-6} = 0b01;
+  let Inst{5-3} = dst;
+  let Inst{2-0} = src;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins GR8:$src);
+}
+
+// LD r,n
+class LDrn<string mnemonic> : Z80Inst16<mnemonic # " $dst, $imm"> {
+  bits<3> dst;
+  bits<8> imm;
+  let Inst{7-6} = 0b00;
+  let Inst{5-3} = dst;
+  let Inst{2-0} = 0b110;
+  let Inst{15-8} = imm;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins imm8:$imm);
+}
+
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def LD_r_r : LDrr<"ld">;
 
-// LD r,n - Load immediate to register
 def LD_r_n : LDrn<"ld"> {
   let isAsCheapAsAMove = 1;
   let isMoveImm = 1;
@@ -30,11 +50,31 @@ def LD_r_n : LDrn<"ld"> {
 }
 }
 
-// LD r,(HL) - Load from memory at HL
+// LD r,(HL)
+class LDrHLind<string mnemonic> : Z80Inst8<mnemonic # " $dst, (hl)"> {
+  bits<3> dst;
+  let Inst{7-6} = 0b01;
+  let Inst{5-3} = dst;
+  let Inst{2-0} = 0b110;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins);
+  let Uses = [HL];
+}
+
 let mayLoad = true, mayStore = false, hasSideEffects = false in
 def LD_r_HLind : LDrHLind<"ld">;
 
-// LD (HL),r - Store to memory at HL
+// LD (HL),r
+class LDHLindr<string mnemonic> : Z80Inst8<mnemonic # " (hl), $src"> {
+  bits<3> src;
+  let Inst{7-6} = 0b01;
+  let Inst{5-3} = 0b110;
+  let Inst{2-0} = src;
+  let OutOperandList = (outs);
+  let InOperandList = (ins GR8:$src);
+  let Uses = [HL];
+}
+
 let mayLoad = false, mayStore = true, hasSideEffects = false in
 def LD_HLind_r : LDHLindr<"ld">;
 
@@ -58,7 +98,18 @@ def LD_DEind_A : Inst8<"ld (de),a", 0x12> { let Uses = [DE, A]; }
 //  16-bit Load Group (common subset)
 //===----------------------------------------------------------------------===//
 
-// LD dd,nn - Load 16-bit immediate (defines the target register)
+// LD rr,nn
+class LDrrnn<string mnemonic> : Z80Inst24<mnemonic # " $dst, $imm"> {
+  bits<2> dst;
+  bits<16> imm;
+  let Inst{7-6} = 0b00;
+  let Inst{5-4} = dst;
+  let Inst{3-0} = 0b0001;
+  let Inst{23-8} = imm;
+  let OutOperandList = (outs GR16:$dst);
+  let InOperandList = (ins imm16:$imm);
+}
+
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def LD_rr_nn : LDrrnn<"ld"> {
   let isAsCheapAsAMove = 1;
@@ -71,29 +122,50 @@ def LD_SP_nn : Inst24<"ld sp,", 0x31, Imm16Mode> { let Defs = [SP]; }
 // LD SP,HL
 def LD_SP_HL : Inst8<"ld sp,hl", 0xF9> { let Uses = [HL]; let Defs = [SP]; }
 
+// PUSH rr
+class PUSHrr<Register rr>
+    : Inst8<"push " # rr.AsmName, !or(0xC5, !shl(rr.HWEncoding{1-0}, 4))> {
+  let Uses = [rr];
+}
+
+// POP rr
+class POPrr<Register rr>
+    : Inst8<"pop " # rr.AsmName, !or(0xC1, !shl(rr.HWEncoding{1-0}, 4))> {
+  let Defs = [rr];
+}
+
 // PUSH/POP - stack memory access, no unmodeled side effects.
 // Note: SP is not declared in Defs/Uses because LLVM's PEI handles
 // SP adjustments separately. Peephole passes must check PUSH/POP
 // opcodes explicitly when tracking SP.
 let mayLoad = false, mayStore = true, hasSideEffects = false in {
-def PUSH_BC : PUSHrr<REGPAIR_BC> { let Uses = [BC]; }
-def PUSH_DE : PUSHrr<REGPAIR_DE> { let Uses = [DE]; }
-def PUSH_HL : PUSHrr<REGPAIR_HL> { let Uses = [HL]; }
-def PUSH_AF : PUSHrr<REGPAIR_AF> { let Uses = [A, F]; }
+def PUSH_BC : PUSHrr<BC>;
+def PUSH_DE : PUSHrr<DE>;
+def PUSH_HL : PUSHrr<HL>;
+def PUSH_AF : PUSHrr<AF> { let Uses = [A, F]; }
 }
 
 let mayLoad = true, mayStore = false, hasSideEffects = false in {
-def POP_BC : POPrr<REGPAIR_BC> { let Defs = [BC]; }
-def POP_DE : POPrr<REGPAIR_DE> { let Defs = [DE]; }
-def POP_HL : POPrr<REGPAIR_HL> { let Defs = [HL]; }
-def POP_AF : POPrr<REGPAIR_AF> { let Defs = [A, F]; }
+def POP_BC : POPrr<BC>;
+def POP_DE : POPrr<DE>;
+def POP_HL : POPrr<HL>;
+def POP_AF : POPrr<AF> { let Defs = [A, F]; }
 }
 
 //===----------------------------------------------------------------------===//
 //  8-bit Arithmetic Group
 //===----------------------------------------------------------------------===//
 
-// ALU A,r - The eight accumulator operations against a register.
+// ALU A,r for the eight accumulator operations
+class ALUAr<string mnemonic, bits<3> op> : Z80Inst8<mnemonic # " $src"> {
+  bits<3> src;
+  let Inst{7-6} = 0b10;
+  let Inst{5-3} = op;
+  let Inst{2-0} = src;
+  let OutOperandList = (outs);
+  let InOperandList = (ins GR8:$src);
+}
+
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADD_A_r : ALUAr<"add a,", 0b000> { let Uses = [A]; let Defs = [A, F]; }
 def ADC_A_r : ALUAr<"adc a,", 0b001> { let Uses = [A, F]; let Defs = [A, F]; }
@@ -129,7 +201,18 @@ def OR_n : Inst16<"or", 0xF6, Imm8Mode> { let Uses = [A]; let Defs = [A, F]; }
 def CP_n : Inst16<"cp", 0xFE, Imm8Mode> { let Uses = [A]; let Defs = [F]; }
 }
 
-// INC/DEC r - 8-bit INC/DEC set all flags except carry
+// INC r and DEC r. These set every flag except the carry.
+class INCDECr<string mnemonic, bits<3> lo> : Z80Inst8<mnemonic # " $dst"> {
+  bits<3> dst;
+  let Inst{7-6} = 0b00;
+  let Inst{5-3} = dst;
+  let Inst{2-0} = lo;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins GR8:$src);
+  let Constraints = "$dst = $src";
+  let Defs = [F];
+}
+
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def INC_r : INCDECr<"inc", 0b100>;
 def DEC_r : INCDECr<"dec", 0b101>;
@@ -161,14 +244,33 @@ def EI : Inst8<"ei", 0xFB>;
 //  16-bit Arithmetic Group (common subset)
 //===----------------------------------------------------------------------===//
 
-// ADD HL,ss - Uses HL and the source register pair, defines HL (sets carry, H)
+// ADD HL,rr
+class ADDHLrr<string mnemonic> : Z80Inst8<mnemonic # " hl, $src"> {
+  bits<2> src;
+  let Inst{7-6} = 0b00;
+  let Inst{5-4} = src;
+  let Inst{3-0} = 0b1001;
+  let OutOperandList = (outs);
+  let InOperandList = (ins GR16_BCDE:$src);
+}
+
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADD_HL_rr : ADDHLrr<"add"> { let Uses = [HL]; let Defs = [HL, F]; }
 def ADD_HL_HL : Inst8<"add hl,hl", 0x29> { let Uses = [HL]; let Defs = [HL, F]; }
 def ADD_HL_SP : Inst8<"add hl,sp", 0x39> { let Uses = [HL, SP]; let Defs = [HL, F]; }
 }
 
-// INC/DEC ss
+// INC rr and DEC rr
+class INCDECrr<string mnemonic, bits<4> lo> : Z80Inst8<mnemonic # " $dst"> {
+  bits<2> dst;
+  let Inst{7-6} = 0b00;
+  let Inst{5-4} = dst;
+  let Inst{3-0} = lo;
+  let OutOperandList = (outs GR16:$dst);
+  let InOperandList = (ins GR16:$src);
+  let Constraints = "$dst = $src";
+}
+
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def INC_rr : INCDECrr<"inc", 0b0011>;
 def DEC_rr : INCDECrr<"dec", 0b1011>;
@@ -181,6 +283,19 @@ def DEC_SP : Inst8<"dec sp", 0x3B> { let Uses = [SP]; let Defs = [SP]; }
 //===----------------------------------------------------------------------===//
 //  Rotate and Shift Group
 //===----------------------------------------------------------------------===//
+
+// RLC/RRC/RL/RR/SLA/SRA/SRL r
+class CBRotate<string mnemonic, bits<3> op> : Z80Inst16<mnemonic # " $dst"> {
+  bits<3> dst;
+  let Inst{7-0} = 0xCB;
+  let Inst{15-14} = 0b00;
+  let Inst{13-11} = op;
+  let Inst{10-8} = dst;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins GR8:$src);
+  let Constraints = "$dst = $src";
+  let Defs = [F];
+}
 
 // Rotate and shift a register. The carry is both an input and an output for
 // RL and RR, and an output only for the rest.
@@ -219,73 +334,100 @@ def SRL_HLind : InstCB<"srl (hl)", 0x3E> { let Uses = [HL]; let Defs = [F]; }
 //  Bit Set, Reset, and Test Group (CB prefixed)
 //===----------------------------------------------------------------------===//
 
-// The bit number and the register are both operands.
+// BIT b,r
+class BITbr<string mnemonic, bits<2> op> : Z80Inst16<mnemonic # " $b, $src"> {
+  bits<3> b;
+  bits<3> src;
+  let Inst{7-0} = 0xCB;
+  let Inst{15-14} = op;
+  let Inst{13-11} = b;
+  let Inst{10-8} = src;
+  let OutOperandList = (outs);
+  let InOperandList = (ins imm3:$b, GR8:$src);
+}
+
+// RES b,r and SET b,r
+class RESSETbr<string mnemonic, bits<2> op>
+    : Z80Inst16<mnemonic # " $b, $dst"> {
+  bits<3> b;
+  bits<3> dst;
+  let Inst{7-0} = 0xCB;
+  let Inst{15-14} = op;
+  let Inst{13-11} = b;
+  let Inst{10-8} = dst;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins imm3:$b, GR8:$src);
+  let Constraints = "$dst = $src";
+}
+
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def BIT_b_r : BITbr<"bit", 0b01> { let Defs = [F]; }
 def RES_b_r : RESSETbr<"res", 0b10>;
 def SET_b_r : RESSETbr<"set", 0b11>;
 }
 
-// BIT b,(HL) - Test a bit in memory
-let mayLoad = true, mayStore = false, hasSideEffects = false in {
-def BIT_0_HLind : InstCB<"bit 0,(hl)", 0x46>;
-def BIT_1_HLind : InstCB<"bit 1,(hl)", 0x4E>;
-def BIT_2_HLind : InstCB<"bit 2,(hl)", 0x56>;
-def BIT_3_HLind : InstCB<"bit 3,(hl)", 0x5E>;
-def BIT_4_HLind : InstCB<"bit 4,(hl)", 0x66>;
-def BIT_5_HLind : InstCB<"bit 5,(hl)", 0x6E>;
-def BIT_6_HLind : InstCB<"bit 6,(hl)", 0x76>;
-def BIT_7_HLind : InstCB<"bit 7,(hl)", 0x7E>;
+// BIT/RES/SET b,(HL)
+class BitOpHLind<string mnemonic, bits<2> op>
+    : Z80Inst16<mnemonic # " $b, (hl)"> {
+  bits<3> b;
+  let Inst{7-0} = 0xCB;
+  let Inst{15-14} = op;
+  let Inst{13-11} = b;
+  let Inst{10-8} = 0b110;
+  let InOperandList = (ins imm3:$b);
 }
 
-// RES b,(HL) - Reset a bit in memory
-let mayLoad = true, mayStore = true, hasSideEffects = false in {
-def RES_0_HLind : InstCB<"res 0,(hl)", 0x86> { let Uses = [HL]; }
-def RES_1_HLind : InstCB<"res 1,(hl)", 0x8E> { let Uses = [HL]; }
-def RES_2_HLind : InstCB<"res 2,(hl)", 0x96> { let Uses = [HL]; }
-def RES_3_HLind : InstCB<"res 3,(hl)", 0x9E> { let Uses = [HL]; }
-def RES_4_HLind : InstCB<"res 4,(hl)", 0xA6> { let Uses = [HL]; }
-def RES_5_HLind : InstCB<"res 5,(hl)", 0xAE> { let Uses = [HL]; }
-def RES_6_HLind : InstCB<"res 6,(hl)", 0xB6> { let Uses = [HL]; }
-def RES_7_HLind : InstCB<"res 7,(hl)", 0xBE> { let Uses = [HL]; }
-}
+let mayLoad = true, mayStore = false, hasSideEffects = false in
+def BIT_b_HLind : BitOpHLind<"bit", 0b01> { let Uses = [HL]; let Defs = [F]; }
 
-// SET b,(HL) - Set a bit in memory
-let mayLoad = true, mayStore = true, hasSideEffects = false in {
-def SET_0_HLind : InstCB<"set 0,(hl)", 0xC6> { let Uses = [HL]; }
-def SET_1_HLind : InstCB<"set 1,(hl)", 0xCE> { let Uses = [HL]; }
-def SET_2_HLind : InstCB<"set 2,(hl)", 0xD6> { let Uses = [HL]; }
-def SET_3_HLind : InstCB<"set 3,(hl)", 0xDE> { let Uses = [HL]; }
-def SET_4_HLind : InstCB<"set 4,(hl)", 0xE6> { let Uses = [HL]; }
-def SET_5_HLind : InstCB<"set 5,(hl)", 0xEE> { let Uses = [HL]; }
-def SET_6_HLind : InstCB<"set 6,(hl)", 0xF6> { let Uses = [HL]; }
-def SET_7_HLind : InstCB<"set 7,(hl)", 0xFE> { let Uses = [HL]; }
-}
+let mayLoad = true, mayStore = true, hasSideEffects = false in
+def RES_b_HLind : BitOpHLind<"res", 0b10> { let Uses = [HL]; }
+
+let mayLoad = true, mayStore = true, hasSideEffects = false in
+def SET_b_HLind : BitOpHLind<"set", 0b11> { let Uses = [HL]; }
 
 //===----------------------------------------------------------------------===//
 //  Jump Group (common subset: NZ/Z/NC/C conditions only)
 //===----------------------------------------------------------------------===//
 
 // JP nn - Unconditional jump
-def JP_nn : Inst24<"jp", 0xC3, Imm16Mode>, InstUnconditionalBranch;
+let isBranch = true, isTerminator = true, isBarrier = true in
+def JP_nn : Inst24<"jp", 0xC3, TargetMode>;
 
-// JP cc,nn - Conditional jump (NZ/Z/NC/C only — shared with SM83)
+// JP cc,nn
+class JPcond<Z80CondCode cc> : Inst24<"jp " # cc.Name # ",",
+                                      !or(0xC2, !shl(cc.cc, 3)), TargetMode> {
+  let isBranch = true;
+  let isTerminator = true;
+  let Uses = [F];
+}
+
+// NZ/Z/NC/C only, shared with SM83
 def JP_NZ_nn : JPcond<CC_NZ>;
 def JP_Z_nn  : JPcond<CC_Z>;
 def JP_NC_nn : JPcond<CC_NC>;
 def JP_C_nn  : JPcond<CC_C>;
 
 // JR e - Relative jump
-def JR_e : Inst16<"jr", 0x18, RelativeMode>, InstUnconditionalBranch;
+let isBranch = true, isTerminator = true, isBarrier = true in
+def JR_e : Inst16<"jr", 0x18, RelativeMode>;
 
-// JR cc,e - Conditional relative jump (only NZ/Z/NC/C)
+// JR cc,e
+class JRcond<Z80CondCode cc> : Inst16<"jr " # cc.Name # ",",
+                                      !or(0x20, !shl(cc.cc, 3)), RelativeMode> {
+  let isBranch = true;
+  let isTerminator = true;
+  let Uses = [F];
+}
+
 def JR_NZ_e : JRcond<CC_NZ>;
 def JR_Z_e  : JRcond<CC_Z>;
 def JR_NC_e : JRcond<CC_NC>;
 def JR_C_e  : JRcond<CC_C>;
 
 // JP (HL) - Jump to address in HL
-def JP_HLind : Inst8<"jp (hl)", 0xE9>, InstUnconditionalBranch {
+let isBranch = true, isTerminator = true, isBarrier = true in
+def JP_HLind : Inst8<"jp (hl)", 0xE9> {
   let isIndirectBranch = true;
   let Uses = [HL];
 }
@@ -297,11 +439,20 @@ def JP_HLind : Inst8<"jp (hl)", 0xE9>, InstUnconditionalBranch {
 // CALL nn - Caller-saved registers are clobbered by calls.
 // Argument registers are added dynamically as implicit uses in lowerCall.
 // IY: caller-saved on Z80; harmless on SM83 where IY is reserved.
-def CALL_nn : Inst24<"call", 0xCD, Imm16Mode>, InstCall {
+def CALL_nn : Inst24<"call", 0xCD, TargetMode> {
+  let isCall = true;
   let Defs = [A, BC, DE, HL, IY, F];
 }
 
-// CALL cc,nn (NZ/Z/NC/C only — shared with SM83)
+// CALL cc,nn
+class CALLcond<Z80CondCode cc> : Inst24<"call " # cc.Name # ",",
+                                        !or(0xC4, !shl(cc.cc, 3)), TargetMode> {
+  let isCall = true;
+  let Uses = [F];
+  let Defs = [A, BC, DE, HL, IY, F];
+}
+
+// NZ/Z/NC/C only, shared with SM83
 def CALL_NZ_nn : CALLcond<CC_NZ>;
 def CALL_Z_nn  : CALLcond<CC_Z>;
 def CALL_NC_nn : CALLcond<CC_NC>;
@@ -310,15 +461,29 @@ def CALL_C_nn  : CALLcond<CC_C>;
 // RET - Return from subroutine
 // Note: Return value registers (A, HL, DE) are added as implicit uses
 // dynamically in lowerReturn based on the actual return type.
-def RET : Inst8<"ret", 0xC9>, InstReturn;
+let isReturn = true, isTerminator = true, isBarrier = true in
+def RET : Inst8<"ret", 0xC9>;
 
-// RET cc (NZ/Z/NC/C only — shared with SM83)
+// RET cc
+class RETcond<Z80CondCode cc> : Inst8<"ret " # cc.Name,
+                                      !or(0xC0, !shl(cc.cc, 3))> {
+  let isReturn = true;
+  let isTerminator = true;
+  let Uses = [F];
+}
+
+// NZ/Z/NC/C only, shared with SM83
 def RET_NZ : RETcond<CC_NZ>;
 def RET_Z  : RETcond<CC_Z>;
 def RET_NC : RETcond<CC_NC>;
 def RET_C  : RETcond<CC_C>;
 
 // RST p
+class RSTvec<bits<3> t> : Inst8<"rst " # !mul(t, 8),
+                                !or(0xC7, !shl(t, 3))> {
+  let isCall = true;
+}
+
 def RST_00 : RSTvec<0>;
 def RST_08 : RSTvec<1>;
 def RST_10 : RSTvec<2>;

@@ -1053,26 +1053,6 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
     return true;
   }
 
-  case Z80::IN8_C:
-  case Z80::OUT8_C: {
-    // IN r,(C) and OUT (C),r name their register in the opcode.
-    static const MCPhysReg Regs[] = {Z80::B, Z80::C, Z80::D, Z80::E,
-                                     Z80::H, Z80::L, Z80::A};
-    static const unsigned InOpcs[] = {Z80::IN_B_C, Z80::IN_C_C, Z80::IN_D_C,
-                                      Z80::IN_E_C, Z80::IN_H_C, Z80::IN_L_C,
-                                      Z80::IN_A_C};
-    static const unsigned OutOpcs[] = {Z80::OUT_C_B, Z80::OUT_C_C, Z80::OUT_C_D,
-                                       Z80::OUT_C_E, Z80::OUT_C_H, Z80::OUT_C_L,
-                                       Z80::OUT_C_A};
-    const MCPhysReg *It = find(Regs, MI.getOperand(0).getReg());
-    assert(It != std::end(Regs) && "IN/OUT register outside GR8");
-    unsigned Idx = It - std::begin(Regs);
-    BuildMI(MBB, MI, DL,
-            get(MI.getOpcode() == Z80::IN8_C ? InOpcs[Idx] : OutOpcs[Idx]));
-    MI.eraseFromParent();
-    return true;
-  }
-
   case Z80::STORE8_IND: {
     // Expand to LD (BC),A, LD (DE),A, or LD (HL),A based on allocated register.
     Register Addr = MI.getOperand(1).getReg();
@@ -2177,10 +2157,6 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case Z80::LOAD8_IND:  // LD A,(rr) = 1
   case Z80::STORE8_IND: // LD (rr),A = 1
     return 1;
-
-  case Z80::IN8_C:  // IN r,(C) = 2
-  case Z80::OUT8_C: // OUT (C),r = 2
-    return 2;
 
   // Z80: AND A(1) + ADC/SBC HL,rr(2) + PUSH(1) + POP(1) + LD(1) + RRCA x2(2) +
   // AND n(2) = 10. SM83: 13 x 1-byte + AND n(2) = 15.

@@ -74,17 +74,11 @@ template <> struct enum_iteration_traits<decltype(Z80::NoRegister)> {
 namespace Z80Op {
 
 enum OperandType : unsigned {
-  OPERAND_IMM8 = MCOI::OPERAND_FIRST_TARGET,
+  OPERAND_IMM_DATA = MCOI::OPERAND_FIRST_TARGET,
   OPERAND_ADDR8,
-  OPERAND_ADDR16,
-  OPERAND_IMM16,
-  OPERAND_IMM3,
   OPERAND_ADDR24,
   OPERAND_IMM24,
   OPERAND_IMM4,
-  OPERAND_PORT8,
-  OPERAND_PCREL,
-  OPERAND_DISP8,
 };
 
 } // namespace Z80Op

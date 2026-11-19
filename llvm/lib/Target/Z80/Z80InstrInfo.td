@@ -44,10 +44,10 @@ def LD_nnind_A : Inst24<"ld", 0x32, DirectMode> {
 }
 
 // LD A,I / LD A,R / LD I,A / LD R,A - Special registers (ED prefix)
-def LD_A_I : InstED8<"ld a,i", 0x57>;
-def LD_A_R : InstED8<"ld a,r", 0x5F>;
-def LD_I_A : InstED8<"ld i,a", 0x47>;
-def LD_R_A : InstED8<"ld r,a", 0x4F>;
+def LD_A_I : InstED<"ld a,i", 0x57>;
+def LD_A_R : InstED<"ld a,r", 0x5F>;
+def LD_I_A : InstED<"ld i,a", 0x47>;
+def LD_R_A : InstED<"ld r,a", 0x4F>;
 
 //===----------------------------------------------------------------------===//
 //  16-bit Load Group (Z80-only)
@@ -68,15 +68,15 @@ def LD_nnind_HL : Inst24<"ld", 0x22, DirectMode> {
 
 // LD dd,(nn) / LD (nn),dd - ED prefixed
 let mayLoad = true, mayStore = false, hasSideEffects = false in {
-def LD_BC_nnind : InstED24<"ld bc,", 0x4B, DirectModeAt2> { let Defs = [BC]; }
-def LD_DE_nnind : InstED24<"ld de,", 0x5B, DirectModeAt2> { let Defs = [DE]; }
-def LD_SP_nnind : InstED24<"ld sp,", 0x7B, DirectModeAt2> { let Defs = [SP]; }
+def LD_BC_nnind : InstEDnn<"ld bc,", 0x4B, DirectAt2Mode> { let Defs = [BC]; }
+def LD_DE_nnind : InstEDnn<"ld de,", 0x5B, DirectAt2Mode> { let Defs = [DE]; }
+def LD_SP_nnind : InstEDnn<"ld sp,", 0x7B, DirectAt2Mode> { let Defs = [SP]; }
 }
 
 let mayLoad = false, mayStore = true, hasSideEffects = false in {
-def LD_nnind_BC : InstED24<"ld", 0x43, DirectModeAt2> { let AsmString = "ld ( $imm ),bc"; let Uses = [BC]; }
-def LD_nnind_DE : InstED24<"ld", 0x53, DirectModeAt2> { let AsmString = "ld ( $imm ),de"; let Uses = [DE]; }
-def LD_nnind_SP : InstED24<"ld", 0x73, DirectModeAt2> { let AsmString = "ld ( $imm ),sp"; let Uses = [SP]; }
+def LD_nnind_BC : InstEDnn<"ld", 0x43, DirectAt2Mode> { let AsmString = "ld ( $imm ),bc"; let Uses = [BC]; }
+def LD_nnind_DE : InstEDnn<"ld", 0x53, DirectAt2Mode> { let AsmString = "ld ( $imm ),de"; let Uses = [DE]; }
+def LD_nnind_SP : InstEDnn<"ld", 0x73, DirectAt2Mode> { let AsmString = "ld ( $imm ),sp"; let Uses = [SP]; }
 }
 
 //===----------------------------------------------------------------------===//
@@ -97,18 +97,18 @@ def EX_SPind_HL : Inst8<"ex (sp),hl", 0xE3> { let Uses = [SP, HL]; let Defs = [H
 
 // Block transfer: read (HL), write (DE), decrement BC, inc/dec HL and DE
 let mayLoad = true, mayStore = true in {
-def LDI  : InstED8<"ldi",  0xA0> { let Uses = [HL, DE, BC]; let Defs = [HL, DE, BC, F]; }
-def LDIR : InstED8<"ldir", 0xB0> { let Uses = [HL, DE, BC]; let Defs = [HL, DE, BC, F]; }
-def LDD  : InstED8<"ldd",  0xA8> { let Uses = [HL, DE, BC]; let Defs = [HL, DE, BC, F]; }
-def LDDR : InstED8<"lddr", 0xB8> { let Uses = [HL, DE, BC]; let Defs = [HL, DE, BC, F]; }
+def LDI  : InstED<"ldi",  0xA0> { let Uses = [HL, DE, BC]; let Defs = [HL, DE, BC, F]; }
+def LDIR : InstED<"ldir", 0xB0> { let Uses = [HL, DE, BC]; let Defs = [HL, DE, BC, F]; }
+def LDD  : InstED<"ldd",  0xA8> { let Uses = [HL, DE, BC]; let Defs = [HL, DE, BC, F]; }
+def LDDR : InstED<"lddr", 0xB8> { let Uses = [HL, DE, BC]; let Defs = [HL, DE, BC, F]; }
 }
 
 // Block compare: read (HL), compare with A, decrement BC, inc/dec HL
 let mayLoad = true, mayStore = false in {
-def CPI  : InstED8<"cpi",  0xA1> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F]; }
-def CPIR : InstED8<"cpir", 0xB1> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F]; }
-def CPD  : InstED8<"cpd",  0xA9> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F]; }
-def CPDR : InstED8<"cpdr", 0xB9> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F]; }
+def CPI  : InstED<"cpi",  0xA1> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F]; }
+def CPIR : InstED<"cpir", 0xB1> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F]; }
+def CPD  : InstED<"cpd",  0xA9> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F]; }
+def CPDR : InstED<"cpdr", 0xB9> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F]; }
 }
 
 //===----------------------------------------------------------------------===//
@@ -116,29 +116,39 @@ def CPDR : InstED8<"cpdr", 0xB9> { let Uses = [HL, A, BC]; let Defs = [HL, BC, F
 //===----------------------------------------------------------------------===//
 
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def NEG : InstED8<"neg", 0x44> { let Uses = [A]; let Defs = [A, F]; }
+def NEG : InstED<"neg", 0x44> { let Uses = [A]; let Defs = [A, F]; }
 }
 
 // IM instructions
-def IM_0 : InstED8<"im 0", 0x46>;
-def IM_1 : InstED8<"im 1", 0x56>;
-def IM_2 : InstED8<"im 2", 0x5E>;
+def IM_0 : InstED<"im 0", 0x46>;
+def IM_1 : InstED<"im 1", 0x56>;
+def IM_2 : InstED<"im 2", 0x5E>;
 
 //===----------------------------------------------------------------------===//
 //  16-bit Arithmetic Group (Z80-only: ED prefixed)
 //===----------------------------------------------------------------------===//
 
-// ADC HL,ss (ED prefixed) - Add with carry (reads carry flag)
+// ADC HL,rr and SBC HL,rr
+class ADCSBCHLrr<string mnemonic, bits<4> lo>
+    : Z80Inst16<mnemonic # " hl, $src"> {
+  bits<2> src;
+  let Inst{7-0} = 0xED;
+  let Inst{15-14} = 0b01;
+  let Inst{13-12} = src;
+  let Inst{11-8} = lo;
+  let OutOperandList = (outs);
+  let InOperandList = (ins GR16:$src);
+}
+
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def ADC_HL_rr : ADCSBCHLrr<"adc", 0b1010> { let Uses = [HL, F]; let Defs = [HL, F]; }
 }
-def ADC_HL_SP : InstED8<"adc hl,sp", 0x7A> { let Uses = [HL, SP, F]; let Defs = [HL, F]; }
+def ADC_HL_SP : InstED<"adc hl,sp", 0x7A> { let Uses = [HL, SP, F]; let Defs = [HL, F]; }
 
-// SBC HL,ss (ED prefixed) - Subtract with carry (reads carry flag)
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
 def SBC_HL_rr : ADCSBCHLrr<"sbc", 0b0010> { let Uses = [HL, F]; let Defs = [HL, F]; }
 }
-def SBC_HL_SP : InstED8<"sbc hl,sp", 0x72> { let Uses = [HL, SP, F]; let Defs = [HL, F]; }
+def SBC_HL_SP : InstED<"sbc hl,sp", 0x72> { let Uses = [HL, SP, F]; let Defs = [HL, F]; }
 
 //===----------------------------------------------------------------------===//
 //  Rotate and Shift Group (Z80-only: ED prefixed)
@@ -146,8 +156,8 @@ def SBC_HL_SP : InstED8<"sbc hl,sp", 0x72> { let Uses = [HL, SP, F]; let Defs = 
 
 // RLD / RRD (ED prefixed) - set flags
 let mayLoad = true, mayStore = true, hasSideEffects = false in {
-def RLD : InstED8<"rld", 0x6F> { let Uses = [HL, A]; let Defs = [A, F]; }
-def RRD : InstED8<"rrd", 0x67> { let Uses = [HL, A]; let Defs = [A, F]; }
+def RLD : InstED<"rld", 0x6F> { let Uses = [HL, A]; let Defs = [A, F]; }
+def RRD : InstED<"rrd", 0x67> { let Uses = [HL, A]; let Defs = [A, F]; }
 }
 
 //===----------------------------------------------------------------------===//
@@ -161,7 +171,8 @@ def JP_P_nn  : JPcond<CC_P>;
 def JP_M_nn  : JPcond<CC_M>;
 
 // DJNZ e - Decrement B and jump if not zero
-def DJNZ_e : Inst16<"djnz", 0x10, RelativeMode>, InstConditionalBranch;
+let isBranch = true, isTerminator = true in
+def DJNZ_e : Inst16<"djnz", 0x10, RelativeMode>;
 
 //===----------------------------------------------------------------------===//
 //  Call and Return Group (Z80-only)
@@ -171,11 +182,13 @@ def DJNZ_e : Inst16<"djnz", 0x10, RelativeMode>, InstConditionalBranch;
 // Pseudo-instruction that expands to "call __call_iy" in expandPostRAPseudo.
 // The runtime __call_iy trampoline does "jp (iy)".
 // IY holds the function pointer; HL/DE are free for arguments.
-let isPseudo = true in
-def CALL_IY : Z80Inst<"call\t__call_iy">, InstCall {
-  let InOperandList = (ins);
+def CALL_IY : Z80Pseudo<(outs), (ins)> {
+  let isCall = true;
   let Uses = [IY];
   let Defs = [A, BC, DE, HL, IY, F];
+  let mayLoad = true;
+  let mayStore = true;
+  let hasSideEffects = true;
 }
 
 // CALL cc,nn - Sign/parity conditions (Z80-only)
@@ -191,57 +204,57 @@ def RET_P  : RETcond<CC_P>;
 def RET_M  : RETcond<CC_M>;
 
 // RETI / RETN (ED prefix)
-def RETI : InstED8<"reti", 0x4D>, InstReturn;
-def RETN : InstED8<"retn", 0x45>, InstReturn;
+let isReturn = true, isTerminator = true, isBarrier = true in {
+def RETI : InstED<"reti", 0x4D>;
+def RETN : InstED<"retn", 0x45>;
+}
 
 //===----------------------------------------------------------------------===//
 //  Input and Output Group
 //===----------------------------------------------------------------------===//
 
 // IN A,(n)
-def IN_A_n : Inst16<"in a,", 0xDB, PortMode> {
-  let AsmString = "in a, ( $imm )";
-}
+def IN_A_n : Inst16<"in a,", 0xDB, PortMode>;
 
 // OUT (n),A
 def OUT_n_A : Inst16<"out", 0xD3, PortMode> {
   let AsmString = "out ( $imm ), a";
 }
 
-// IN r,(C) - ED prefixed (sets flags)
-// These instructions read from port specified by C and store in the register
-let Uses = [C] in {
-  def IN_B_C : InstED8<"in b,(c)", 0x40> { let Defs = [B, F]; }
-  def IN_C_C : InstED8<"in c,(c)", 0x48> { let Defs = [C, F]; }
-  def IN_D_C : InstED8<"in d,(c)", 0x50> { let Defs = [D, F]; }
-  def IN_E_C : InstED8<"in e,(c)", 0x58> { let Defs = [E, F]; }
-  def IN_H_C : InstED8<"in h,(c)", 0x60> { let Defs = [H, F]; }
-  def IN_L_C : InstED8<"in l,(c)", 0x68> { let Defs = [L, F]; }
-  def IN_A_C : InstED8<"in a,(c)", 0x78> { let Defs = [A, F]; }
+// IN r,(C)
+let Uses = [C], Defs = [F], hasSideEffects = true, mayLoad = false,
+    mayStore = false in
+def IN_r_C : Z80Inst16<"in $dst, (c)"> {
+  bits<3> dst;
+  let Inst{7-0} = 0xED;
+  let Inst{15-14} = 0b01;
+  let Inst{13-11} = dst;
+  let Inst{10-8} = 0b000;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins);
 }
 
-// OUT (C),r - ED prefixed
-// These instructions write the register value to port specified by C
-let Uses = [C] in {
-  def OUT_C_B : InstED8<"out (c),b", 0x41> { let Uses = [C, B]; }
-  def OUT_C_C : InstED8<"out (c),c", 0x49> { let Uses = [C]; }
-  def OUT_C_D : InstED8<"out (c),d", 0x51> { let Uses = [C, D]; }
-  def OUT_C_E : InstED8<"out (c),e", 0x59> { let Uses = [C, E]; }
-  def OUT_C_H : InstED8<"out (c),h", 0x61> { let Uses = [C, H]; }
-  def OUT_C_L : InstED8<"out (c),l", 0x69> { let Uses = [C, L]; }
-  def OUT_C_A : InstED8<"out (c),a", 0x79> { let Uses = [C, A]; }
+// OUT (C),r
+let Uses = [C], hasSideEffects = true, mayLoad = false, mayStore = false in
+def OUT_C_r : Z80Inst16<"out (c), $src"> {
+  bits<3> src;
+  let Inst{7-0} = 0xED;
+  let Inst{15-14} = 0b01;
+  let Inst{13-11} = src;
+  let Inst{10-8} = 0b001;
+  let InOperandList = (ins GR8:$src);
 }
 
 // Block I/O (set flags)
-def INI  : InstED8<"ini",  0xA2> { let Defs = [F]; }
-def INIR : InstED8<"inir", 0xB2> { let Defs = [F]; }
-def IND  : InstED8<"ind",  0xAA> { let Defs = [F]; }
-def INDR : InstED8<"indr", 0xBA> { let Defs = [F]; }
+def INI  : InstED<"ini",  0xA2> { let Defs = [F]; }
+def INIR : InstED<"inir", 0xB2> { let Defs = [F]; }
+def IND  : InstED<"ind",  0xAA> { let Defs = [F]; }
+def INDR : InstED<"indr", 0xBA> { let Defs = [F]; }
 
-def OUTI : InstED8<"outi", 0xA3> { let Defs = [F]; }
-def OTIR : InstED8<"otir", 0xB3> { let Defs = [F]; }
-def OUTD : InstED8<"outd", 0xAB> { let Defs = [F]; }
-def OTDR : InstED8<"otdr", 0xBB> { let Defs = [F]; }
+def OUTI : InstED<"outi", 0xA3> { let Defs = [F]; }
+def OTIR : InstED<"otir", 0xB3> { let Defs = [F]; }
+def OUTD : InstED<"outd", 0xAB> { let Defs = [F]; }
+def OTDR : InstED<"otdr", 0xBB> { let Defs = [F]; }
 
 } // Predicates = [IsZ80]
 
@@ -253,57 +266,54 @@ let Predicates = [IsZ80] in {
 
 // LD IX,nn / LD IY,nn
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def LD_IX_nn : InstDD24<"ld ix,", 0x21, Imm16ModeAt2> { let Defs = [IX]; }
-def LD_IY_nn : InstFD24<"ld iy,", 0x21, Imm16ModeAt2> { let Defs = [IY]; }
+def LD_IX_nn : InstDDnn<"ld ix,", 0x21, Imm16At2Mode> { let Defs = [IX]; }
+def LD_IY_nn : InstFDnn<"ld iy,", 0x21, Imm16At2Mode> { let Defs = [IY]; }
 }
 
 // PUSH IX / PUSH IY
-def PUSH_IX : InstDD8<"push ix", 0xE5> { let Uses = [IX]; }
-def PUSH_IY : InstFD8<"push iy", 0xE5> { let Uses = [IY]; }
+def PUSH_IX : InstDD<"push ix", 0xE5> { let Uses = [IX]; }
+def PUSH_IY : InstFD<"push iy", 0xE5> { let Uses = [IY]; }
 
 // POP IX / POP IY
-def POP_IX : InstDD8<"pop ix", 0xE1> { let Defs = [IX]; }
-def POP_IY : InstFD8<"pop iy", 0xE1> { let Defs = [IY]; }
+def POP_IX : InstDD<"pop ix", 0xE1> { let Defs = [IX]; }
+def POP_IY : InstFD<"pop iy", 0xE1> { let Defs = [IY]; }
 
 // JP (IX) / JP (IY)
-def JP_IXind : InstDD8<"jp (ix)", 0xE9>, InstUnconditionalBranch {
-  let isIndirectBranch = true;
-  let Uses = [IX];
-}
-def JP_IYind : InstFD8<"jp (iy)", 0xE9>, InstUnconditionalBranch {
-  let isIndirectBranch = true;
-  let Uses = [IY];
+let isBranch = true, isTerminator = true, isBarrier = true,
+    isIndirectBranch = true in {
+def JP_IXind : InstDD<"jp (ix)", 0xE9> { let Uses = [IX]; }
+def JP_IYind : InstFD<"jp (iy)", 0xE9> { let Uses = [IY]; }
 }
 
 // LD SP,IX / LD SP,IY
-def LD_SP_IX : InstDD8<"ld sp,ix", 0xF9> { let Uses = [IX]; let Defs = [SP]; }
-def LD_SP_IY : InstFD8<"ld sp,iy", 0xF9> { let Uses = [IY]; let Defs = [SP]; }
+def LD_SP_IX : InstDD<"ld sp,ix", 0xF9> { let Uses = [IX]; let Defs = [SP]; }
+def LD_SP_IY : InstFD<"ld sp,iy", 0xF9> { let Uses = [IY]; let Defs = [SP]; }
 
 // INC IX / INC IY / DEC IX / DEC IY
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def INC_IX : InstDD8<"inc ix", 0x23> { let Uses = [IX]; let Defs = [IX]; }
-def INC_IY : InstFD8<"inc iy", 0x23> { let Uses = [IY]; let Defs = [IY]; }
-def DEC_IX : InstDD8<"dec ix", 0x2B> { let Uses = [IX]; let Defs = [IX]; }
-def DEC_IY : InstFD8<"dec iy", 0x2B> { let Uses = [IY]; let Defs = [IY]; }
+def INC_IX : InstDD<"inc ix", 0x23> { let Uses = [IX]; let Defs = [IX]; }
+def INC_IY : InstFD<"inc iy", 0x23> { let Uses = [IY]; let Defs = [IY]; }
+def DEC_IX : InstDD<"dec ix", 0x2B> { let Uses = [IX]; let Defs = [IX]; }
+def DEC_IY : InstFD<"dec iy", 0x2B> { let Uses = [IY]; let Defs = [IY]; }
 
 // ADD IX,pp / ADD IY,rr (sets carry, H)
-def ADD_IX_BC : InstDD8<"add ix,bc", 0x09> { let Uses = [IX, BC]; let Defs = [IX, F]; }
-def ADD_IX_DE : InstDD8<"add ix,de", 0x19> { let Uses = [IX, DE]; let Defs = [IX, F]; }
-def ADD_IX_IX : InstDD8<"add ix,ix", 0x29> { let Uses = [IX];     let Defs = [IX, F]; }
+def ADD_IX_BC : InstDD<"add ix,bc", 0x09> { let Uses = [IX, BC]; let Defs = [IX, F]; }
+def ADD_IX_DE : InstDD<"add ix,de", 0x19> { let Uses = [IX, DE]; let Defs = [IX, F]; }
+def ADD_IX_IX : InstDD<"add ix,ix", 0x29> { let Uses = [IX];     let Defs = [IX, F]; }
 }
-def ADD_IX_SP : InstDD8<"add ix,sp", 0x39> { let Uses = [IX, SP]; let Defs = [IX, F]; }
+def ADD_IX_SP : InstDD<"add ix,sp", 0x39> { let Uses = [IX, SP]; let Defs = [IX, F]; }
 
 let mayLoad = 0, mayStore = 0, hasSideEffects = 0 in {
-def ADD_IY_BC : InstFD8<"add iy,bc", 0x09> { let Uses = [IY, BC]; let Defs = [IY, F]; }
-def ADD_IY_DE : InstFD8<"add iy,de", 0x19> { let Uses = [IY, DE]; let Defs = [IY, F]; }
-def ADD_IY_IY : InstFD8<"add iy,iy", 0x29> { let Uses = [IY];     let Defs = [IY, F]; }
+def ADD_IY_BC : InstFD<"add iy,bc", 0x09> { let Uses = [IY, BC]; let Defs = [IY, F]; }
+def ADD_IY_DE : InstFD<"add iy,de", 0x19> { let Uses = [IY, DE]; let Defs = [IY, F]; }
+def ADD_IY_IY : InstFD<"add iy,iy", 0x29> { let Uses = [IY];     let Defs = [IY, F]; }
 }
-def ADD_IY_SP : InstFD8<"add iy,sp", 0x39> { let Uses = [IY, SP]; let Defs = [IY, F]; }
+def ADD_IY_SP : InstFD<"add iy,sp", 0x39> { let Uses = [IY, SP]; let Defs = [IY, F]; }
 
 // EX (SP),IX / EX (SP),IY
 let mayLoad = true, mayStore = true, hasSideEffects = false in {
-def EX_SPind_IX : InstDD8<"ex (sp),ix", 0xE3> { let Uses = [SP, IX]; let Defs = [IX]; }
-def EX_SPind_IY : InstFD8<"ex (sp),iy", 0xE3> { let Uses = [SP, IY]; let Defs = [IY]; }
+def EX_SPind_IX : InstDD<"ex (sp),ix", 0xE3> { let Uses = [SP, IX]; let Defs = [IX]; }
+def EX_SPind_IY : InstFD<"ex (sp),iy", 0xE3> { let Uses = [SP, IY]; let Defs = [IY]; }
 }
 
 //===----------------------------------------------------------------------===//
@@ -312,7 +322,24 @@ def EX_SPind_IY : InstFD8<"ex (sp),iy", 0xE3> { let Uses = [SP, IY]; let Defs = 
 // Opcode: FD [46|4E|56|5E|66|6E|7E] d for IY
 //===----------------------------------------------------------------------===//
 
-// LD r,(IX+d) / LD r,(IY+d) — loads name the destination register
+// LD r,(IX+d) and LD r,(IY+d)
+class LDrIdxd<string mnemonic, bits<8> prefix, string idx>
+    : Z80Inst24<mnemonic # " $dst, ( " # idx # " + $imm )"> {
+  bits<3> dst;
+  bits<8> imm;
+  let Inst{7-0} = prefix;
+  let Inst{15-14} = 0b01;
+  let Inst{13-11} = dst;
+  let Inst{10-8} = 0b110;
+  let Inst{23-16} = imm;
+  let OutOperandList = (outs GR8:$dst);
+  let InOperandList = (ins disp8:$imm);
+  let mayLoad = 1;
+  let mayStore = 0;
+  let Uses = !if(!eq(idx, "ix"), [IX], [IY]);
+  let hasSideEffects = 0;
+}
+
 def LD_r_IXd : LDrIdxd<"ld", 0xDD, "ix">;
 def LD_r_IYd : LDrIdxd<"ld", 0xFD, "iy">;
 
@@ -322,7 +349,24 @@ def LD_r_IYd : LDrIdxd<"ld", 0xFD, "iy">;
 // Opcode: FD [70|71|72|73|74|75|77] d for IY
 //===----------------------------------------------------------------------===//
 
-// LD (IX+d),r / LD (IY+d),r — stores name the source register
+// LD (IX+d),r and LD (IY+d),r
+class LDIdxdr<string mnemonic, bits<8> prefix, string idx>
+    : Z80Inst24<mnemonic # " ( " # idx # " + $imm ), $src"> {
+  bits<3> src;
+  bits<8> imm;
+  let Inst{7-0} = prefix;
+  let Inst{15-14} = 0b01;
+  let Inst{13-11} = 0b110;
+  let Inst{10-8} = src;
+  let Inst{23-16} = imm;
+  let OutOperandList = (outs);
+  let InOperandList = (ins disp8:$imm, GR8:$src);
+  let mayLoad = 0;
+  let mayStore = 1;
+  let Uses = !if(!eq(idx, "ix"), [IX], [IY]);
+  let hasSideEffects = 0;
+}
+
 // The load and the store patterns overlap on the byte where both would name
 // the memory slot as their register, so the store decodes from its own table.
 // That byte is HALT under a DD or FD prefix, which the two-byte definitions
@@ -335,8 +379,8 @@ def LD_IYd_r : LDIdxdr<"ld", 0xFD, "iy">;
 // A DD or FD prefix in front of HALT does nothing, so the disassembler decodes
 // the pair as HALT and not as an indexed load.
 let AsmVariantName = "NonParsable" in {
-def HALT_DD : InstDD8<"halt", 0x76>;
-def HALT_FD : InstFD8<"halt", 0x76>;
+def HALT_DD : InstDD<"halt", 0x76>;
+def HALT_FD : InstFD<"halt", 0x76>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -345,40 +389,42 @@ def HALT_FD : InstFD8<"halt", 0x76>;
 // Opcode: FD 36 d n for IY
 //===----------------------------------------------------------------------===//
 
-def LD_IXd_n : InstDD16Imm<"ld", 0x36> { let AsmString = "ld ( ix + $disp ), $val"; let Uses = [IX]; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
-def LD_IYd_n : InstFD16Imm<"ld", 0x36> { let AsmString = "ld ( iy + $disp ), $val"; let Uses = [IY]; let mayLoad = 0; let mayStore = 1; let hasSideEffects = 0; }
+let mayLoad = 0, mayStore = 1, hasSideEffects = 0 in {
+def LD_IXd_n : InstDDdn<"ld", 0x36> { let Uses = [IX]; }
+def LD_IYd_n : InstFDdn<"ld", 0x36> { let Uses = [IY]; }
+}
 
 //===----------------------------------------------------------------------===//
 //  IX-indexed ALU instructions (DD prefix)
 //===----------------------------------------------------------------------===//
 
 let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
-  def ADD_A_IXd : InstDD16<"add a,", 0x86, IndexedIXMode> {
+  def ADD_A_IXd : InstDDd<"add a,", 0x86> {
     let Uses = [A, IX]; let Defs = [A, F];
   }
-  def ADC_A_IXd : InstDD16<"adc a,", 0x8E, IndexedIXMode> {
+  def ADC_A_IXd : InstDDd<"adc a,", 0x8E> {
     let Uses = [A, IX, F]; let Defs = [A, F];
   }
-  def SUB_IXd : InstDD16<"sub", 0x96, IndexedIXMode> {
+  def SUB_IXd : InstDDd<"sub", 0x96> {
     let AsmString = "sub ( ix + $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
-  def SBC_A_IXd : InstDD16<"sbc a,", 0x9E, IndexedIXMode> {
+  def SBC_A_IXd : InstDDd<"sbc a,", 0x9E> {
     let Uses = [A, IX, F]; let Defs = [A, F];
   }
-  def AND_IXd : InstDD16<"and", 0xA6, IndexedIXMode> {
+  def AND_IXd : InstDDd<"and", 0xA6> {
     let AsmString = "and ( ix + $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
-  def XOR_IXd : InstDD16<"xor", 0xAE, IndexedIXMode> {
+  def XOR_IXd : InstDDd<"xor", 0xAE> {
     let AsmString = "xor ( ix + $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
-  def OR_IXd : InstDD16<"or", 0xB6, IndexedIXMode> {
+  def OR_IXd : InstDDd<"or", 0xB6> {
     let AsmString = "or ( ix + $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
-  def CP_IXd : InstDD16<"cp", 0xBE, IndexedIXMode> {
+  def CP_IXd : InstDDd<"cp", 0xBE> {
     let AsmString = "cp ( ix + $imm )";
     let Uses = [A, IX]; let Defs = [F];
   }
@@ -389,32 +435,32 @@ let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
 //===----------------------------------------------------------------------===//
 
 let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
-  def ADD_A_IYd : InstFD16<"add a,", 0x86, IndexedIYMode> {
+  def ADD_A_IYd : InstFDd<"add a,", 0x86> {
     let Uses = [A, IY]; let Defs = [A, F];
   }
-  def ADC_A_IYd : InstFD16<"adc a,", 0x8E, IndexedIYMode> {
+  def ADC_A_IYd : InstFDd<"adc a,", 0x8E> {
     let Uses = [A, IY, F]; let Defs = [A, F];
   }
-  def SUB_IYd : InstFD16<"sub", 0x96, IndexedIYMode> {
+  def SUB_IYd : InstFDd<"sub", 0x96> {
     let AsmString = "sub ( iy + $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
-  def SBC_A_IYd : InstFD16<"sbc a,", 0x9E, IndexedIYMode> {
+  def SBC_A_IYd : InstFDd<"sbc a,", 0x9E> {
     let Uses = [A, IY, F]; let Defs = [A, F];
   }
-  def AND_IYd : InstFD16<"and", 0xA6, IndexedIYMode> {
+  def AND_IYd : InstFDd<"and", 0xA6> {
     let AsmString = "and ( iy + $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
-  def XOR_IYd : InstFD16<"xor", 0xAE, IndexedIYMode> {
+  def XOR_IYd : InstFDd<"xor", 0xAE> {
     let AsmString = "xor ( iy + $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
-  def OR_IYd : InstFD16<"or", 0xB6, IndexedIYMode> {
+  def OR_IYd : InstFDd<"or", 0xB6> {
     let AsmString = "or ( iy + $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
-  def CP_IYd : InstFD16<"cp", 0xBE, IndexedIYMode> {
+  def CP_IYd : InstFDd<"cp", 0xBE> {
     let AsmString = "cp ( iy + $imm )";
     let Uses = [A, IY]; let Defs = [F];
   }
@@ -425,19 +471,19 @@ let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
 //===----------------------------------------------------------------------===//
 
 let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
-  def INC_IXd : InstDD16<"inc", 0x34, IndexedIXMode> {
+  def INC_IXd : InstDDd<"inc", 0x34> {
     let AsmString = "inc ( ix + $imm )";
     let Uses = [IX]; let Defs = [F];
   }
-  def DEC_IXd : InstDD16<"dec", 0x35, IndexedIXMode> {
+  def DEC_IXd : InstDDd<"dec", 0x35> {
     let AsmString = "dec ( ix + $imm )";
     let Uses = [IX]; let Defs = [F];
   }
-  def INC_IYd : InstFD16<"inc", 0x34, IndexedIYMode> {
+  def INC_IYd : InstFDd<"inc", 0x34> {
     let AsmString = "inc ( iy + $imm )";
     let Uses = [IY]; let Defs = [F];
   }
-  def DEC_IYd : InstFD16<"dec", 0x35, IndexedIYMode> {
+  def DEC_IYd : InstFDd<"dec", 0x35> {
     let AsmString = "dec ( iy + $imm )";
     let Uses = [IY]; let Defs = [F];
   }
@@ -473,76 +519,44 @@ let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
 //  DDCB/FDCB indexed BIT/SET/RES instructions (4-byte)
 //===----------------------------------------------------------------------===//
 
-// BIT b,(IX+d) — read memory only
-let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
-  def BIT_0_IXd : InstDDCB<"bit 0,", 0x46> { let Uses = [IX]; let Defs = [F]; }
-  def BIT_1_IXd : InstDDCB<"bit 1,", 0x4E> { let Uses = [IX]; let Defs = [F]; }
-  def BIT_2_IXd : InstDDCB<"bit 2,", 0x56> { let Uses = [IX]; let Defs = [F]; }
-  def BIT_3_IXd : InstDDCB<"bit 3,", 0x5E> { let Uses = [IX]; let Defs = [F]; }
-  def BIT_4_IXd : InstDDCB<"bit 4,", 0x66> { let Uses = [IX]; let Defs = [F]; }
-  def BIT_5_IXd : InstDDCB<"bit 5,", 0x6E> { let Uses = [IX]; let Defs = [F]; }
-  def BIT_6_IXd : InstDDCB<"bit 6,", 0x76> { let Uses = [IX]; let Defs = [F]; }
-  def BIT_7_IXd : InstDDCB<"bit 7,", 0x7E> { let Uses = [IX]; let Defs = [F]; }
+// BIT/RES/SET b,(IX+d)
+class BitOpIXd<string mnemonic, bits<2> op>
+    : Z80Inst32<mnemonic # " $b, ( ix + $imm )"> {
+  bits<3> b;
+  bits<8> imm;
+  let Inst{7-0} = 0xDD;
+  let Inst{15-8} = 0xCB;
+  let Inst{23-16} = imm;
+  let Inst{31-30} = op;
+  let Inst{29-27} = b;
+  let Inst{26-24} = 0b110;
+  let InOperandList = (ins imm3:$b, disp8:$imm);
 }
 
-// BIT b,(IY+d) — read memory only
-let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
-  def BIT_0_IYd : InstFDCB<"bit 0,", 0x46> { let Uses = [IY]; let Defs = [F]; }
-  def BIT_1_IYd : InstFDCB<"bit 1,", 0x4E> { let Uses = [IY]; let Defs = [F]; }
-  def BIT_2_IYd : InstFDCB<"bit 2,", 0x56> { let Uses = [IY]; let Defs = [F]; }
-  def BIT_3_IYd : InstFDCB<"bit 3,", 0x5E> { let Uses = [IY]; let Defs = [F]; }
-  def BIT_4_IYd : InstFDCB<"bit 4,", 0x66> { let Uses = [IY]; let Defs = [F]; }
-  def BIT_5_IYd : InstFDCB<"bit 5,", 0x6E> { let Uses = [IY]; let Defs = [F]; }
-  def BIT_6_IYd : InstFDCB<"bit 6,", 0x76> { let Uses = [IY]; let Defs = [F]; }
-  def BIT_7_IYd : InstFDCB<"bit 7,", 0x7E> { let Uses = [IY]; let Defs = [F]; }
+// BIT/RES/SET b,(IY+d)
+class BitOpIYd<string mnemonic, bits<2> op>
+    : Z80Inst32<mnemonic # " $b, ( iy + $imm )"> {
+  bits<3> b;
+  bits<8> imm;
+  let Inst{7-0} = 0xFD;
+  let Inst{15-8} = 0xCB;
+  let Inst{23-16} = imm;
+  let Inst{31-30} = op;
+  let Inst{29-27} = b;
+  let Inst{26-24} = 0b110;
+  let InOperandList = (ins imm3:$b, disp8:$imm);
 }
 
-// RES b,(IX+d) — read and write memory
+let mayLoad = 1, mayStore = 0, hasSideEffects = 0, Defs = [F] in {
+  def BIT_b_IXd : BitOpIXd<"bit", 0b01> { let Uses = [IX]; }
+  def BIT_b_IYd : BitOpIYd<"bit", 0b01> { let Uses = [IY]; }
+}
+
 let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
-  def RES_0_IXd : InstDDCB<"res 0,", 0x86> { let Uses = [IX]; }
-  def RES_1_IXd : InstDDCB<"res 1,", 0x8E> { let Uses = [IX]; }
-  def RES_2_IXd : InstDDCB<"res 2,", 0x96> { let Uses = [IX]; }
-  def RES_3_IXd : InstDDCB<"res 3,", 0x9E> { let Uses = [IX]; }
-  def RES_4_IXd : InstDDCB<"res 4,", 0xA6> { let Uses = [IX]; }
-  def RES_5_IXd : InstDDCB<"res 5,", 0xAE> { let Uses = [IX]; }
-  def RES_6_IXd : InstDDCB<"res 6,", 0xB6> { let Uses = [IX]; }
-  def RES_7_IXd : InstDDCB<"res 7,", 0xBE> { let Uses = [IX]; }
-}
-
-// RES b,(IY+d) — read and write memory
-let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
-  def RES_0_IYd : InstFDCB<"res 0,", 0x86> { let Uses = [IY]; }
-  def RES_1_IYd : InstFDCB<"res 1,", 0x8E> { let Uses = [IY]; }
-  def RES_2_IYd : InstFDCB<"res 2,", 0x96> { let Uses = [IY]; }
-  def RES_3_IYd : InstFDCB<"res 3,", 0x9E> { let Uses = [IY]; }
-  def RES_4_IYd : InstFDCB<"res 4,", 0xA6> { let Uses = [IY]; }
-  def RES_5_IYd : InstFDCB<"res 5,", 0xAE> { let Uses = [IY]; }
-  def RES_6_IYd : InstFDCB<"res 6,", 0xB6> { let Uses = [IY]; }
-  def RES_7_IYd : InstFDCB<"res 7,", 0xBE> { let Uses = [IY]; }
-}
-
-// SET b,(IX+d) — read and write memory
-let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
-  def SET_0_IXd : InstDDCB<"set 0,", 0xC6> { let Uses = [IX]; }
-  def SET_1_IXd : InstDDCB<"set 1,", 0xCE> { let Uses = [IX]; }
-  def SET_2_IXd : InstDDCB<"set 2,", 0xD6> { let Uses = [IX]; }
-  def SET_3_IXd : InstDDCB<"set 3,", 0xDE> { let Uses = [IX]; }
-  def SET_4_IXd : InstDDCB<"set 4,", 0xE6> { let Uses = [IX]; }
-  def SET_5_IXd : InstDDCB<"set 5,", 0xEE> { let Uses = [IX]; }
-  def SET_6_IXd : InstDDCB<"set 6,", 0xF6> { let Uses = [IX]; }
-  def SET_7_IXd : InstDDCB<"set 7,", 0xFE> { let Uses = [IX]; }
-}
-
-// SET b,(IY+d) — read and write memory
-let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
-  def SET_0_IYd : InstFDCB<"set 0,", 0xC6> { let Uses = [IY]; }
-  def SET_1_IYd : InstFDCB<"set 1,", 0xCE> { let Uses = [IY]; }
-  def SET_2_IYd : InstFDCB<"set 2,", 0xD6> { let Uses = [IY]; }
-  def SET_3_IYd : InstFDCB<"set 3,", 0xDE> { let Uses = [IY]; }
-  def SET_4_IYd : InstFDCB<"set 4,", 0xE6> { let Uses = [IY]; }
-  def SET_5_IYd : InstFDCB<"set 5,", 0xEE> { let Uses = [IY]; }
-  def SET_6_IYd : InstFDCB<"set 6,", 0xF6> { let Uses = [IY]; }
-  def SET_7_IYd : InstFDCB<"set 7,", 0xFE> { let Uses = [IY]; }
+  def RES_b_IXd : BitOpIXd<"res", 0b10> { let Uses = [IX]; }
+  def RES_b_IYd : BitOpIYd<"res", 0b10> { let Uses = [IY]; }
+  def SET_b_IXd : BitOpIXd<"set", 0b11> { let Uses = [IX]; }
+  def SET_b_IYd : BitOpIYd<"set", 0b11> { let Uses = [IY]; }
 }
 
 } // Predicates = [IsZ80]
@@ -551,17 +565,6 @@ let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
 // Z80 Spill Pseudos
 // These are expanded in expandPostRAPseudo after physical registers are assigned
 //===----------------------------------------------------------------------===//
-
-// Base class for Z80 pseudo instructions
-class Z80Pseudo<dag outs, dag ins> : Instruction {
-  let Namespace = "Z80";
-  dag OutOperandList = outs;
-  dag InOperandList = ins;
-  let hasSideEffects = false;
-  let isPseudo = true;
-  let isCodeGenOnly = true;
-  let hasNoSchedulingInfo = true;
-}
 
 // The 8-bit ALU with the accumulator as an operand. The real instructions
 // name A implicitly, so selecting them directly pins every operand and
@@ -619,14 +622,6 @@ let Predicates = [IsSM83] in {
 // to 0 or 0xFF.
 let Uses = [F], Defs = [F], mayLoad = false, mayStore = false in
 def SBC_Ac_Ac : Z80Pseudo<(outs Ac:$dst), (ins)>;
-
-// IN r,(C) and OUT (C),r name their register in the opcode. These take it as
-// an operand, any of them, and expand to the one allocated.
-let Predicates = [IsZ80], hasSideEffects = true, mayLoad = false,
-    mayStore = false, Uses = [C] in {
-  def IN8_C : Z80Pseudo<(outs GR8:$dst), (ins)> { let Defs = [F]; }
-  def OUT8_C : Z80Pseudo<(outs), (ins GR8:$src)>;
-}
 
 // Spill/Reload pseudo instructions for stack slots (frame index).
 // No static Defs: small offsets expand to IX+d (no clobbers), large offsets
@@ -775,36 +770,21 @@ def STORE16_ABS : Z80Pseudo<(outs), (ins i16imm:$addr, GR16:$src)> {
 // HL is always the implicit first operand (hardware constraint: ADD/ADC/SBC
 // HL,rr only supports HL as destination).
 
-let isPseudo = true, isCodeGenOnly = true in {
+let Uses = [HL], Defs = [HL, A, F], mayLoad = false, mayStore = false in {
 
 // AND A; SBC HL,rr (subtraction without borrow)
-def SUB_HL_rr : Z80Inst<"sub_hl_rr"> {
-  let InOperandList = (ins GR16_BCDE:$rhs);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, A, F];
-}
+def SUB_HL_rr : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs)>;
 
 // ADC HL,rr and SBC HL,rr with the carry or borrow in taken from a register,
 // restored into the flags right before the instruction that reads it. The
 // carry or borrow out is left in the flags.
 // LD A,carry; RRCA; ADC HL,rr
-def ADC_HL_rr_CI : Z80Inst<"adc_hl_rr_ci"> {
-  let InOperandList = (ins GR16_BCDE:$rhs, GR8:$carry_in);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, A, F];
-}
+def ADC_HL_rr_CI : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs, GR8:$carry_in)>;
 
 // LD A,borrow; RRCA; SBC HL,rr
-def SBC_HL_rr_BI : Z80Inst<"sbc_hl_rr_bi"> {
-  let InOperandList = (ins GR16_BCDE:$rhs, GR8:$borrow_in);
-  let OutOperandList = (outs);
-  let Uses = [HL];
-  let Defs = [HL, A, F];
-}
+def SBC_HL_rr_BI : Z80Pseudo<(outs), (ins GR16_BCDE:$rhs, GR8:$borrow_in)>;
 
-} // isPseudo, isCodeGenOnly
+}
 
 // HL plus or minus a pair, with the signed overflow in A as 0 or 1. $tmp is
 // scratch.
@@ -1029,7 +1009,7 @@ def ADJCALLSTACKUP : Z80Pseudo<(outs), (ins i16imm:$bytes, i16imm:$prior)>;
 // Callee-cleanup return: pops return address, adjusts SP by $bytes, then
 // returns via indirect jump. Used by __sdcccall(1) callee-cleanup and
 // future __z88dk_callee convention.
-let isPseudo = true, isReturn = true, isTerminator = true, isBarrier = true,
+let isReturn = true, isTerminator = true, isBarrier = true,
     Defs = [SP, HL, BC], Uses = [SP], hasSideEffects = true,
     mayLoad = false, mayStore = false in {
 def RET_CLEANUP : Z80Pseudo<(outs), (ins i16imm:$bytes)>;
@@ -1039,8 +1019,8 @@ def RET_CLEANUP : Z80Pseudo<(outs), (ins i16imm:$bytes)>;
 let isCall = true, isReturn = true, isTerminator = true, isBarrier = true,
     hasSideEffects = true, mayLoad = true, mayStore = true in {
 let Uses = [SP], Defs = [A, BC, DE, HL, IY, F] in
-def TCRETURN_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
-                  PseudoInstExpansion<(JP_nn imm16:$dst)>;
+def TCRETURN_nn : Z80Pseudo<(outs), (ins target16:$dst)>,
+                  PseudoInstExpansion<(JP_nn target16:$dst)>;
 let Uses = [SP, IY], Defs = [A, BC, DE, HL, IY, F] in
 def TCRETURN_IY : Z80Pseudo<(outs), (ins)>, PseudoInstExpansion<(JP_IYind)>;
 let Uses = [SP, HL], Defs = [A, BC, DE, HL, F] in
@@ -1052,14 +1032,14 @@ def TCRETURN_HL : Z80Pseudo<(outs), (ins)>, PseudoInstExpansion<(JP_HLind)>;
 let isCall = true, isReturn = true, isTerminator = true,
     hasSideEffects = true, mayLoad = true, mayStore = true,
     Uses = [SP, F] in {
-def TCRETURN_NZ_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
-                     PseudoInstExpansion<(JP_NZ_nn imm16:$dst)>;
-def TCRETURN_Z_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
-                    PseudoInstExpansion<(JP_Z_nn imm16:$dst)>;
-def TCRETURN_NC_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
-                     PseudoInstExpansion<(JP_NC_nn imm16:$dst)>;
-def TCRETURN_C_nn : Z80Pseudo<(outs), (ins imm16:$dst)>,
-                    PseudoInstExpansion<(JP_C_nn imm16:$dst)>;
+def TCRETURN_NZ_nn : Z80Pseudo<(outs), (ins target16:$dst)>,
+                     PseudoInstExpansion<(JP_NZ_nn target16:$dst)>;
+def TCRETURN_Z_nn : Z80Pseudo<(outs), (ins target16:$dst)>,
+                    PseudoInstExpansion<(JP_Z_nn target16:$dst)>;
+def TCRETURN_NC_nn : Z80Pseudo<(outs), (ins target16:$dst)>,
+                     PseudoInstExpansion<(JP_NC_nn target16:$dst)>;
+def TCRETURN_C_nn : Z80Pseudo<(outs), (ins target16:$dst)>,
+                    PseudoInstExpansion<(JP_C_nn target16:$dst)>;
 }
 
 // SM83-only instructions and pseudos

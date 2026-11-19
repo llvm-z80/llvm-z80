@@ -3457,7 +3457,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           .addReg(PortReg);
 
       // IN r,(C), into any register
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::IN8_C), DstReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::IN_r_C), DstReg);
 
       MI.eraseFromParent();
       return true;
@@ -3480,7 +3480,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           .addReg(PortReg);
 
       // OUT (C),r, from any register
-      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::OUT8_C)).addReg(ValueReg);
+      BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::OUT_C_r))
+          .addReg(ValueReg);
 
       MI.eraseFromParent();
       return true;
