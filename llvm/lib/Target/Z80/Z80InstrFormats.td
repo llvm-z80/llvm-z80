@@ -31,7 +31,6 @@ class ImmAsmOperand<string name> : AsmOperandClass {
 // JR/DJNZ target. A constant is an address.
 def PCRel8AsmOperand : AsmOperandClass {
   let Name = "PCRel8";
-  let PredicateMethod = "isImm";
   let RenderMethod = "addPCRelOperands";
 }
 

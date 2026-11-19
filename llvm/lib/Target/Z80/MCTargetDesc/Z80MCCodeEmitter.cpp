@@ -73,11 +73,12 @@ unsigned Z80MCCodeEmitter::encodeImm(const MCInst &MI, unsigned OpNo,
   auto MO = MI.getOperand(OpNo);
 
   if (MO.isExpr()) {
-    if (isa<Z80MCExpr>(MO.getExpr())) {
-      // A Z80MCExpr already carries its own fixup, so adding another here
-      // would create one against the modifier expression instead of the
-      // symbol it wraps.
-      return getExprOpValue(MO.getExpr(), Fixups, STI, Offset);
+    if (const auto *Z80Expr = dyn_cast<Z80MCExpr>(MO.getExpr())) {
+      int64_t Result;
+      if (Z80Expr->evaluateAsAbsolute(Result))
+        return Result;
+      addFixup(Fixups, Offset, Z80Expr, Z80Expr->getFixupKind());
+      return 0;
     }
 
     MCFixupKind FixupKind = static_cast<MCFixupKind>(Fixup);
@@ -88,34 +89,6 @@ unsigned Z80MCCodeEmitter::encodeImm(const MCInst &MI, unsigned OpNo,
 
   assert(MO.isImm());
   return MO.getImm();
-}
-
-unsigned Z80MCCodeEmitter::getExprOpValue(const MCExpr *Expr,
-                                          SmallVectorImpl<MCFixup> &Fixups,
-                                          const MCSubtargetInfo &STI,
-                                          unsigned int Offset) const {
-
-  MCExpr::ExprKind Kind = Expr->getKind();
-
-  if (Kind == MCExpr::Binary) {
-    Expr = static_cast<const MCBinaryExpr *>(Expr)->getLHS();
-    Kind = Expr->getKind();
-  }
-
-  if (Kind == Z80MCExpr::Target) {
-    Z80MCExpr const *Z80Expr = cast<Z80MCExpr>(Expr);
-    int64_t Result;
-    if (Z80Expr->evaluateAsAbsolute(Result)) {
-      return Result;
-    }
-
-    MCFixupKind FixupKind = static_cast<MCFixupKind>(Z80Expr->getFixupKind());
-    addFixup(Fixups, Offset, Z80Expr, FixupKind);
-    return 0;
-  }
-
-  assert(Kind == MCExpr::SymbolRef);
-  return 0;
 }
 
 unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,

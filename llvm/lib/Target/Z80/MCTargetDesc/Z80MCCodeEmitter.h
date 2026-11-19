@@ -53,10 +53,6 @@ private:
                                  SmallVectorImpl<MCFixup> &Fixups,
                                  const MCSubtargetInfo &STI) const;
 
-  unsigned getExprOpValue(const MCExpr *Expr, SmallVectorImpl<MCFixup> &Fixups,
-                          const MCSubtargetInfo &STI,
-                          unsigned int Offset) const;
-
   /// Returns the binary encoding of operand.
   ///
   /// If the machine operand requires relocation, the relocation is recorded

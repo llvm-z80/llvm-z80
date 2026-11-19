@@ -118,6 +118,9 @@ public:
     return DiagnosticPredicate::Match;
   }
 
+  // Reject x & 0xff and x >> 8 as a JR/DJNZ target.
+  bool isPCRel8() const { return isImm() && !isa<Z80MCExpr>(ImmVal); }
+
   DiagnosticPredicate isAddr16() const { return isImm16(); }
 
   DiagnosticPredicate isSImm8() const {
