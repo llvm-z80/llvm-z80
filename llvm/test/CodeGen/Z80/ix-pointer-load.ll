@@ -17,8 +17,8 @@ define i8 @byte() {
 
 define i16 @pair() {
 ; CHECK-LABEL: _pair:
-; CHECK:       ld e,(ix+-6)
-; CHECK-NEXT:  ld d,(ix+-5)
+; CHECK:       ld e,(ix-6)
+; CHECK-NEXT:  ld d,(ix-5)
 ; MIR-LABEL:   name: pair
 ; MIR:         LD_r_IXd -6, implicit $ix :: (volatile load (s8) from %ir.p)
 ; MIR-NEXT:    LD_r_IXd -5, implicit $ix :: (volatile load (s8) from %ir.p + 1)

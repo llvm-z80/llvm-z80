@@ -414,9 +414,9 @@ bool Z80AsmParser::isIndirectOperand() {
 /// Produces token sequences matching the AsmMatcher expectations:
 ///   (hl)     → compound token "(hl)"
 ///   (nn)     → tokens "(", Imm, ")"
-///   (ix+d)   → tokens "(", Reg IX, "+", Imm, ")"
-///   (ix-d)   → tokens "(", Reg IX, "+", Imm(-d), ")"
-///   (ix)     → tokens "(", Reg IX, "+", Imm(0), ")"
+///   (ix+d)   → tokens "(", Reg IX, Imm, ")"
+///   (ix-d)   → tokens "(", Reg IX, Imm(-d), ")"
+///   (ix)     → tokens "(", Reg IX, Imm(0), ")"
 ///   jp (ix)  → compound token "(ix)"
 bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
                                      StringRef Mnemonic) {
@@ -450,7 +450,6 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
       if ((Reg == Z80::IX || Reg == Z80::IY) &&
           (Parser.getTok().is(AsmToken::Plus) ||
            Parser.getTok().is(AsmToken::Minus))) {
-        SMLoc PlusLoc = Parser.getTok().getLoc();
         // Eat only '+'. parseExpression reads a leading '-' as unary minus.
         if (Parser.getTok().is(AsmToken::Plus))
           Parser.Lex();
@@ -465,10 +464,9 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
         SMLoc RParenLoc = Parser.getTok().getLoc();
         Parser.Lex(); // Eat ')'
 
-        // Emit: "(" IX "+" disp ")"
+        // Emit: "(" IX disp ")"
         Operands.push_back(Z80Operand::CreateToken("(", LParenLoc));
         Operands.push_back(Z80Operand::CreateReg(Reg, RegLoc, RegEnd));
-        Operands.push_back(Z80Operand::CreateToken("+", PlusLoc));
         Operands.push_back(Z80Operand::CreateImm(Disp, DispLoc, RParenLoc));
         Operands.push_back(Z80Operand::CreateToken(")", RParenLoc));
         return false;
@@ -485,7 +483,6 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
           !Mnemonic.equals_insensitive("jp")) {
         Operands.push_back(Z80Operand::CreateToken("(", LParenLoc));
         Operands.push_back(Z80Operand::CreateReg(Reg, RegLoc, RegEnd));
-        Operands.push_back(Z80Operand::CreateToken("+", RegEnd));
         Operands.push_back(Z80Operand::CreateImm(
             MCConstantExpr::create(0, getContext()), RegEnd, RegEnd));
         Operands.push_back(Z80Operand::CreateToken(")", RParenEnd));
@@ -528,7 +525,7 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
 /// Parse sdasz80 indexed addressing: d(ix) or d(iy).
 /// The displacement expression has already been parsed.
 /// Emits the same token sequence as LLVM format (ix+d):
-///   "(" IX "+" disp ")"
+///   "(" IX disp ")"
 bool Z80AsmParser::parseSDASZ80Indexed(OperandVector &Operands,
                                        const MCExpr *Disp, SMLoc DispLoc) {
   SMLoc LParenLoc = Parser.getTok().getLoc();
@@ -547,10 +544,9 @@ bool Z80AsmParser::parseSDASZ80Indexed(OperandVector &Operands,
   SMLoc RParenLoc = Parser.getTok().getLoc();
   Parser.Lex(); // Eat ')'
 
-  // Emit as: "(" IX "+" disp ")"
+  // Emit as: "(" IX disp ")"
   Operands.push_back(Z80Operand::CreateToken("(", LParenLoc));
   Operands.push_back(Z80Operand::CreateReg(Reg, RegLoc, RegEnd));
-  Operands.push_back(Z80Operand::CreateToken("+", DispLoc));
   Operands.push_back(Z80Operand::CreateImm(Disp, DispLoc, RParenLoc));
   Operands.push_back(Z80Operand::CreateToken(")", RParenLoc));
   return false;

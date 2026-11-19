@@ -23,7 +23,7 @@ _start:
 
 ; CHECK:      100: 10 03       djnz $105
 ; CHECK-NEXT: 102: 10 06       djnz $10a
-; CHECK-NEXT: 104: dd 7e fd    ld a,(ix+-$3)
+; CHECK-NEXT: 104: dd 7e fd    ld a,(ix-$3)
 ; CHECK-NEXT: 107: 3e 80       ld a,$80
 ; CHECK-NEXT: 109: 21 05 01    ld hl,$105
 

@@ -350,7 +350,7 @@ def EX_SPind_IY : InstFD<"ex (sp),iy", 0xE3> { let Uses = [SP, IY]; let Defs = [
 
 // LD r,(IX+d) and LD r,(IY+d)
 class LDrIdxd<string mnemonic, bits<8> prefix, string idx>
-    : Z80Inst24<mnemonic # " $dst, ( " # idx # " + $imm )"> {
+    : Z80Inst24<mnemonic # " $dst, ( " # idx # " $imm )"> {
   bits<3> dst;
   bits<8> imm;
   let Inst{7-0} = prefix;
@@ -377,7 +377,7 @@ def LD_r_IYd : LDrIdxd<"ld", 0xFD, "iy">;
 
 // LD (IX+d),r and LD (IY+d),r
 class LDIdxdr<string mnemonic, bits<8> prefix, string idx>
-    : Z80Inst24<mnemonic # " ( " # idx # " + $imm ), $src"> {
+    : Z80Inst24<mnemonic # " ( " # idx # " $imm ), $src"> {
   bits<3> src;
   bits<8> imm;
   let Inst{7-0} = prefix;
@@ -432,26 +432,26 @@ let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
     let Uses = [A, IX, F]; let Defs = [A, F];
   }
   def SUB_IXd : InstDDd<"sub", 0x96> {
-    let AsmString = "sub ( ix + $imm )";
+    let AsmString = "sub ( ix $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
   def SBC_A_IXd : InstDDd<"sbc a,", 0x9E> {
     let Uses = [A, IX, F]; let Defs = [A, F];
   }
   def AND_IXd : InstDDd<"and", 0xA6> {
-    let AsmString = "and ( ix + $imm )";
+    let AsmString = "and ( ix $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
   def XOR_IXd : InstDDd<"xor", 0xAE> {
-    let AsmString = "xor ( ix + $imm )";
+    let AsmString = "xor ( ix $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
   def OR_IXd : InstDDd<"or", 0xB6> {
-    let AsmString = "or ( ix + $imm )";
+    let AsmString = "or ( ix $imm )";
     let Uses = [A, IX]; let Defs = [A, F];
   }
   def CP_IXd : InstDDd<"cp", 0xBE> {
-    let AsmString = "cp ( ix + $imm )";
+    let AsmString = "cp ( ix $imm )";
     let Uses = [A, IX]; let Defs = [F];
   }
 }
@@ -468,26 +468,26 @@ let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
     let Uses = [A, IY, F]; let Defs = [A, F];
   }
   def SUB_IYd : InstFDd<"sub", 0x96> {
-    let AsmString = "sub ( iy + $imm )";
+    let AsmString = "sub ( iy $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
   def SBC_A_IYd : InstFDd<"sbc a,", 0x9E> {
     let Uses = [A, IY, F]; let Defs = [A, F];
   }
   def AND_IYd : InstFDd<"and", 0xA6> {
-    let AsmString = "and ( iy + $imm )";
+    let AsmString = "and ( iy $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
   def XOR_IYd : InstFDd<"xor", 0xAE> {
-    let AsmString = "xor ( iy + $imm )";
+    let AsmString = "xor ( iy $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
   def OR_IYd : InstFDd<"or", 0xB6> {
-    let AsmString = "or ( iy + $imm )";
+    let AsmString = "or ( iy $imm )";
     let Uses = [A, IY]; let Defs = [A, F];
   }
   def CP_IYd : InstFDd<"cp", 0xBE> {
-    let AsmString = "cp ( iy + $imm )";
+    let AsmString = "cp ( iy $imm )";
     let Uses = [A, IY]; let Defs = [F];
   }
 }
@@ -498,19 +498,19 @@ let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {
 
 let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
   def INC_IXd : InstDDd<"inc", 0x34> {
-    let AsmString = "inc ( ix + $imm )";
+    let AsmString = "inc ( ix $imm )";
     let Uses = [IX]; let Defs = [F];
   }
   def DEC_IXd : InstDDd<"dec", 0x35> {
-    let AsmString = "dec ( ix + $imm )";
+    let AsmString = "dec ( ix $imm )";
     let Uses = [IX]; let Defs = [F];
   }
   def INC_IYd : InstFDd<"inc", 0x34> {
-    let AsmString = "inc ( iy + $imm )";
+    let AsmString = "inc ( iy $imm )";
     let Uses = [IY]; let Defs = [F];
   }
   def DEC_IYd : InstFDd<"dec", 0x35> {
-    let AsmString = "dec ( iy + $imm )";
+    let AsmString = "dec ( iy $imm )";
     let Uses = [IY]; let Defs = [F];
   }
 }
@@ -547,7 +547,7 @@ let mayLoad = 1, mayStore = 1, hasSideEffects = 0 in {
 
 // BIT/RES/SET b,(IX+d)
 class BitOpIXd<string mnemonic, bits<2> op>
-    : Z80Inst32<mnemonic # " $b, ( ix + $imm )"> {
+    : Z80Inst32<mnemonic # " $b, ( ix $imm )"> {
   bits<3> b;
   bits<8> imm;
   let Inst{7-0} = 0xDD;
@@ -561,7 +561,7 @@ class BitOpIXd<string mnemonic, bits<2> op>
 
 // BIT/RES/SET b,(IY+d)
 class BitOpIYd<string mnemonic, bits<2> op>
-    : Z80Inst32<mnemonic # " $b, ( iy + $imm )"> {
+    : Z80Inst32<mnemonic # " $b, ( iy $imm )"> {
   bits<3> b;
   bits<8> imm;
   let Inst{7-0} = 0xFD;
