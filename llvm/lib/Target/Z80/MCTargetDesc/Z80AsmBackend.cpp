@@ -59,11 +59,9 @@ bool Z80AsmBackend::fixupNeedsRelaxationAdvanced(const MCFragment &F,
                                                  const MCValue &Target,
                                                  uint64_t Value,
                                                  bool Resolved) const {
-  // Primary JR→JP relaxation is handled by BranchRelaxation + Z80BranchCleanup
-  // at the MachineFunction level. This check serves as a safety net for cases
-  // that bypass BranchRelaxation (inline assembly, late pseudo expansion).
+  // The linker checks the range of a JR with a relocation.
   if (!Resolved)
-    return true;
+    return false;
 
   if (Fixup.getKind() == (MCFixupKind)Z80::PCRel8)
     return !isInt<8>(static_cast<int64_t>(encodedValue(Fixup, Value)));
@@ -80,11 +78,6 @@ MCFixupKindInfo Z80AsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"Addr16", 0, 16, 0},
       {"Addr16_Low", 0, 8, 0},
       {"Addr16_High", 0, 8, 0},
-      {"Addr24", 0, 24, 0},
-      {"Addr24_Bank", 0, 8, 0},
-      {"Addr24_Segment", 0, 16, 0},
-      {"Addr24_Segment_Low", 0, 8, 0},
-      {"Addr24_Segment_High", 0, 8, 0},
       {"PCRel8", 0, 8, 0},
       {"Disp8", 0, 8, 0}, // 8-bit signed displacement for indexed addressing
       {"LDH8", 0, 8, 0},  // SM83 LDH operand: 8-bit offset from 0xFF00
@@ -137,11 +130,7 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
     case FK_Data_2:
     case Z80::Imm16:
     case Z80::Addr16:
-    case Z80::Addr24_Segment:
       InRange = isInt<16>(SVal) || isUInt<16>(Value);
-      break;
-    case Z80::Addr24:
-      InRange = isInt<24>(SVal) || isUInt<24>(Value);
       break;
     }
     if (!InRange)
@@ -168,9 +157,6 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   case Z80::Addr8:
   case Z80::Addr16_Low:
   case Z80::Addr16_High:
-  case Z80::Addr24_Bank:
-  case Z80::Addr24_Segment_Low:
-  case Z80::Addr24_Segment_High:
   case Z80::PCRel8:
   case Z80::Disp8: // 8-bit signed displacement for indexed addressing
   case Z80::LDH8:  // SM83 LDH operand: 8-bit offset from 0xFF00
@@ -178,12 +164,8 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
     break;
   case FK_Data_2:
   case Z80::Addr16:
-  case Z80::Addr24_Segment:
   case Z80::Imm16:
     NumBytes = 2;
-    break;
-  case Z80::Addr24:
-    NumBytes = 3;
     break;
   case FK_Data_4:
     NumBytes = 4;

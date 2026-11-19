@@ -21,17 +21,8 @@ public:
   enum VariantKind {
     VK_NONE,
 
-    VK_ADDR16 = MCSymbolRefExpr::FirstTargetSpecifier,
-    VK_IMM16,
-    VK_ADDR8,
-    VK_IMM8,
+    VK_ADDR16_LO = MCSymbolRefExpr::FirstTargetSpecifier,
     VK_ADDR16_HI,
-    VK_ADDR16_LO,
-    VK_ADDR24,
-    VK_ADDR24_BANK,
-    VK_ADDR24_SEGMENT,
-    VK_ADDR24_SEGMENT_LO,
-    VK_ADDR24_SEGMENT_HI,
   };
 
   /// Creates an Z80 machine code expression.
@@ -65,7 +56,7 @@ public:
     return E->getKind() == MCExpr::Target;
   }
 
-  static VariantKind getKindByName(StringRef Name, bool IsImmediate);
+  static VariantKind getKindByName(StringRef Name);
 
 private:
   int64_t evaluateAsInt64(int64_t Value) const;

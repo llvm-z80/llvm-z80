@@ -18,7 +18,6 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCObjectWriter.h"
-#include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -39,53 +38,32 @@ unsigned Z80ELFObjectWriter::getRelocType(const MCFixup &Fixup,
     reportError(Fixup.getLoc(), "unsupported PC-relative relocation");
     return ELF::R_Z80_NONE;
   }
+  // For z80_16hi(x)+1, R_Z80_BYTE1 adds 1 to x before taking the high byte.
+  // So reject a byte operator inside a larger expression.
+  if (Specifier != Z80MCExpr::VK_NONE && !isa<Z80MCExpr>(Fixup.getValue())) {
+    reportError(Fixup.getLoc(),
+                "z80_16lo and z80_16hi must enclose the whole expression");
+    return ELF::R_Z80_NONE;
+  }
+  // A wider field gets the byte zero-extended.
+  if (Specifier == Z80MCExpr::VK_ADDR16_LO)
+    return ELF::R_Z80_BYTE0;
+  if (Specifier == Z80MCExpr::VK_ADDR16_HI)
+    return ELF::R_Z80_BYTE1;
   switch (Kind) {
   case FK_Data_1:
-    switch (Specifier) {
-    default:
-      llvm_unreachable("Unsupported Specifier");
-    case Z80MCExpr::VK_NONE:
-    case Z80MCExpr::VK_ADDR8:
-      return ELF::R_Z80_8;
-    case Z80MCExpr::VK_ADDR16_LO:
-    case Z80MCExpr::VK_ADDR24_SEGMENT_LO:
-      return ELF::R_Z80_BYTE0;
-    case Z80MCExpr::VK_ADDR16_HI:
-    case Z80MCExpr::VK_ADDR24_SEGMENT_HI:
-      return ELF::R_Z80_BYTE1;
-    case Z80MCExpr::VK_ADDR24_BANK:
-      return ELF::R_Z80_BYTE2;
-    }
-  case FK_Data_2:
-    switch (Specifier) {
-    default:
-      llvm_unreachable("Unsupported Specifier");
-    case Z80MCExpr::VK_NONE:
-    case Z80MCExpr::VK_ADDR16:
-      return ELF::R_Z80_16;
-    case Z80MCExpr::VK_ADDR24_SEGMENT:
-      return ELF::R_Z80_WORD0;
-    }
-
   case Z80::Imm8:
   case Z80::Addr8:
   case Z80::LDH8:
     return ELF::R_Z80_8;
+  case FK_Data_2:
   case Z80::Imm16:
   case Z80::Addr16:
     return ELF::R_Z80_16;
   case Z80::Addr16_Low:
-  case Z80::Addr24_Segment_Low:
     return ELF::R_Z80_BYTE0;
   case Z80::Addr16_High:
-  case Z80::Addr24_Segment_High:
     return ELF::R_Z80_BYTE1;
-  case Z80::Addr24:
-    return ELF::R_Z80_24;
-  case Z80::Addr24_Bank:
-    return ELF::R_Z80_BYTE2;
-  case Z80::Addr24_Segment:
-    return ELF::R_Z80_WORD0;
   case Z80::PCRel8:
     return ELF::R_Z80_8_PCREL;
   case Z80::Disp8:

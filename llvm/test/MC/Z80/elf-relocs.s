@@ -23,8 +23,8 @@
 	.byte	ext
 	.short	ext
 	.long	ext
-	.byte	ext@z80_16lo
-	.byte	ext@z80_16hi
+	.byte	z80_16lo(ext)
+	.byte	z80_16hi(ext)
 .endif
 .endif
 

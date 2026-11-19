@@ -22,20 +22,9 @@ namespace {
 const struct ModifierEntry {
   const char *const Spelling;
   Z80MCExpr::VariantKind VariantKind;
-  bool ImmediateOnly = false;
 } ModifierNames[] = {
-    // Define immediate variants of z80_8() and z80_16() first.
-    {"z80_8", Z80MCExpr::VK_IMM8, true},
-    {"z80_16", Z80MCExpr::VK_IMM16, true},
-    {"z80_8", Z80MCExpr::VK_ADDR8},
-    {"z80_16", Z80MCExpr::VK_ADDR16},
     {"z80_16lo", Z80MCExpr::VK_ADDR16_LO},
     {"z80_16hi", Z80MCExpr::VK_ADDR16_HI},
-    {"z80_24", Z80MCExpr::VK_ADDR24},
-    {"z80_24bank", Z80MCExpr::VK_ADDR24_BANK},
-    {"z80_24segment", Z80MCExpr::VK_ADDR24_SEGMENT},
-    {"z80_24segmentlo", Z80MCExpr::VK_ADDR24_SEGMENT_LO},
-    {"z80_24segmenthi", Z80MCExpr::VK_ADDR24_SEGMENT_HI},
 };
 
 } // end of anonymous namespace
@@ -52,8 +41,8 @@ void Z80MCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
     OS << '-';
   }
 
-  // Spell byte-of-address operators as arithmetic for z80asm.
-  if (MAI->isZ88DK() && (Kind == VK_ADDR16_LO || Kind == VK_ADDR16_HI)) {
+  // Print z80_16lo and z80_16hi as arithmetic for z80asm.
+  if (MAI->isZ88DK()) {
     OS << '(';
     MAI->printExpr(OS, *getSubExpr());
     OS << (Kind == VK_ADDR16_LO ? ") & 0xff" : ") >> 8");
@@ -84,7 +73,14 @@ bool Z80MCExpr::evaluateAsConstant(int64_t &Result) const {
 
 bool Z80MCExpr::evaluateAsRelocatableImpl(MCValue &Result,
                                           const MCAssembler *Asm) const {
-  return SubExpr->evaluateAsRelocatable(Result, Asm);
+  if (!SubExpr->evaluateAsRelocatable(Result, Asm))
+    return false;
+  // Fold the byte of a constant. Otherwise the relocation selects the byte.
+  if (Result.isAbsolute())
+    Result = MCValue::get(evaluateAsInt64(Result.getConstant()));
+  else
+    Result.setSpecifier(Kind);
+  return true;
 }
 
 int64_t Z80MCExpr::evaluateAsInt64(int64_t Value) const {
@@ -93,30 +89,13 @@ int64_t Z80MCExpr::evaluateAsInt64(int64_t Value) const {
   }
 
   switch (Kind) {
-  case Z80MCExpr::VK_IMM8:
-  case Z80MCExpr::VK_ADDR8:
   case Z80MCExpr::VK_ADDR16_LO:
-  case Z80MCExpr::VK_ADDR24_SEGMENT_LO:
     Value &= 0xff;
     break;
   case Z80MCExpr::VK_ADDR16_HI:
-  case Z80MCExpr::VK_ADDR24_SEGMENT_HI:
     Value &= 0xff00;
     Value >>= 8;
     break;
-  case Z80MCExpr::VK_ADDR24_BANK:
-    Value &= 0xff0000;
-    Value >>= 16;
-    break;
-  case Z80MCExpr::VK_IMM16:
-  case Z80MCExpr::VK_ADDR16:
-  case Z80MCExpr::VK_ADDR24_SEGMENT:
-    Value &= 0xffff;
-    break;
-  case Z80MCExpr::VK_ADDR24:
-    Value &= 0xffffff;
-    break;
-
   case Z80MCExpr::VK_NONE:
     llvm_unreachable("Uninitialized expression.");
   }
@@ -127,38 +106,11 @@ Z80::Fixups Z80MCExpr::getFixupKind() const {
   Z80::Fixups Kind = Z80::Fixups::LastTargetFixupKind;
 
   switch (getKind()) {
-  case VK_IMM8:
-    Kind = Z80::Imm8;
-    break;
-  case VK_IMM16:
-    Kind = Z80::Imm16;
-    break;
-  case VK_ADDR8:
-    Kind = Z80::Addr8;
-    break;
-  case VK_ADDR16:
-    Kind = Z80::Addr16;
-    break;
   case VK_ADDR16_HI:
     Kind = Z80::Addr16_High;
     break;
   case VK_ADDR16_LO:
     Kind = Z80::Addr16_Low;
-    break;
-  case VK_ADDR24:
-    Kind = Z80::Addr24;
-    break;
-  case VK_ADDR24_BANK:
-    Kind = Z80::Addr24_Bank;
-    break;
-  case VK_ADDR24_SEGMENT:
-    Kind = Z80::Addr24_Segment;
-    break;
-  case VK_ADDR24_SEGMENT_HI:
-    Kind = Z80::Addr24_Segment_High;
-    break;
-  case VK_ADDR24_SEGMENT_LO:
-    Kind = Z80::Addr24_Segment_Low;
     break;
   case VK_NONE:
     llvm_unreachable("Uninitialized expression");
@@ -182,14 +134,11 @@ const char *Z80MCExpr::getName() const {
   return nullptr;
 }
 
-Z80MCExpr::VariantKind Z80MCExpr::getKindByName(StringRef Name,
-                                                bool IsImmediate) {
+Z80MCExpr::VariantKind Z80MCExpr::getKindByName(StringRef Name) {
   const auto &Modifier =
       std::find_if(std::begin(ModifierNames), std::end(ModifierNames),
-                   [&Name, IsImmediate](ModifierEntry const &Mod) {
-                     if (Mod.ImmediateOnly && !IsImmediate)
-                       return false;
-                     return Mod.Spelling == Name;
+                   [&Name](ModifierEntry const &Mod) {
+                     return Name.equals_insensitive(Mod.Spelling);
                    });
 
   if (Modifier != std::end(ModifierNames)) {

@@ -29,11 +29,6 @@ enum Fixups {
   Addr16,                      // A 16-bit address.
   Addr16_Low,                  // The low byte of a 16-bit address.
   Addr16_High,                 // The high byte of a 16-bit address.
-  Addr24,                      // A 24-bit address.
-  Addr24_Bank,                 // The bank byte of a 24-bit address.
-  Addr24_Segment,              // The segment 16-bits of a 24-bit address.
-  Addr24_Segment_Low,  // The low 8 bits of the segment of a 24-bit address.
-  Addr24_Segment_High, // The high 8 bits of the segment of a 24-bit address.
   PCRel8,              // An 8-bit PC relative value.
   Disp8,               // An 8-bit signed displacement for indexed addressing.
   LDH8,                // SM83 LDH operand: 8-bit offset from 0xFF00.

@@ -65,15 +65,6 @@ void Z80InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     OS << formatImm(Op.getImm());
   } else {
     assert(Op.isExpr() && "Unknown operand kind in printOperand");
-    // Format z80_16 immediates using formatImm.
-    if (const auto *MME = dyn_cast<Z80MCExpr>(Op.getExpr())) {
-      int64_t Value = 0;
-      if (MME->getKind() == Z80MCExpr::VK_IMM16 &&
-          MME->getSubExpr()->evaluateAsAbsolute(Value)) {
-        OS << "z80_16(" << formatImm(Value) << ')';
-        return;
-      }
-    }
     MAI.printExpr(OS, *Op.getExpr());
   }
 }
@@ -223,22 +214,12 @@ void Z80InstPrinterSDCC::printOperand(const MCInst *MI, unsigned OpNo,
     assert(Op.isExpr() && "Unknown operand kind in printOperand");
     if (NeedsHash)
       OS << '#';
-    // Format z80_16 immediates using formatImm.
+    // Print z80_16lo(x) as <(x) and z80_16hi(x) as >(x) for sdasz80.
     if (const auto *MME = dyn_cast<Z80MCExpr>(Op.getExpr())) {
-      int64_t Value = 0;
-      if (MME->getKind() == Z80MCExpr::VK_IMM16 &&
-          MME->getSubExpr()->evaluateAsAbsolute(Value)) {
-        OS << "z80_16(" << formatImm(Value) << ')';
-        return;
-      }
-      // sdasz80 spells the byte-of-address operators as unary < and >.
-      if (MME->getKind() == Z80MCExpr::VK_ADDR16_LO ||
-          MME->getKind() == Z80MCExpr::VK_ADDR16_HI) {
-        OS << (MME->getKind() == Z80MCExpr::VK_ADDR16_LO ? "<(" : ">(");
-        MAI.printExpr(OS, *MME->getSubExpr());
-        OS << ')';
-        return;
-      }
+      OS << (MME->getKind() == Z80MCExpr::VK_ADDR16_LO ? "<(" : ">(");
+      MAI.printExpr(OS, *MME->getSubExpr());
+      OS << ')';
+      return;
     }
     MAI.printExpr(OS, *Op.getExpr());
   }

@@ -17,6 +17,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/Z80MCExpr.h"
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "TargetInfo/Z80TargetInfo.h"
 #include "Z80.h"
@@ -239,6 +240,8 @@ private:
 
   ParseStatus parseDirective(AsmToken DirectiveID) override;
 
+  bool parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) override;
+
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
 
@@ -368,6 +371,27 @@ bool Z80AsmParser::tryParseRegisterOperand(OperandVector &Operands) {
 
 bool Z80AsmParser::parseExpression(const MCExpr *&Expr) {
   return getParser().parseExpression(Expr);
+}
+
+// Parse z80_16lo(expr) and z80_16hi(expr).
+bool Z80AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
+  const AsmToken &Tok = Parser.getTok();
+  Z80MCExpr::VariantKind Kind = Z80MCExpr::VK_NONE;
+  if (Tok.is(AsmToken::Identifier) && getLexer().peekTok().is(AsmToken::LParen))
+    Kind = Z80MCExpr::getKindByName(Tok.getString());
+  if (Kind == Z80MCExpr::VK_NONE)
+    return Parser.parsePrimaryExpr(Res, EndLoc, nullptr);
+
+  Parser.Lex(); // Eat the operator name.
+  Parser.Lex(); // Eat '('.
+  const MCExpr *SubExpr;
+  if (Parser.parseExpression(SubExpr, EndLoc))
+    return true;
+  EndLoc = Parser.getTok().getEndLoc();
+  if (Parser.parseToken(AsmToken::RParen, "expected ')'"))
+    return true;
+  Res = Z80MCExpr::create(Kind, SubExpr, false, getContext());
+  return false;
 }
 
 /// Parse a parenthesized operand: (reg), (expr), (ix+d), (iy+d).
