@@ -49,7 +49,8 @@ Z80AsmBackend::createObjectTargetWriter() const {
 static uint64_t encodedValue(const MCFixup &Fixup, uint64_t Value) {
   if (Fixup.isPCRel())
     Value -= 1;
-  if (Fixup.getKind() == Z80::LDH8)
+  // An LDH operand below 0xFF00 is already the offset.
+  if (Fixup.getKind() == Z80::LDH8 && Value >= 0xFF00)
     Value -= 0xFF00;
   return Value;
 }
@@ -118,7 +119,6 @@ void Z80AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
       Msg = "index displacement out of range";
       break;
     case Z80::LDH8:
-      // Value already has the 0xFF00 base subtracted.
       InRange = isUInt<8>(Value);
       Msg = "LDH address must be in the range 0xFF00 to 0xFFFF";
       break;
