@@ -1074,11 +1074,11 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
         printError(std::get<0>(LocSym), "directional label undefined");
       }
     }
-    for (std::tuple<SMLoc, CppHashInfoTy, MCSymbol *> &LocSym : DollarLabels) {
-      if (std::get<2>(LocSym)->isUndefined()) {
-        CppHashInfo = std::get<1>(LocSym);
-        printError(std::get<0>(LocSym), "dollar local label undefined");
-      }
+  }
+  for (std::tuple<SMLoc, CppHashInfoTy, MCSymbol *> &LocSym : DollarLabels) {
+    if (std::get<2>(LocSym)->isUndefined()) {
+      CppHashInfo = std::get<1>(LocSym);
+      printError(std::get<0>(LocSym), "dollar local label undefined");
     }
   }
   // Finalize the output stream if there are no errors and if the client wants
@@ -1816,7 +1816,8 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
       if (isDollarLabelSuffix(IDVal)) {
         Lex(); // Consume the '$'.
         IsDollarLabel = true;
-      } else if (Lexer.getKind() != AsmToken::Colon) {
+      }
+      if (Lexer.getKind() != AsmToken::Colon) {
         if (!TheCondState.Ignore) {
           Lex(); // always eat a token
           return Error(IDLoc, "unexpected token at start of statement");
