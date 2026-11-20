@@ -6,11 +6,16 @@
 ; CHECK-DAG: GLOBAL DEFAULT {{.*}} g{{$}}
 ; CHECK-DAG: GLOBAL DEFAULT {{.*}} h{{$}}
 ; CHECK-DAG: LOCAL DEFAULT {{.*}} l{{$}}
+; CHECK-DAG: 00000005 {{.*}} GLOBAL DEFAULT ABS k{{$}}
+; CHECK-DAG: 00000003 {{.*}} GLOBAL DEFAULT {{[0-9]+}} G$m$0_0$0{{$}}
 
 ; ELF: [[#@LINE+1]]:{{[0-9]+}}: error: unexpected token at start of statement
 g::	nop
 l:	nop
 h::
+	nop
+k == 5
+G$m$0_0$0==.
 	nop
 
 .ifdef ERR

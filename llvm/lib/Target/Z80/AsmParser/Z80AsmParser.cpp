@@ -32,6 +32,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCParser/AsmLexer.h"
+#include "llvm/MC/MCParser/MCAsmParserUtils.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
 #include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/MC/MCSectionELF.h"
@@ -248,6 +249,9 @@ private:
   bool parseDataExpr(const MCExpr *&Res) override;
 
   void onLabelParsed(MCSymbol *Symbol) override;
+
+  bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
+                        AsmToken Token, OperandVector &Operands) override;
 
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
@@ -743,6 +747,24 @@ ParseStatus Z80AsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
   return ParseStatus::Success;
 }
 
+// sdasz80 sym == expr makes sym a global constant.
+bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
+                                    AsmToken Token, OperandVector &Operands) {
+  if (!isParsingSDAS() || getLexer().isNot(AsmToken::EqualEqual))
+    return parseInstruction(Info, Name, Token.getLoc(), Operands);
+  Parser.Lex(); // Eat '=='
+  MCSymbol *Sym = nullptr;
+  const MCExpr *Value;
+  if (MCParserUtils::parseAssignmentExpression(Token.getString(), true, Parser,
+                                               Sym, Value))
+    return true;
+  if (Sym) {
+    getStreamer().emitAssignment(Sym, Value);
+    getStreamer().emitSymbolAttribute(Sym, MCSA_Global);
+  }
+  return false;
+}
+
 bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                     SMLoc NameLoc, OperandVector &Operands) {
   // Add the mnemonic as the first operand
@@ -875,6 +897,8 @@ bool Z80AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                            OperandVector &Operands,
                                            MCStreamer &Out, uint64_t &ErrorInfo,
                                            bool MatchingInlineAsm) {
+  if (Operands.empty())
+    return false;
   MCInst Inst;
   unsigned MatchResult =
       MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm);

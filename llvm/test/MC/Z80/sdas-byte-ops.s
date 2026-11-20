@@ -17,9 +17,12 @@
 	ld	a, #<(ext+1)
 	ld	b, #>ext
 	.db	<ext, >ext
+	.byte	ext, (ext >> 8)
 .endif
 
 ; RELOC: 0x5 R_Z80_BYTE0 ext 0x1
 ; RELOC: 0x7 R_Z80_BYTE1 ext 0x0
 ; RELOC: 0x8 R_Z80_BYTE0 ext 0x0
 ; RELOC: 0x9 R_Z80_BYTE1 ext 0x0
+; RELOC: 0xA R_Z80_BYTE0 ext 0x0
+; RELOC: 0xB R_Z80_BYTE1 ext 0x0

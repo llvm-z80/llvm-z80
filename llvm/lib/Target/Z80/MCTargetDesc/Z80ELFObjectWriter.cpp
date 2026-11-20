@@ -13,7 +13,9 @@
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAssembler.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
@@ -52,6 +54,10 @@ unsigned Z80ELFObjectWriter::getRelocType(const MCFixup &Fixup,
     return ELF::R_Z80_BYTE1;
   switch (Kind) {
   case FK_Data_1:
+    // In sdasz80 syntax, .byte of an address is the low byte.
+    if (getContext().getAsmInfo().isSDCC())
+      return ELF::R_Z80_BYTE0;
+    return ELF::R_Z80_8;
   case Z80::Imm8:
   case Z80::Addr8:
   case Z80::LDH8:
