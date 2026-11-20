@@ -470,6 +470,10 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
   SMLoc LParenLoc = Parser.getTok().getLoc();
   Parser.Lex(); // Eat '('
 
+  // Skip the '#' before an sdasz80 address (ld (#_x),a).
+  if (isParsingSDAS() && Parser.getTok().is(AsmToken::Hash))
+    Parser.Lex();
+
   // Check for register inside parentheses
   if (Parser.getTok().is(AsmToken::Identifier)) {
     MCRegister Reg = tryParseRegisterName();
