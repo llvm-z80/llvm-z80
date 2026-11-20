@@ -269,6 +269,9 @@ private:
   bool parseExpression(const MCExpr *&Expr);
   void eatComma();
 
+  // Are we parsing the sdasz80 dialect?
+  bool isParsingSDAS() { return getContext().getAsmInfo().isSDCC(); }
+
   /// Get the compound token string for a register indirect like "(hl)".
   /// Returns nullptr if the register doesn't use compound tokens.
   static const char *getCompoundToken(MCRegister Reg) {
@@ -304,6 +307,14 @@ public:
     MCAsmParserExtension::Initialize(Parser);
     // Z80 assemblers count .ds in bytes.
     Parser.addAliasForDirective(".ds", ".skip");
+    // sdasz80 names for .byte and .short.
+    if (isParsingSDAS()) {
+      Parser.addAliasForDirective(".db", ".byte");
+      Parser.addAliasForDirective(".fcb", ".byte");
+      Parser.addAliasForDirective(".dw", ".short");
+      Parser.addAliasForDirective(".word", ".short");
+      Parser.addAliasForDirective(".fdb", ".short");
+    }
     MRI = getContext().getRegisterInfo();
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
@@ -394,6 +405,9 @@ bool Z80AsmParser::parseExpression(const MCExpr *&Expr) {
 }
 
 bool Z80AsmParser::parseDataExpr(const MCExpr *&Res) {
+  // Skip the '#' before an sdasz80 data value (.dw #0x1234).
+  if (isParsingSDAS() && getLexer().is(AsmToken::Hash))
+    Parser.Lex();
   return parseExpression(Res);
 }
 
@@ -724,6 +738,14 @@ bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
 ///   .area _X     → .section _X
 ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
   StringRef IDVal = DirectiveID.getString();
+  // Skip the sdasz80 module and listing directives.
+  if (isParsingSDAS() &&
+      StringSwitch<bool>(IDVal.lower())
+          .Cases({".module", ".title", ".sbttl", ".optsdcc"}, true)
+          .Default(false)) {
+    Parser.eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
   if (IDVal.lower() != ".area")
     return ParseStatus::NoMatch;
 

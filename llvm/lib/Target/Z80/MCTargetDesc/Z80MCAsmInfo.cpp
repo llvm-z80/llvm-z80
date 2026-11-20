@@ -59,6 +59,7 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
   AssemblerDialect = 1;
   IsSDCC = true;
   SupportsQuotedNames = false;
+  AllowDollarAtStartOfIdentifier = true;
 
   // Suppress ELF-specific directives
   HasDotTypeDotSizeDirective = false;
