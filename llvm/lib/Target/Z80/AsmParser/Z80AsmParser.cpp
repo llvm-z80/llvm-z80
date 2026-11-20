@@ -245,6 +245,8 @@ private:
 
   bool parseDataExpr(const MCExpr *&Res) override;
 
+  void onLabelParsed(MCSymbol *Symbol) override;
+
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
 
@@ -409,6 +411,14 @@ bool Z80AsmParser::parseDataExpr(const MCExpr *&Res) {
   if (isParsingSDAS() && getLexer().is(AsmToken::Hash))
     Parser.Lex();
   return parseExpression(Res);
+}
+
+// A second ':' makes the sdasz80 label global.
+void Z80AsmParser::onLabelParsed(MCSymbol *Symbol) {
+  if (!isParsingSDAS() || getLexer().isNot(AsmToken::Colon))
+    return;
+  Parser.Lex(); // Eat the second ':'.
+  getStreamer().emitSymbolAttribute(Symbol, MCSA_Global);
 }
 
 // Return true when the ')' matching the leading '(' ends the operand.
