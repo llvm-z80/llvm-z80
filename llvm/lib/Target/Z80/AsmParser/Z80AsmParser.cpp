@@ -816,15 +816,16 @@ ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
   if (Parser.parseEOL())
     return ParseStatus::Failure;
 
-  // In sdas, _DATA has no initial values.
-  // In other environments, _DATA has initial values.
-  // So we make _DATA uninitialized for sdcc and map _DATA to .data otherwise.
+  // In sdas, _DATA and _INITIALIZED have no initial values.
+  // In other environments, these areas have initial values.
+  // So we make both uninitialized for sdcc and map both to .data otherwise.
   bool IsSDCCEnv = getSTI().getTargetTriple().getEnvironment() == Triple::SDCC;
-  StringRef Section = StringSwitch<StringRef>(AreaName)
-                          .Cases({"_CODE", "_HOME"}, ".text")
-                          .Case("_DATA", IsSDCCEnv ? "_DATA" : ".data")
-                          .Case("_BSS", ".bss")
-                          .Default(AreaName);
+  StringRef Section =
+      StringSwitch<StringRef>(AreaName)
+          .Cases({"_CODE", "_HOME"}, ".text")
+          .Cases({"_DATA", "_INITIALIZED"}, IsSDCCEnv ? AreaName : ".data")
+          .Case("_BSS", ".bss")
+          .Default(AreaName);
 
   unsigned Type = ELF::SHT_PROGBITS;
   unsigned Flags = ELF::SHF_ALLOC | ELF::SHF_EXECINSTR;

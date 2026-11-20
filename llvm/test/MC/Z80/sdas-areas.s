@@ -10,7 +10,8 @@
 ; SYNTAX: .data        PROGBITS {{[0-9a-f ]+}} WA
 	.area	_DATA
 	.ds	1
-; CHECK:  _INITIALIZED NOBITS   {{[0-9a-f ]+}} WA
+; SDCC:   _INITIALIZED NOBITS   {{[0-9a-f ]+}} WA
+; SYNTAX-NOT: _INITIALIZED
 	.area	_INITIALIZED
 	.ds	1
 ; CHECK:  _INITIALIZER PROGBITS {{[0-9a-f ]+}} A {{[0-9]}}
