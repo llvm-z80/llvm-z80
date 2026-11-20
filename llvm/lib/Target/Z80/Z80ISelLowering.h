@@ -81,22 +81,10 @@ public:
   bool isTruncateFree(Type *FromTy, Type *ToTy) const override;
   bool isTruncateFree(LLT FromTy, LLT ToTy, LLVMContext &Ctx) const override;
 
-  bool isZExtFree(Type *FromTy, Type *ToTy) const override;
-  bool isZExtFree(LLT FromTy, LLT ToTy, LLVMContext &Ctx) const override;
-
-  EVT getOptimalMemOpType(LLVMContext &Context, const MemOp &Op,
-                          const AttributeList &FuncAttributes) const override {
-    return MVT::i8;
-  }
-
   LLT getOptimalMemOpLLT(const MemOp &Op,
                          const AttributeList &FuncAttributes) const override {
     return LLT::scalar(8);
   }
-
-  MachineBasicBlock *
-  EmitInstrWithCustomInserter(MachineInstr &MI,
-                              MachineBasicBlock *MBB) const override;
 };
 
 } // namespace llvm

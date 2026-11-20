@@ -44,16 +44,6 @@ public:
                       unsigned DstSubReg, const TargetRegisterClass *NewRC,
                       LiveIntervals &LIS) const override;
 
-  bool requiresRegisterScavenging(const MachineFunction &MF) const override {
-    return true;
-  }
-
-  bool saveScavengerRegister(MachineBasicBlock &MBB,
-                             MachineBasicBlock::iterator I,
-                             MachineBasicBlock::iterator &UseMI,
-                             const TargetRegisterClass *RC,
-                             Register Reg) const override;
-
   // Use forward frame index replacement so PEI tracks per-instruction SPAdj
   // inside call sequences (via InsideCallSequence). The backward walk lacks
   // this tracking, causing incorrect offsets when PUSHes shift SP.
@@ -72,7 +62,7 @@ private:
   /// The elimination itself. The public entry point wraps it to carry the
   /// pseudo's memory operands onto whatever performs the access.
   bool eliminateFrameIndexImpl(MachineBasicBlock::iterator MI, int SPAdj,
-                               unsigned FIOperandNum, RegScavenger *RS) const;
+                               unsigned FIOperandNum) const;
 };
 
 } // namespace llvm

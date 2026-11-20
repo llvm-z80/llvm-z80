@@ -692,24 +692,6 @@ def SPILL_POP : Z80Pseudo<(outs Any16:$dst), (ins)> {
   let mayStore = false;
 }
 
-// 16-bit add/sub from frame slot via 8-bit IX-indexed ALU.
-// ADD_HL_FI expands to: LD A,L; ADD A,(IX+d); LD L,A; LD A,H; ADC A,(IX+d+1); LD H,A
-// SUB_HL_FI expands to: LD A,L; SUB (IX+d); LD L,A; LD A,H; SBC A,(IX+d+1); LD H,A
-// These avoid allocating a GR16_BCDE register pair, reducing register pressure.
-def ADD_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi, i32imm:$offset)> {
-  let Uses = [HL];
-  let Defs = [HL, A, F];
-  let mayLoad = true;
-  let mayStore = false;
-  let Predicates = [IsZ80];
-}
-def SUB_HL_FI : Z80Pseudo<(outs), (ins i32imm:$fi, i32imm:$offset)> {
-  let Uses = [HL];
-  let Defs = [HL, A, F];
-  let mayLoad = true;
-  let mayStore = false;
-  let Predicates = [IsZ80];
-}
 // 8-bit ALU against a frame slot, with the accumulator as an operand as in
 // the register forms. $op says which operation, so one pseudo covers them
 // all. Selection cannot name the addressing mode yet: whether the frame

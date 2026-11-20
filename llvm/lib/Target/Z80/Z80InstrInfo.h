@@ -235,15 +235,6 @@ inline const MachineOperand &idxSlotOperand(const MachineInstr &MI) {
   return MI.getOperand(IsLoad ? 1 : 0);
 }
 
-/// Emit `BIT b, src`, which sets the zero flag from one bit of a register.
-inline MachineInstrBuilder buildBitTest(MachineBasicBlock &MBB,
-                                        MachineBasicBlock::iterator I,
-                                        const DebugLoc &DL,
-                                        const TargetInstrInfo &TII,
-                                        unsigned Bit, MCRegister Src) {
-  return BuildMI(MBB, I, DL, TII.get(Z80::BIT_b_r)).addImm(Bit).addReg(Src);
-}
-
 /// Append `BIT b, src` to the end of \p MBB.
 inline MachineInstrBuilder buildBitTest(MachineBasicBlock *MBB,
                                         const DebugLoc &DL,
@@ -284,16 +275,6 @@ buildStoreHL(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   return BuildMI(MBB, I, DL, TII.get(Z80::LD_HLind_r)).addReg(Src);
 }
 
-/// Emit `INC r` or `DEC r`. \p Opc is Z80::INC_r or Z80::DEC_r; the register
-/// is both read and written, so it appears twice.
-inline MachineInstrBuilder buildIncDec8(MachineBasicBlock &MBB,
-                                        MachineBasicBlock::iterator I,
-                                        const DebugLoc &DL,
-                                        const TargetInstrInfo &TII,
-                                        unsigned Opc, MCRegister Reg) {
-  return BuildMI(MBB, I, DL, TII.get(Opc), Reg).addReg(Reg);
-}
-
 /// Append `INC r` or `DEC r` to the end of \p MBB.
 inline MachineInstrBuilder buildIncDec8(MachineBasicBlock *MBB,
                                         const DebugLoc &DL,
@@ -310,14 +291,6 @@ inline MachineInstrBuilder buildIncDec16(MachineBasicBlock &MBB,
                                          const TargetInstrInfo &TII,
                                          unsigned Opc, MCRegister Pair) {
   return BuildMI(MBB, I, DL, TII.get(Opc), Pair).addReg(Pair);
-}
-
-/// Append `INC rr` or `DEC rr` to the end of \p MBB.
-inline MachineInstrBuilder buildIncDec16(MachineBasicBlock *MBB,
-                                         const DebugLoc &DL,
-                                         const TargetInstrInfo &TII,
-                                         unsigned Opc, MCRegister Pair) {
-  return BuildMI(MBB, DL, TII.get(Opc), Pair).addReg(Pair);
 }
 
 /// Mark a register the instruction reads only incidentally as undef: the

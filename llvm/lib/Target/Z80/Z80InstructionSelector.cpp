@@ -116,18 +116,9 @@ private:
       Register RhsW3, MachineRegisterInfo &MRI, const DebugLoc &DL,
       CmpInst::Predicate &NormalizedPred, Register *Bool = nullptr);
 
-  /// Count foldable G_LOAD→G_ADD/SUB/PTR_ADD patterns in a BB.
-  /// Used to decide if register pressure is high enough to justify folding.
-  unsigned countFoldablePatternsInBB(MachineBasicBlock &MBB,
-                                     MachineRegisterInfo &MRI);
-
   const Z80InstrInfo &TII;
   const Z80RegisterInfo &TRI;
   const Z80RegisterBankInfo &RBI;
-
-  // Per-BB fold count cache for register pressure heuristic.
-  MachineBasicBlock *CachedFoldBB = nullptr;
-  unsigned CachedFoldCount = 0;
 };
 
 } // namespace
@@ -242,55 +233,6 @@ Z80InstructionSelector::Z80InstructionSelector(const Z80TargetMachine &TM,
                                                Z80Subtarget &STI,
                                                Z80RegisterBankInfo &RBI)
     : TII(*STI.getInstrInfo()), TRI(*STI.getRegisterInfo()), RBI(RBI) {}
-
-/// Count how many 16-bit G_ADD/G_SUB/G_PTR_ADD in the BB have a single-use
-/// G_LOAD from a frame index as an operand.  When this count exceeds the
-/// GR16_BCDE physical register count (2), spills become likely and folding
-/// into ADD_HL_FI/SUB_HL_FI is beneficial.
-unsigned
-Z80InstructionSelector::countFoldablePatternsInBB(MachineBasicBlock &MBB,
-                                                  MachineRegisterInfo &MRI) {
-  unsigned Count = 0;
-  for (MachineInstr &MI : MBB) {
-    unsigned Opc = MI.getOpcode();
-    if (Opc != TargetOpcode::G_ADD && Opc != TargetOpcode::G_SUB &&
-        Opc != TargetOpcode::G_PTR_ADD)
-      continue;
-    if (MRI.getType(MI.getOperand(0).getReg()).getSizeInBits() > 16)
-      continue;
-    // Check operands 1 and 2 (for G_ADD, either could be the load due to
-    // commutativity; for G_SUB/G_PTR_ADD only operand 2).
-    unsigned StartOp = (Opc == TargetOpcode::G_ADD) ? 1 : 2;
-    unsigned EndOp = 2;
-    for (unsigned i = StartOp; i <= EndOp; ++i) {
-      Register Reg = MI.getOperand(i).getReg();
-      if (!Reg.isVirtual() || !MRI.hasOneNonDBGUse(Reg))
-        continue;
-      MachineInstr *Def = MRI.getVRegDef(Reg);
-      if (!Def || Def->getOpcode() != TargetOpcode::G_LOAD ||
-          Def->getParent() != &MBB)
-        continue;
-      Register AddrReg = Def->getOperand(1).getReg();
-      MachineInstr *AddrDef = MRI.getVRegDef(AddrReg);
-      if (!AddrDef)
-        continue;
-      if (AddrDef->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
-        ++Count;
-        break;
-      }
-      if (AddrDef->getOpcode() == TargetOpcode::G_PTR_ADD) {
-        MachineInstr *Base = MRI.getVRegDef(AddrDef->getOperand(1).getReg());
-        MachineInstr *Off = MRI.getVRegDef(AddrDef->getOperand(2).getReg());
-        if (Base && Base->getOpcode() == TargetOpcode::G_FRAME_INDEX && Off &&
-            Off->getOpcode() == TargetOpcode::G_CONSTANT) {
-          ++Count;
-          break;
-        }
-      }
-    }
-  }
-  return Count;
-}
 
 // Select 16-bit ops via inline pseudo (for +inline-i16-runtime mode).
 // Input: HL = src1, DE = src2. Output: DE = result.
@@ -751,14 +693,6 @@ bool Z80InstructionSelector::emitFusedCompareAndBranch(
     Pred = CmpInst::ICMP_UGE;
     std::swap(LHS, RHS);
     break;
-  case CmpInst::ICMP_SGT:
-    Pred = CmpInst::ICMP_SLT;
-    std::swap(LHS, RHS);
-    break;
-  case CmpInst::ICMP_SLE:
-    Pred = CmpInst::ICMP_SGE;
-    std::swap(LHS, RHS);
-    break;
   default:
     break;
   }
@@ -960,35 +894,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
   unsigned Opcode = MI.getOpcode();
 
-  // Cache per-BB foldable pattern count for register pressure heuristic.
-  // Only fold RELOAD+ADD into IX-indexed ALU when pressure is high enough
-  // (>2 foldable patterns) to justify the +2B/fold cost via spill avoidance.
-  if (&MBB != CachedFoldBB) {
-    CachedFoldBB = &MBB;
-    CachedFoldCount = countFoldablePatternsInBB(MBB, MRI);
-  }
-
-  // Helper: extract 8-bit constant from G_CONSTANT or G_UNMERGE_VALUES of
-  // G_CONSTANT. Used by AND/OR/XOR immediate folding.
+  // Helper: extract an 8-bit constant from G_CONSTANT.
   auto getConst8 = [&](Register Reg) -> std::optional<int64_t> {
     MachineInstr *Def = MRI.getVRegDef(Reg);
-    if (!Def)
-      return std::nullopt;
-    if (Def->getOpcode() == TargetOpcode::G_CONSTANT)
+    if (Def && Def->getOpcode() == TargetOpcode::G_CONSTANT)
       return Def->getOperand(1).getCImm()->getSExtValue();
-    if (Def->getOpcode() == TargetOpcode::G_UNMERGE_VALUES) {
-      unsigned NumDefs = Def->getNumOperands() - 1;
-      Register SrcReg = Def->getOperand(NumDefs).getReg();
-      MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
-      if (!SrcDef || SrcDef->getOpcode() != TargetOpcode::G_CONSTANT)
-        return std::nullopt;
-      uint64_t FullVal = SrcDef->getOperand(1).getCImm()->getZExtValue();
-      unsigned EltBits = MRI.getType(Reg).getSizeInBits();
-      for (unsigned I = 0; I < NumDefs; ++I) {
-        if (Def->getOperand(I).getReg() == Reg)
-          return (FullVal >> (I * EltBits)) & ((1ULL << EltBits) - 1);
-      }
-    }
     return std::nullopt;
   };
 
@@ -1103,138 +1013,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
                                      *MF.getSubtarget().getRegBankInfo());
     return true;
   }
-
-  // Dead code elimination for folded generic instructions.
-  // When IX-indexed load patterns are folded, the address computation
-  // (G_PTR_ADD, G_CONSTANT) becomes dead. Clean it up here.
-  // For multi-def instructions (e.g. G_UNMERGE_VALUES), ALL defs must be
-  // dead before we can safely delete the instruction.
-  if (MI.getNumDefs() > 0) {
-    bool AllDefsDead = true;
-    for (unsigned I = 0, E = MI.getNumDefs(); I < E; ++I) {
-      Register DefReg = MI.getOperand(I).getReg();
-      if (!DefReg.isVirtual() || !MRI.use_nodbg_empty(DefReg)) {
-        AllDefsDead = false;
-        break;
-      }
-    }
-    if (AllDefsDead && !MI.mayLoadOrStore() && !MI.hasUnmodeledSideEffects()) {
-      MI.eraseFromParent();
-      return true;
-    }
-  }
-
-  // Helper: check if a register is defined by a single-use G_LOAD from a
-  // frame index (G_FRAME_INDEX or G_PTR_ADD(G_FRAME_INDEX, G_CONSTANT)).
-  // Returns {FI, Offset, LoadMI} or {-1, 0, nullptr} if not foldable.
-  struct FILoadInfo {
-    int FI;
-    int64_t Offset;
-    MachineInstr *LoadMI;
-  };
-  auto getFILoad = [&](Register Reg) -> FILoadInfo {
-    if (!Reg.isVirtual() || !MRI.hasOneNonDBGUse(Reg))
-      return {-1, 0, nullptr};
-    MachineInstr *LoadMI = MRI.getVRegDef(Reg);
-    if (!LoadMI || LoadMI->getOpcode() != TargetOpcode::G_LOAD)
-      return {-1, 0, nullptr};
-    if (LoadMI->getParent() != &MBB)
-      return {-1, 0, nullptr};
-    // Check address operand: G_FRAME_INDEX or G_PTR_ADD(G_FRAME_INDEX, const)
-    Register AddrReg = LoadMI->getOperand(1).getReg();
-    MachineInstr *AddrDef = MRI.getVRegDef(AddrReg);
-    if (!AddrDef)
-      return {-1, 0, nullptr};
-    if (AddrDef->getOpcode() == TargetOpcode::G_FRAME_INDEX)
-      return {AddrDef->getOperand(1).getIndex(), 0, LoadMI};
-    if (AddrDef->getOpcode() == TargetOpcode::G_PTR_ADD) {
-      MachineInstr *BaseDef = MRI.getVRegDef(AddrDef->getOperand(1).getReg());
-      MachineInstr *OffDef = MRI.getVRegDef(AddrDef->getOperand(2).getReg());
-      if (BaseDef && BaseDef->getOpcode() == TargetOpcode::G_FRAME_INDEX &&
-          OffDef && OffDef->getOpcode() == TargetOpcode::G_CONSTANT)
-        return {BaseDef->getOperand(1).getIndex(),
-                OffDef->getOperand(1).getCImm()->getSExtValue(), LoadMI};
-    }
-    return {-1, 0, nullptr};
-  };
-
-  // Helper: move LIFETIME_END for a given FI from between LoadMI and MI
-  // to after InsertPt. This prevents StackColoring from merging the slot
-  // before the folded read occurs.
-  auto moveLifetimeEnd = [&](MachineInstr *LoadMI, MachineInstr &UseMI,
-                             MachineBasicBlock::iterator InsertPt, int FI) {
-    for (auto SIt = std::next(MachineBasicBlock::iterator(LoadMI));
-         SIt != MachineBasicBlock::iterator(UseMI);) {
-      MachineInstr &Cur = *SIt++;
-      if (Cur.getOpcode() != TargetOpcode::LIFETIME_END)
-        continue;
-      for (const MachineOperand &MO : Cur.operands()) {
-        if (MO.isFI() && MO.getIndex() == FI) {
-          MBB.splice(InsertPt, &MBB, &Cur);
-          break;
-        }
-      }
-    }
-  };
-
-  // Helper: try to fold a FI load into ADD_HL_FI or SUB_HL_FI.
-  // HLSrcReg is copied into HL (the accumulator side of the 16-bit op).
-  // FoldReg is the candidate whose defining G_LOAD from a frame index
-  // will be folded into the pseudo.  Returns true if the fold was emitted.
-  auto tryFIFold = [&](Register HLSrcReg, Register FoldReg, Register DstReg,
-                       unsigned FoldOpc) -> bool {
-    FILoadInfo FIInfo = getFILoad(FoldReg);
-    if (FIInfo.FI < 0)
-      return false;
-    if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
-        !RBI.constrainGenericRegister(HLSrcReg, Z80::GR16RegClass, MRI))
-      return false;
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), Z80::HL)
-        .addReg(HLSrcReg);
-    auto MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(FoldOpc));
-    MIB.addFrameIndex(FIInfo.FI).addImm(FIInfo.Offset);
-    // The pseudo performs the load the fold is about to erase.
-    MIB.cloneMemRefs(*FIInfo.LoadMI);
-    BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
-        .addReg(Z80::HL);
-    moveLifetimeEnd(FIInfo.LoadMI, MI,
-                    std::next(MachineBasicBlock::iterator(*MIB.getInstr())),
-                    FIInfo.FI);
-    FIInfo.LoadMI->eraseFromParent();
-    MI.eraseFromParent();
-    return true;
-  };
-
-  // Helper: fold a single-use frame slot load into an 8-bit ALU operation.
-  // ASrcReg is the operand that goes to A; FoldReg is the one whose load
-  // becomes the memory operand. Only where the function keeps a frame
-  // pointer, since IX+d is the form this is worth doing for; without one
-  // the expansion has to unfold it again and nothing is gained.
-  auto tryAluFIFold = [&](Register ASrcReg, Register FoldReg, Register DstReg,
-                          unsigned AluOp) -> bool {
-    const MachineFunction &FoldMF = *MBB.getParent();
-    if (!FoldMF.getSubtarget().getFrameLowering()->hasFP(FoldMF))
-      return false;
-    FILoadInfo FIInfo = getFILoad(FoldReg);
-    if (FIInfo.FI < 0)
-      return false;
-    if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
-        !RBI.constrainGenericRegister(ASrcReg, Z80::GR8RegClass, MRI))
-      return false;
-    auto MIB = buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::ALU_Ac_FI, DstReg,
-                          ASrcReg, MRI)
-                   .addImm(AluOp)
-                   .addFrameIndex(FIInfo.FI)
-                   .addImm(FIInfo.Offset);
-    // The pseudo performs the load the fold is about to erase.
-    MIB.cloneMemRefs(*FIInfo.LoadMI);
-    moveLifetimeEnd(FIInfo.LoadMI, MI,
-                    std::next(MachineBasicBlock::iterator(*MIB.getInstr())),
-                    FIInfo.FI);
-    FIInfo.LoadMI->eraseFromParent();
-    MI.eraseFromParent();
-    return true;
-  };
 
   // Handle generic opcodes
   switch (Opcode) {
@@ -1742,12 +1520,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       }
     }
 
-    // Try fold: if OffReg is a single-use G_LOAD from frame index,
-    // fold into ADD_HL_FI to avoid a GR16_BCDE register allocation.
-    if (STI.isZ80() && CachedFoldCount > 2 &&
-        tryFIFold(BaseReg, OffReg, DstReg, Z80::ADD_HL_FI))
-      return true;
-
     if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
         !RBI.constrainGenericRegister(BaseReg, Z80::GR16RegClass, MRI) ||
         !RBI.constrainGenericRegister(OffReg, Z80::GR16_BCDERegClass, MRI))
@@ -1769,23 +1541,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
 
     if (DstTy.getSizeInBits() <= 8) {
-      // Check for constant operand (G_ADD is commutative)
-      auto getConst8 = [&](Register Reg) -> std::optional<int64_t> {
-        MachineInstr *Def = MRI.getVRegDef(Reg);
-        if (Def && Def->getOpcode() == TargetOpcode::G_CONSTANT)
-          return Def->getOperand(1).getCImm()->getSExtValue();
-        return std::nullopt;
-      };
-      auto ConstVal1 = getConst8(Src1Reg);
-      auto ConstVal2 = getConst8(Src2Reg);
-
-      // Normalize: put constant in Src2
-      if (ConstVal1 && !ConstVal2) {
-        std::swap(Src1Reg, Src2Reg);
-        std::swap(ConstVal1, ConstVal2);
-      }
-
-      if (ConstVal2) {
+      // The combiner already moved a constant operand to Src2.
+      if (std::optional<int64_t> ConstVal2 = getConst8(Src2Reg)) {
         int64_t Val = *ConstVal2;
         if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
             !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI))
@@ -1804,10 +1561,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         MI.eraseFromParent();
         return true;
       }
-
-      if (tryAluFIFold(Src1Reg, Src2Reg, DstReg, Z80::ALU_ADD) ||
-          tryAluFIFold(Src2Reg, Src1Reg, DstReg, Z80::ALU_ADD))
-        return true;
 
       // Constrain registers
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
@@ -1831,16 +1584,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       // 16-bit add
       // Check for constant +1/-1 to use INC rr/DEC rr
       {
-        MachineInstr *Def1 = MRI.getVRegDef(Src1Reg);
-        MachineInstr *Def2 = MRI.getVRegDef(Src2Reg);
         // G_ADD is commutative, check either operand for constant
-        auto getConstVal = [](MachineInstr *Def) -> std::optional<int64_t> {
-          if (Def && Def->getOpcode() == TargetOpcode::G_CONSTANT)
-            return Def->getOperand(1).getCImm()->getSExtValue();
-          return std::nullopt;
-        };
-        auto ConstVal1 = getConstVal(Def1);
-        auto ConstVal2 = getConstVal(Def2);
+        auto ConstVal1 = getConst8(Src1Reg);
+        auto ConstVal2 = getConst8(Src2Reg);
         // Prefer the non-constant as the source register
         // Check for small constants that can use repeated INC rr/DEC rr.
         // INC rr is 1 byte each, vs LD rr,nn (3 bytes) + ADD HL,rr (1 byte).
@@ -1892,18 +1638,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
                           Def1->getOperand(1).getReg() == Z80::HL;
         bool Src2FromHL = Def2 && Def2->getOpcode() == TargetOpcode::COPY &&
                           Def2->getOperand(1).getReg() == Z80::HL;
-        if (Src2FromHL && !Src1FromHL) {
+        if (Src2FromHL && !Src1FromHL)
           std::swap(Src1Reg, Src2Reg);
-          std::swap(Def1, Def2);
-        }
-
-        // Try fold: if either operand is a single-use G_LOAD from frame
-        // index, fold into ADD_HL_FI.  G_ADD is commutative, so try Src2
-        // first (preferred: Src1 stays in HL after HL-hint swap), then Src1.
-        if (STI.isZ80() && CachedFoldCount > 2 &&
-            (tryFIFold(Src1Reg, Src2Reg, DstReg, Z80::ADD_HL_FI) ||
-             tryFIFold(Src2Reg, Src1Reg, DstReg, Z80::ADD_HL_FI)))
-          return true;
 
         // Src2 → GR16_BCDE (regalloc chooses BC or DE), Src1 → HL
         if (!RBI.constrainGenericRegister(Src2Reg, Z80::GR16_BCDERegClass, MRI))
@@ -1949,9 +1685,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         return true;
       }
 
-      if (tryAluFIFold(Src1Reg, Src2Reg, DstReg, Z80::ALU_SUB))
-        return true;
-
       // Constrain registers
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
@@ -1996,12 +1729,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         }
       }
 
-      // Try fold: if Src2 is a single-use G_LOAD from frame index,
-      // fold into SUB_HL_FI.  SUB is not commutative, so only Src2.
-      if (STI.isZ80() && CachedFoldCount > 2 &&
-          tryFIFold(Src1Reg, Src2Reg, DstReg, Z80::SUB_HL_FI))
-        return true;
-
       // 16-bit sub
       if (!RBI.constrainGenericRegister(Src2Reg, Z80::GR16_BCDERegClass, MRI))
         return false;
@@ -2031,26 +1758,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
       // Identity fold: AND with 0xFF → COPY (for 8-bit)
       auto isAllOnesConst = [&](Register Reg) -> bool {
-        MachineInstr *Def = MRI.getVRegDef(Reg);
-        if (!Def)
-          return false;
-        if (Def->getOpcode() == TargetOpcode::G_CONSTANT)
-          return Def->getOperand(1).getCImm()->isAllOnesValue();
-        if (Def->getOpcode() == TargetOpcode::G_UNMERGE_VALUES) {
-          unsigned NumDefs = Def->getNumOperands() - 1;
-          Register SrcReg = Def->getOperand(NumDefs).getReg();
-          MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
-          if (!SrcDef || SrcDef->getOpcode() != TargetOpcode::G_CONSTANT)
-            return false;
-          uint64_t FullVal = SrcDef->getOperand(1).getCImm()->getZExtValue();
-          unsigned EltBits = MRI.getType(Reg).getSizeInBits();
-          uint64_t Mask = (1ULL << EltBits) - 1;
-          for (unsigned I = 0; I < NumDefs; ++I) {
-            if (Def->getOperand(I).getReg() == Reg)
-              return ((FullVal >> (I * EltBits)) & Mask) == Mask;
-          }
-        }
-        return false;
+        auto V = getConst8(Reg);
+        return V && (*V & 0xFF) == 0xFF;
       };
 
       // Zero fold: AND with 0 → result is always 0
@@ -2093,10 +1802,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           return true;
         }
 
-        if (!ImmVal && (tryAluFIFold(Src1Reg, Src2Reg, DstReg, Z80::ALU_AND) ||
-                        tryAluFIFold(Src2Reg, Src1Reg, DstReg, Z80::ALU_AND)))
-          return true;
-
         if (ImmVal)
           buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::AND_Ac_n, DstReg, Src1Reg,
                      MRI)
@@ -2120,12 +1825,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     const LLT DstTy = MRI.getType(DstReg);
 
     if (DstTy.getSizeInBits() <= 8) {
-      unsigned AluOp =
-          Opcode == TargetOpcode::G_OR ? Z80::ALU_OR : Z80::ALU_XOR;
-      if (tryAluFIFold(Src1Reg, Src2Reg, DstReg, AluOp) ||
-          tryAluFIFold(Src2Reg, Src1Reg, DstReg, AluOp))
-        return true;
-
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(Src1Reg, Z80::GR8RegClass, MRI) ||
           !RBI.constrainGenericRegister(Src2Reg, Z80::GR8RegClass, MRI))
@@ -2133,27 +1832,8 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
       // Identity fold: OR/XOR with 0 → COPY
       auto isZeroConst = [&](Register Reg) -> bool {
-        MachineInstr *Def = MRI.getVRegDef(Reg);
-        if (!Def)
-          return false;
-        if (Def->getOpcode() == TargetOpcode::G_CONSTANT)
-          return Def->getOperand(1).getCImm()->isZero();
-        if (Def->getOpcode() == TargetOpcode::G_UNMERGE_VALUES) {
-          unsigned NumDefs = Def->getNumOperands() - 1;
-          Register SrcReg = Def->getOperand(NumDefs).getReg();
-          MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
-          if (!SrcDef || SrcDef->getOpcode() != TargetOpcode::G_CONSTANT)
-            return false;
-          uint64_t FullVal = SrcDef->getOperand(1).getCImm()->getZExtValue();
-          unsigned EltBits = MRI.getType(Reg).getSizeInBits();
-          for (unsigned I = 0; I < NumDefs; ++I) {
-            if (Def->getOperand(I).getReg() == Reg) {
-              return ((FullVal >> (I * EltBits)) & ((1ULL << EltBits) - 1)) ==
-                     0;
-            }
-          }
-        }
-        return false;
+        auto V = getConst8(Reg);
+        return V && (*V & 0xFF) == 0;
       };
 
       if (isZeroConst(Src2Reg)) {
@@ -2236,10 +1916,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           !RBI.constrainGenericRegister(ShiftAmtReg, Z80::GR8RegClass, MRI))
         return false;
 
-      if (ShiftAmt == 0) {
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
-            .addReg(SrcReg);
-      } else if (ShiftAmt >= 16) {
+      if (ShiftAmt >= 16) {
         BuildMI(MBB, MI, DL, TII.get(Z80::LD_rr_nn), DstReg).addImm(0);
       } else if (ShiftAmt >= 8) {
         // The low byte moves up and shifts on its own, into the high half of
@@ -2322,10 +1999,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
           !RBI.constrainGenericRegister(ShiftAmtReg, Z80::GR8RegClass, MRI))
         return false;
 
-      if (ShiftAmt == 0) {
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
-            .addReg(SrcReg);
-      } else if (ShiftAmt >= 16) {
+      if (ShiftAmt >= 16) {
         BuildMI(MBB, MI, DL, TII.get(Z80::LD_rr_nn), DstReg).addImm(0);
       } else if (ShiftAmt >= 8) {
         // The high byte moves down, shifts on its own and is zero-extended.
@@ -2425,10 +2099,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
         }
       }
 
-      if (ShiftAmt == 0) {
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
-            .addReg(SrcReg);
-      } else if (ShiftAmt >= 15) {
+      if (ShiftAmt >= 15) {
         // Sign extension: result = 0x0000 or 0xFFFF based on sign bit
         // Uses SEXT16 pseudo expanded post-RA to avoid clobbering src
         BuildMI(MBB, MI, DL, TII.get(Z80::SEXT16), DstReg).addReg(SrcReg);
@@ -2526,12 +2197,6 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
     Register DstReg = MI.getOperand(0).getReg();
 
-    // If the result has no uses (fused into G_BRCOND), skip materialization.
-    if (MRI.use_nodbg_empty(DstReg)) {
-      MI.eraseFromParent();
-      return true;
-    }
-
     CmpInst::Predicate Pred =
         static_cast<CmpInst::Predicate>(MI.getOperand(1).getPredicate());
     Register LHS = MI.getOperand(2).getReg();
@@ -2544,17 +2209,9 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     Register Bool;
     if (LHSTy.getSizeInBits() <= 8) {
       // 8-bit comparison using generalized ALU pseudos.
-      // Check if RHS is a constant for immediate-form instructions.
-      auto getRHSConst = [&](Register Reg) -> std::optional<int64_t> {
-        MachineInstr *Def = MRI.getVRegDef(Reg);
-        if (Def && Def->getOpcode() == TargetOpcode::G_CONSTANT)
-          return Def->getOperand(1).getCImm()->getSExtValue();
-        return std::nullopt;
-      };
-
       // CP sets the carry when its left operand is below its right one.
       auto emitCP = [&](Register L, Register R) {
-        if (auto C = getRHSConst(R))
+        if (auto C = getConst8(R))
           buildAccOp(MBB, MI, MI.getDebugLoc(), Z80::CP_Ac_n, Register(), L,
                      MRI)
               .addImm(*C & 0xFF);
@@ -2599,7 +2256,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       case CmpInst::ICMP_SGE: {
         // The legalizer leaves a signed order only as x < 0 or x >= 0: the sign
         // bit, rotated down to bit 0.
-        std::optional<int64_t> RC = getRHSConst(RHS);
+        std::optional<int64_t> RC = getConst8(RHS);
         if (!RC || *RC != 0)
           return false;
         const DebugLoc &DL = MI.getDebugLoc();
