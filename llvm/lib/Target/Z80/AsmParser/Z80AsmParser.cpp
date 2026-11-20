@@ -814,18 +814,27 @@ ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
   if (Parser.parseEOL())
     return ParseStatus::Failure;
 
-  // Map sdasz80 area names to ELF sections
+  // In sdas, _DATA has no initial values.
+  // In other environments, _DATA has initial values.
+  // So we make _DATA uninitialized for sdcc and map _DATA to .data otherwise.
+  bool IsSDCCEnv = getSTI().getTargetTriple().getEnvironment() == Triple::SDCC;
   StringRef Section = StringSwitch<StringRef>(AreaName)
                           .Cases({"_CODE", "_HOME"}, ".text")
-                          .Cases({"_DATA", "_INITIALIZED"}, ".data")
+                          .Case("_DATA", IsSDCCEnv ? "_DATA" : ".data")
                           .Case("_BSS", ".bss")
                           .Default(AreaName);
 
-  getStreamer().switchSection(getContext().getELFSection(
-      Section, Section == ".bss" ? ELF::SHT_NOBITS : ELF::SHT_PROGBITS,
-      Section == ".bss"    ? (ELF::SHF_ALLOC | ELF::SHF_WRITE)
-      : Section == ".data" ? (ELF::SHF_ALLOC | ELF::SHF_WRITE)
-                           : (ELF::SHF_ALLOC | ELF::SHF_EXECINSTR)));
+  unsigned Type = ELF::SHT_PROGBITS;
+  unsigned Flags = ELF::SHF_ALLOC | ELF::SHF_EXECINSTR;
+  if (Section == ".data") {
+    Flags = ELF::SHF_ALLOC | ELF::SHF_WRITE;
+  } else if (is_contained({"_DATA", "_INITIALIZED", ".bss"}, Section)) {
+    Type = ELF::SHT_NOBITS;
+    Flags = ELF::SHF_ALLOC | ELF::SHF_WRITE;
+  } else if (Section == "_INITIALIZER") {
+    Flags = ELF::SHF_ALLOC;
+  }
+  getStreamer().switchSection(getContext().getELFSection(Section, Type, Flags));
 
   return ParseStatus::Success;
 }
