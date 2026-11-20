@@ -243,6 +243,8 @@ private:
 
   ParseStatus parseDirective(AsmToken DirectiveID) override;
 
+  bool parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) override;
+
   bool parseDataExpr(const MCExpr *&Res) override;
 
   void onLabelParsed(MCSymbol *Symbol) override;
@@ -403,6 +405,23 @@ bool Z80AsmParser::parseExpression(const MCExpr *&Expr) {
   if (getParser().parseExpression(Expr))
     return true;
   Expr = selectByte(Expr, getContext());
+  return false;
+}
+
+// sdasz80 <x and >x take the low and high byte of the next term.
+// For example, ld a,#>(_tbl+1) loads the high byte of _tbl+1.
+bool Z80AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
+  if (!isParsingSDAS() ||
+      (getLexer().isNot(AsmToken::Less) && getLexer().isNot(AsmToken::Greater)))
+    return Parser.parsePrimaryExpr(Res, EndLoc, nullptr);
+  Z80MCExpr::VariantKind Kind = getLexer().is(AsmToken::Less)
+                                    ? Z80MCExpr::VK_ADDR16_LO
+                                    : Z80MCExpr::VK_ADDR16_HI;
+  Parser.Lex(); // Eat '<' or '>'.
+  const MCExpr *Term;
+  if (parsePrimaryExpr(Term, EndLoc))
+    return true;
+  Res = Z80MCExpr::create(Kind, Term, getContext());
   return false;
 }
 
