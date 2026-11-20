@@ -193,6 +193,11 @@ protected:
   /// still be lexed as a comment.
   bool AllowDollarAtStartOfIdentifier = false;
 
+  /// This is true if the assembler allows GNU dollar local labels, such as 1$.
+  /// A dollar local label goes out of scope at the next non-temporary label.
+  /// Defaults to false.
+  bool AllowDollarLocalLabels = false;
+
   /// This is true if the assembler allows the "@" character at the start of
   /// a string to be lexed as an AsmToken::Identifier.
   /// If the AsmLexer determines that the string can be lexed as a possible
@@ -594,6 +599,7 @@ public:
   bool doesAllowDollarAtStartOfIdentifier() const {
     return AllowDollarAtStartOfIdentifier;
   }
+  bool doesAllowDollarLocalLabels() const { return AllowDollarLocalLabels; }
   bool supportsNameQuoting() const { return SupportsQuotedNames; }
 
   bool doesSupportDataRegionDirectives() const {

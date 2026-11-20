@@ -13,6 +13,7 @@
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallString.h"
@@ -164,6 +165,13 @@ private:
   /// List of forward directional labels for diagnosis at the end.
   SmallVector<std::tuple<SMLoc, CppHashInfoTy, MCSymbol *>, 4> DirLabels;
 
+  /// List of dollar local label references for diagnosis at the end.
+  SmallVector<std::tuple<SMLoc, CppHashInfoTy, MCSymbol *>, 4> DollarLabels;
+
+  /// Map from the number of a dollar local label in the current scope to the
+  /// label symbol.
+  DenseMap<uint64_t, MCSymbol *> DollarLabelSymbols;
+
   SmallSet<StringRef, 2> LTODiscardSymbols;
 
   /// AssemblerDialect. ~OU means unset value and use value provided by MAI.
@@ -279,6 +287,9 @@ public:
 private:
   bool parseCurlyBlockScope(SmallVectorImpl<AsmRewrite>& AsmStrRewrites);
   bool parseCppHashLineFilenameComment(SMLoc L, bool SaveLocInfo = true);
+
+  bool isDollarLabelSuffix(StringRef Digits);
+  MCSymbol *getDollarLabelSymbol(uint64_t N);
 
   void checkForBadMacro(SMLoc DirectiveLoc, StringRef Name, StringRef Body,
                         ArrayRef<MCAsmMacroParameter> Parameters);
@@ -1064,6 +1075,12 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
       }
     }
   }
+  for (std::tuple<SMLoc, CppHashInfoTy, MCSymbol *> &LocSym : DollarLabels) {
+    if (std::get<2>(LocSym)->isUndefined()) {
+      CppHashInfo = std::get<1>(LocSym);
+      printError(std::get<0>(LocSym), "dollar local label undefined");
+    }
+  }
   // Finalize the output stream if there are no errors and if the client wants
   // us to.
   if (!HadError && !NoFinalize) {
@@ -1140,6 +1157,23 @@ bool AsmParser::parseBracketExpr(const MCExpr *&Res, SMLoc &EndLoc) {
   if (parseToken(AsmToken::RBrac, "expected ']' in brackets expression"))
     return true;
   return false;
+}
+
+/// Return true if the current token is a '$' right after the integer Digits.
+bool AsmParser::isDollarLabelSuffix(StringRef Digits) {
+  const AsmToken &Tok = getTok();
+  return MAI.doesAllowDollarLocalLabels() && all_of(Digits, isDigit) &&
+         Tok.getLoc().getPointer() == Digits.end() &&
+         (Tok.is(AsmToken::Dollar) ||
+          (Tok.is(AsmToken::Identifier) && Tok.getString() == "$"));
+}
+
+/// Return the symbol of the dollar local label N$ in the current scope.
+MCSymbol *AsmParser::getDollarLabelSymbol(uint64_t N) {
+  MCSymbol *&Sym = DollarLabelSymbols[N];
+  if (!Sym)
+    Sym = Ctx.createNamedTempSymbol();
+  return Sym;
 }
 
 /// Parse a primary expression and return it.
@@ -1266,10 +1300,20 @@ bool AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc,
     return TokError("literal value out of range for directive");
   case AsmToken::Integer: {
     SMLoc Loc = getTok().getLoc();
+    StringRef Digits = getTok().getString();
     int64_t IntVal = getTok().getIntVal();
     Res = MCConstantExpr::create(IntVal, getContext());
     EndLoc = Lexer.getTok().getEndLoc();
     Lex(); // Eat token.
+    // Look for '$' following an Integer as a dollar local label
+    if (isDollarLabelSuffix(Digits)) {
+      MCSymbol *Sym = getDollarLabelSymbol(IntVal);
+      Res = MCSymbolRefExpr::create(Sym, getContext(), Loc);
+      DollarLabels.push_back(std::make_tuple(Loc, CppHashInfo, Sym));
+      EndLoc = Lexer.getTok().getEndLoc();
+      Lex(); // Eat '$'.
+      return false;
+    }
     // Look for 'b' or 'f' following an Integer as a directional label
     if (Lexer.getKind() == AsmToken::Identifier) {
       StringRef IDVal = getTok().getString();
@@ -1751,6 +1795,7 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
   SMLoc IDLoc = ID.getLoc();
   StringRef IDVal;
   int64_t LocalLabelVal = -1;
+  bool IsDollarLabel = false;
   StartTokLoc = ID.getLoc();
   if (Lexer.is(AsmToken::HashDirective))
     return parseCppHashLineFilenameComment(IDLoc,
@@ -1768,6 +1813,10 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
     } else {
       IDVal = getTok().getString();
       Lex(); // Consume the integer token to be used as an identifier token.
+      if (isDollarLabelSuffix(IDVal)) {
+        Lex(); // Consume the '$'.
+        IsDollarLabel = true;
+      }
       if (Lexer.getKind() != AsmToken::Colon) {
         if (!TheCondState.Ignore) {
           Lex(); // always eat a token
@@ -1862,7 +1911,9 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
     // FIXME: This doesn't diagnose assignment to a symbol which has been
     // implicitly marked as external.
     MCSymbol *Sym;
-    if (LocalLabelVal == -1) {
+    if (IsDollarLabel) {
+      Sym = getDollarLabelSymbol(LocalLabelVal);
+    } else if (LocalLabelVal == -1) {
       if (ParsingMSInlineAsm && SI) {
         StringRef RewrittenLabel =
             SI->LookupInlineAsmLabel(IDVal, getSourceManager(), IDLoc, true);
@@ -1873,6 +1924,9 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
         IDVal = RewrittenLabel;
       }
       Sym = getContext().parseSymbol(IDVal);
+      // A non-temporary label starts a new scope of dollar local labels.
+      if (MAI.doesAllowDollarLocalLabels() && !Sym->isTemporary())
+        DollarLabelSymbols.clear();
     } else
       Sym = Ctx.createDirectionalLocalSymbol(LocalLabelVal);
     // End of Labels should be treated as end of line for lexing

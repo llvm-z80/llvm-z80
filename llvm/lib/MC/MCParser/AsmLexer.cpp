@@ -624,9 +624,10 @@ AsmToken AsmLexer::LexDigit() {
     return intToken(StringRef(TokStart, CurPtr - TokStart), Result);
   }
 
-  // Either octal or hexadecimal.
+  // Either octal (decimal for SDAS) or hexadecimal.
   APInt Value(128, 0, true);
-  unsigned Radix = doHexLookAhead(CurPtr, 8, LexMasmIntegers);
+  unsigned Radix =
+      doHexLookAhead(CurPtr, LexSDASIntegers ? 10 : 8, LexMasmIntegers);
   StringRef Result(TokStart, CurPtr - TokStart);
   if (Result.getAsInteger(Radix, Value))
     return ReturnError(TokStart, "invalid " + radixName(Radix) + " number");

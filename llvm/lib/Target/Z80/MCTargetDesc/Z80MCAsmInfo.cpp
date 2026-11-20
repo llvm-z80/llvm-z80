@@ -60,6 +60,7 @@ Z80MCAsmInfoSDCC::Z80MCAsmInfoSDCC(const Triple &TT,
   IsSDCC = true;
   SupportsQuotedNames = false;
   AllowDollarAtStartOfIdentifier = true;
+  AllowDollarLocalLabels = true;
 
   // Suppress ELF-specific directives
   HasDotTypeDotSizeDirective = false;
