@@ -470,6 +470,20 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
   SMLoc LParenLoc = Parser.getTok().getLoc();
   Parser.Lex(); // Eat '('
 
+  // Read the sdasgb (hli) and (hld) as (hl+) and (hl-).
+  StringRef Name = Parser.getTok().getString();
+  if (isParsingSDAS() && getSTI().hasFeature(Z80::FeatureSM83) &&
+      Parser.getTok().is(AsmToken::Identifier) &&
+      (Name.equals_insensitive("hli") || Name.equals_insensitive("hld")) &&
+      getLexer().peekTok().is(AsmToken::RParen)) {
+    bool IsPlus = Name.equals_insensitive("hli");
+    Parser.Lex(); // Eat hli or hld
+    Parser.Lex(); // Eat ')'
+    Operands.push_back(
+        Z80Operand::CreateToken(IsPlus ? "(hl+)" : "(hl-)", LParenLoc));
+    return false;
+  }
+
   // Skip the '#' before an sdasz80 address (ld (#_x),a).
   if (isParsingSDAS() && Parser.getTok().is(AsmToken::Hash))
     Parser.Lex();
