@@ -4,14 +4,11 @@ set(LLVM_TARGET_DEFINITIONS Z80.td)
 
 tablegen(LLVM Z80GenAsmMatcher.inc -gen-asm-matcher)
 tablegen(LLVM Z80GenAsmWriter.inc -gen-asm-writer)
-tablegen(LLVM Z80GenCallingConv.inc -gen-callingconv)
-tablegen(LLVM Z80GenDAGISel.inc -gen-dag-isel)
 tablegen(LLVM Z80GenDisassemblerTables.inc -gen-disassembler)
 tablegen(LLVM Z80GenPreLegalizeGICombiner.inc -gen-global-isel-combiner
               -combiners="Z80PreLegalizerCombiner")
 tablegen(LLVM Z80GenPostLegalizeGICombiner.inc -gen-global-isel-combiner
               -combiners="Z80PostLegalizerCombiner")
-tablegen(LLVM Z80GenGlobalISel.inc -gen-global-isel)
 tablegen(LLVM Z80GenInstrInfo.inc -gen-instr-info)
 tablegen(LLVM Z80GenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM Z80GenMCPseudoLowering.inc -gen-pseudo-lowering)
@@ -27,7 +24,6 @@ add_llvm_target(Z80CodeGen
   Z80AsmPrinter.cpp
   Z80BranchCleanup.cpp
   Z80CallLowering.cpp
-  Z80CallingConv.cpp
   Z80CheckUnsupported.cpp
   Z80PreLegalizerCombiner.cpp
   Z80PostLegalizerCombiner.cpp

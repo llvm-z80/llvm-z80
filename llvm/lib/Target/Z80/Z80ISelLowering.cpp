@@ -70,11 +70,6 @@ Z80TargetLowering::Z80TargetLowering(const Z80TargetMachine &TM,
   // costs hundreds of bytes on interpreter-style dense switches.
   if (STI.isSM83())
     setMinimumJumpTableEntries(8);
-
-  // Z80 has no conditional move instruction, so SELECT is always expanded
-  // to a branch sequence. Prefer branches over selects since they avoid
-  // computing both sides of the conditional.
-  PredictableSelectIsExpensive = true;
 }
 
 const char *Z80TargetLowering::getRequiredLibcallName(RTLIB::Libcall LC,
@@ -216,18 +211,3 @@ bool Z80TargetLowering::isTruncateFree(LLT FromTy, LLT ToTy,
          FromTy.getSizeInBits() > ToTy.getSizeInBits();
 }
 
-bool Z80TargetLowering::isZExtFree(Type *FromTy, Type *ToTy) const {
-  return false; // Zero extension requires explicit operations
-}
-
-bool Z80TargetLowering::isZExtFree(LLT FromTy, LLT ToTy,
-                                   LLVMContext &Ctx) const {
-  return false;
-}
-
-MachineBasicBlock *
-Z80TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
-                                               MachineBasicBlock *MBB) const {
-  // TODO: Implement custom instruction insertion
-  llvm_unreachable("EmitInstrWithCustomInserter not implemented for Z80");
-}

@@ -33,7 +33,6 @@ public:
                    std::optional<CodeModel::Model> CM, CodeGenOptLevel OL,
                    bool JIT);
 
-  const Z80Subtarget *getSubtargetImpl() const { return &SubTarget; }
   const Z80Subtarget *getSubtargetImpl(const Function &F) const override;
 
   TargetLoweringObjectFile *getObjFileLowering() const override {
@@ -45,10 +44,6 @@ public:
   void registerPassBuilderCallbacks(PassBuilder &) override;
 
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
-
-  // The Z80 has only register-related scheduling concerns, so disable PostRA
-  // scheduling by claiming to emit it ourselves, then never doing so.
-  bool targetSchedulesPostRAScheduling() const override { return true; };
 
   // Whether the static frame machinery is active in this compilation. Both
   // the pass pipeline and frame lowering consult this one gate, so a

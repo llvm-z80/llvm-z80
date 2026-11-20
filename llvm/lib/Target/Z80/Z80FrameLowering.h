@@ -35,9 +35,6 @@ public:
                               MutableArrayRef<CalleeSavedInfo> CSI,
                               const TargetRegisterInfo *TRI) const override;
 
-  void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
-                            RegScavenger *RS) const override;
-
   MachineBasicBlock::iterator
   eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator MI) const override;

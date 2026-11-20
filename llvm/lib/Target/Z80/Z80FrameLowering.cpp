@@ -463,16 +463,6 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
   }
 }
 
-void Z80FrameLowering::determineCalleeSaves(MachineFunction &MF,
-                                            BitVector &SavedRegs,
-                                            RegScavenger *RS) const {
-  TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
-  // Note: when hasFP(MF), IX is reserved and manually saved/restored in
-  // emitPrologue/emitEpilogue — do NOT add it to SavedRegs here, as that
-  // would cause PEI to insert a redundant PUSH/POP via
-  // spillCalleeSavedRegisters.
-}
-
 bool Z80FrameLowering::spillCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {

@@ -248,33 +248,6 @@ bool Z80RegisterInfo::shouldCoalesce(
   return true;
 }
 
-bool Z80RegisterInfo::saveScavengerRegister(MachineBasicBlock &MBB,
-                                            MachineBasicBlock::iterator I,
-                                            MachineBasicBlock::iterator &UseMI,
-                                            const TargetRegisterClass *RC,
-                                            Register Reg) const {
-  const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
-  DebugLoc DL;
-
-  // Z80 can only PUSH/POP 16-bit register pairs.
-  // For 8-bit registers, save the containing pair.
-  MCRegister Pair;
-  if (Reg == Z80::BC || Reg == Z80::B || Reg == Z80::C)
-    Pair = Z80::BC;
-  else if (Reg == Z80::DE || Reg == Z80::D || Reg == Z80::E)
-    Pair = Z80::DE;
-  else if (Reg == Z80::HL || Reg == Z80::H || Reg == Z80::L)
-    Pair = Z80::HL;
-  else if (Reg == Z80::AF || Reg == Z80::A)
-    Pair = Z80::AF;
-  else
-    return false;
-
-  Z80::emitPairSavePush(MBB, I, DL, TII, Pair);
-  BuildMI(MBB, std::next(UseMI), DL, TII.get(Z80::getPopOpcode(Pair)));
-  return true;
-}
-
 //===----------------------------------------------------------------------===//
 // F liveness helper
 //===----------------------------------------------------------------------===//
@@ -1087,44 +1060,6 @@ static bool rewriteStaticSlotAccess(MachineBasicBlock::iterator MI,
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
     break;
   }
-
-  case Z80::ADD_HL_FI:
-  case Z80::SUB_HL_FI: {
-    Register TempReg = !isRegLiveAt(Z80::BC, MBB, NextIt, TRI)   ? Z80::BC
-                       : !isRegLiveAt(Z80::DE, MBB, NextIt, TRI) ? Z80::DE
-                                                                 : Z80::BC;
-    bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, TRI);
-    if (NeedSaveTemp)
-      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
-
-    if (!IsSM83) {
-      AddSlot(BuildMI(
-          MBB, MI, DL,
-          TII.get(TempReg == Z80::BC ? Z80::LD_BC_nnind : Z80::LD_DE_nnind)));
-    } else {
-      // The slot is read through a pointer, and HL holds the accumulated
-      // value, so park it on the stack around the reload.
-      emitHLSavePush(MBB, MI, DL, TII);
-      LoadSlotAddr();
-      Register TempLo = TempReg == Z80::BC ? Z80::C : Z80::E;
-      Register TempHi = TempReg == Z80::BC ? Z80::B : Z80::D;
-      Z80::buildLoadHL(MBB, MI, DL, TII, TempLo);
-      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
-      Z80::buildLoadHL(MBB, MI, DL, TII, TempHi);
-      BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
-    }
-
-    if (Opc == Z80::ADD_HL_FI) {
-      Z80::buildAddHL(MBB, MI, DL, TII, TempReg);
-    } else {
-      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, TII, Z80::AND_r, Z80::A),
-                        Z80::A);
-      Z80::buildAdcSbcHL(MBB, MI, DL, TII, Z80::SBC_HL_rr, TempReg);
-    }
-    if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
-    break;
-  }
   }
 
   MI->eraseFromParent();
@@ -1155,7 +1090,7 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   Z80::collectEmptyReadBytes(MBB, MI, this, EmptyBytes);
   Z80::collectUndefReads(*MI, this, EmptyBytes);
 
-  bool Res = eliminateFrameIndexImpl(MI, SPAdj, FIOperandNum, RS);
+  bool Res = eliminateFrameIndexImpl(MI, SPAdj, FIOperandNum);
 
   MachineBasicBlock::iterator Begin = AtStart ? MBB.begin() : std::next(Prev);
   Z80::markEmptyReads(Begin, Next, this, EmptyBytes);
@@ -1170,13 +1105,8 @@ bool Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
 }
 
 bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
-                                              int SPAdj, unsigned FIOperandNum,
-                                              RegScavenger *RS) const {
-  // RS is unused — we use isRegLiveAt() for accurate liveness checks
-  // instead of RegScavenger, which is unreliable with forward frame index
-  // elimination (eliminateFrameIndicesBackwards=false).
-  (void)RS;
-
+                                              int SPAdj,
+                                              unsigned FIOperandNum) const {
   MachineFunction &MF = *MI->getMF();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   const TargetFrameLowering *TFI = getFrameLowering(MF);
@@ -1273,9 +1203,6 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
         } else if (DstReg == Z80::BC) {
           Z80::buildLD8(MBB, MI, DL, TII, Z80::B, Z80::H);
           Z80::buildLD8(MBB, MI, DL, TII, Z80::C, Z80::L);
-        } else if (DstReg == Z80::IX) {
-          BuildMI(MBB, MI, DL, TII.get(Z80::PUSH_HL));
-          BuildMI(MBB, MI, DL, TII.get(Z80::POP_IX));
         } else {
           llvm_unreachable("Unexpected register for LEA_IX_FI");
         }
@@ -1411,23 +1338,8 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       return false;
     }
 
-    // SP-relative mode: unfold ADD_HL_FI/SUB_HL_FI back to RELOAD + op.
-    //
-    // Without a frame pointer, IX+d addressing is unavailable, so we cannot
-    // expand to the 8-bit IX-indexed ALU sequence.  Instead we unfold back
-    // to the equivalent of RELOAD_GR16 + ADD_HL_rr / SUB_HL_rr:
-    //
-    //   [PUSH TempReg]          ; save if TempReg is live
-    //   PUSH HL                 ; save running sum (HL is clobbered by reload)
-    //   <reload SP-relative>    ; load stack variable into TempReg
-    //   POP HL                  ; restore running sum
-    //   ADD HL, TempReg         ; (or AND A / SBC HL, TempReg for SUB)
-    //   [POP TempReg]           ; restore if was saved
-    //
-    // The PUSH/POP of HL shifts SP, so Offset is adjusted by SPAdj to
-    // compensate for the extra stack entries between SP and the target slot.
-    // Without a frame pointer there is no IX+d to fold into, so unfold back
-    // to the reload and the register form the selection replaced.
+    // Without a frame pointer there is no IX+d to fold into. So unfold back
+    // to the reload and the register ALU that spill folding replaced.
     if (Opc == Z80::ALU_Ac_FI) {
       unsigned Op = Z80::getAluFIOp(*MI);
       auto NextIt = std::next(MI);
@@ -1453,38 +1365,6 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       return false;
     }
 
-    if (Opc == Z80::ADD_HL_FI || Opc == Z80::SUB_HL_FI) {
-      auto NextIt = std::next(MI);
-      Register TempReg = !isRegLiveAt(Z80::BC, MBB, NextIt, this)   ? Z80::BC
-                         : !isRegLiveAt(Z80::DE, MBB, NextIt, this) ? Z80::DE
-                                                                    : Z80::BC;
-      bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
-
-      if (NeedSaveTemp)
-        Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
-      emitHLSavePush(MBB, MI, DL, TII);
-
-      int SPAdj = 2 + (NeedSaveTemp ? 2 : 0);
-      expandReloadGR16SPRelative(false, MBB, MI, DL, TII, TempReg,
-                                 Offset + SPAdj, this);
-
-      BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
-
-      if (Opc == Z80::ADD_HL_FI) {
-        Z80::buildAddHL(MBB, MI, DL, TII, TempReg);
-      } else {
-        Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, TII, Z80::AND_r, Z80::A),
-                          Z80::A);
-        Z80::buildAdcSbcHL(MBB, MI, DL, TII, Z80::SBC_HL_rr, TempReg);
-      }
-
-      if (NeedSaveTemp)
-        BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
-
-      MI->eraseFromParent();
-      return false;
-    }
-
     llvm_unreachable("Unexpected frame index instruction in SP-relative mode");
   }
 
@@ -1494,8 +1374,7 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
   // For 16-bit SPILL/RELOAD, both Offset and Offset+1 must fit.
   bool Is16BitFI = (Opc == Z80::SPILL_GR16 || Opc == Z80::RELOAD_GR16 ||
                     Opc == Z80::SPILL_ANY16 || Opc == Z80::RELOAD_ANY16 ||
-                    Opc == Z80::SPILL_IMM16 || Opc == Z80::ADD_HL_FI ||
-                    Opc == Z80::SUB_HL_FI);
+                    Opc == Z80::SPILL_IMM16);
   int64_t MaxOffset = Is16BitFI ? Offset + 1 : Offset;
 
   if (Offset >= -128 && MaxOffset <= 127) {
@@ -1504,38 +1383,6 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       BuildMI(MBB, MI, DL, TII.get(Z80::getAluIXdOpcode(Op)))
           .addImm(Offset)
           .cloneMemRefs(*MI);
-      MI->eraseFromParent();
-      return false;
-    }
-
-    // Expand ADD_HL_FI/SUB_HL_FI to 8-bit IX-indexed ALU sequence (10 bytes).
-    // This is the fast path — the offset fits in IX+d, so we can directly
-    // use ADD A,(IX+d) / ADC A,(IX+d+1) to perform 16-bit addition byte
-    // by byte without allocating a GR16_BCDE register pair.
-    //
-    //   LD A, L              ; 1B  low byte of running sum
-    //   ADD A, (IX+d)        ; 3B  add low byte of stack variable
-    //   LD L, A              ; 1B  store back
-    //   LD A, H              ; 1B  high byte of running sum
-    //   ADC A, (IX+d+1)      ; 3B  add high byte with carry
-    //   LD H, A              ; 1B  store back → HL = sum + variable
-    if (Opc == Z80::ADD_HL_FI) {
-      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Z80::L);
-      BuildMI(MBB, MI, DL, TII.get(Z80::ADD_A_IXd)).addImm(Offset);
-      Z80::buildLD8(MBB, MI, DL, TII, Z80::L, Z80::A);
-      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Z80::H);
-      BuildMI(MBB, MI, DL, TII.get(Z80::ADC_A_IXd)).addImm(Offset + 1);
-      Z80::buildLD8(MBB, MI, DL, TII, Z80::H, Z80::A);
-      MI->eraseFromParent();
-      return false;
-    }
-    if (Opc == Z80::SUB_HL_FI) {
-      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Z80::L);
-      BuildMI(MBB, MI, DL, TII.get(Z80::SUB_IXd)).addImm(Offset);
-      Z80::buildLD8(MBB, MI, DL, TII, Z80::L, Z80::A);
-      Z80::buildLD8(MBB, MI, DL, TII, Z80::A, Z80::H);
-      BuildMI(MBB, MI, DL, TII.get(Z80::SBC_A_IXd)).addImm(Offset + 1);
-      Z80::buildLD8(MBB, MI, DL, TII, Z80::H, Z80::A);
       MI->eraseFromParent();
       return false;
     }
@@ -1640,76 +1487,6 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
-    MI->eraseFromParent();
-    return false;
-  }
-
-  // Large offset fallback for ADD_HL_FI/SUB_HL_FI.
-  //
-  // When Offset+1 > 127 or Offset < -128, the displacement doesn't fit in
-  // IX+d (signed 8-bit), so we cannot use the 10-byte IX-indexed ALU
-  // expansion.  Instead we unfold back to the equivalent of a full 16-bit
-  // RELOAD + ADD HL,rr, which requires a register pair (TempReg = BC or DE).
-  //
-  // This is strictly worse than not folding at all (~16B vs ~14B for the
-  // unfold), because fold's purpose — avoiding a GR16_BCDE allocation — is
-  // defeated by the unfold.  However, the final offset is unknown at fold
-  // time (ISel/pre-StackColoring), so we cannot prevent folding for large
-  // frames.  This path exists purely as a correctness fallback.
-  //
-  // In practice this is dead code: Z80 stack frames rarely exceed 127 bytes.
-  //
-  // Sequence (ADD_HL_FI, TempReg = BC):
-  //   [PUSH BC]             ; save if BC is live
-  //   PUSH HL               ; save running sum
-  //   PUSH IX / POP HL      ;   HL = IX (frame pointer)
-  //   LD BC, #Offset        ;   BC = large offset
-  //   ADD HL, BC            ;   HL = IX + Offset = &variable
-  //   LD C, (HL)            ;   load low byte
-  //   INC HL
-  //   LD B, (HL)            ;   load high byte → BC = variable value
-  //   POP HL                ; restore running sum
-  //   ADD HL, BC            ; HL += variable
-  //   [POP BC]              ; restore if was saved
-  if (Opc == Z80::ADD_HL_FI || Opc == Z80::SUB_HL_FI) {
-    bool PreserveFlags = isFlagsLiveAfter(MI, this);
-    auto NextIt = std::next(MI);
-    Register TempReg = !isRegLiveAt(Z80::BC, MBB, NextIt, this)   ? Z80::BC
-                       : !isRegLiveAt(Z80::DE, MBB, NextIt, this) ? Z80::DE
-                                                                  : Z80::BC;
-    bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, this);
-
-    if (NeedSaveTemp)
-      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
-
-    // Save HL (the value to add/sub to).
-    emitHLSavePush(MBB, MI, DL, TII);
-
-    // Compute address: HL = IX + Offset (clobbers HL)
-    emitLargeOffsetAddr(MBB, MI, DL, TII, Offset, TempReg, PreserveFlags);
-
-    // Load from (HL) into TempReg
-    Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
-    Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
-    Z80::buildLoadHL(MBB, MI, DL, TII, TempLo);
-    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
-    Z80::buildLoadHL(MBB, MI, DL, TII, TempHi);
-
-    // Restore HL.
-    BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
-
-    // Perform the 16-bit operation.
-    if (Opc == Z80::ADD_HL_FI) {
-      Z80::buildAddHL(MBB, MI, DL, TII, TempReg);
-    } else {
-      Z80::markUndefUse(Z80::buildAlu8(MBB, MI, DL, TII, Z80::AND_r, Z80::A),
-                        Z80::A);
-      Z80::buildAdcSbcHL(MBB, MI, DL, TII, Z80::SBC_HL_rr, TempReg);
-    }
-
-    if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
-
     MI->eraseFromParent();
     return false;
   }

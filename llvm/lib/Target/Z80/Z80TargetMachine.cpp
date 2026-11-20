@@ -200,7 +200,6 @@ public:
   }
 
   void addIRPasses() override;
-  bool addPreISel() override;
   bool addIRTranslator() override;
   void addPreLegalizeMachineIR() override;
   bool addLegalizeMachineIR() override;
@@ -243,8 +242,6 @@ void Z80PassConfig::addIRPasses() {
     addPass(createZ80NarrowMemAccessPass());
   }
 }
-
-bool Z80PassConfig::addPreISel() { return false; }
 
 bool Z80PassConfig::addIRTranslator() {
   addPass(new IRTranslatorLegacy(getOptLevel()));
@@ -301,10 +298,6 @@ void Z80PassConfig::addOptimizedRegAlloc() {
     // Run the coalescer twice to coalesce RMW patterns revealed by the first
     // coalesce.
     insertPass(&llvm::TwoAddressInstructionPassID, &llvm::RegisterCoalescerID);
-
-    // Re-run Live Intervals after coalescing to renumber the contained values.
-    // This can allow constant rematerialization after aggressive coalescing.
-    insertPass(&llvm::MachineSchedulerID, &llvm::LiveIntervalsID);
   }
   TargetPassConfig::addOptimizedRegAlloc();
 }
@@ -327,10 +320,6 @@ bool Z80PassConfig::addRegAssignAndRewriteOptimized() {
 }
 
 void Z80PassConfig::addPreSched2() {
-  // Lower control flow pseudos.
-  addPass(&FinalizeISelID);
-  // Lower pseudos produced by control flow pseudos.
-  addPass(&ExpandPostRAPseudosID);
   // Copy lowering leaves the halves of a pair copy declared on the wrong one
   // of the two byte moves. See Z80FixupImplicitDefs.cpp.
   addPass(createZ80FixupImplicitDefsPass());

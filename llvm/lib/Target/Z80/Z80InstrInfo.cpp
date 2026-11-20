@@ -96,11 +96,6 @@ static std::pair<Register, Register> getSubRegs16(Register Reg) {
   }
 }
 
-// Get PUSH opcode for a 16-bit register
-static unsigned getPUSHOpcode(Register Reg) { return Z80::getPushOpcode(Reg); }
-
-static unsigned getPOPOpcode(Register Reg) { return Z80::getPopOpcode(Reg); }
-
 std::optional<DestSourcePair>
 Z80InstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
   // A copy carrying anything beyond these two operands is not offered. Half
@@ -186,8 +181,8 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
        Z80::IR16RegClass.contains(DestReg)) &&
       (Z80::GR16RegClass.contains(SrcReg) ||
        Z80::IR16RegClass.contains(SrcReg))) {
-    unsigned PushOp = getPUSHOpcode(SrcReg);
-    unsigned PopOp = getPOPOpcode(DestReg);
+    unsigned PushOp = Z80::getPushOpcode(SrcReg);
+    unsigned PopOp = Z80::getPopOpcode(DestReg);
     if (PushOp && PopOp) {
       BuildMI(MBB, I, DL, get(PushOp));
       BuildMI(MBB, I, DL, get(PopOp));
@@ -1526,7 +1521,7 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
       Z80::buildAdcSbcHL(MBB, MI, DL, *this,
                          IsSub ? Z80::SBC_HL_rr : Z80::ADC_HL_rr, RHS);
       BuildMI(MBB, MI, DL, get(Z80::PUSH_AF));
-      BuildMI(MBB, MI, DL, get(getPOPOpcode(Tmp)));
+      BuildMI(MBB, MI, DL, get(Z80::getPopOpcode(Tmp)));
       Z80::buildLD8(MBB, MI, DL, *this, Z80::A, TmpLo);
       BuildMI(MBB, MI, DL, get(Z80::RRCA));
       BuildMI(MBB, MI, DL, get(Z80::RRCA));
@@ -1993,14 +1988,6 @@ bool Z80InstrInfo::shouldHoist(const MachineInstr &MI,
 unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
 
-  // ADD_HL_FI / SUB_HL_FI are expanded during eliminateFrameIndex (PEI),
-  // which runs before BranchRelaxation. By the time branch distances matter,
-  // these pseudos no longer exist. Return the FP-mode size (10B) as a
-  // reasonable estimate for any pre-PEI pass that queries instruction size.
-  // SP-relative mode expands to ~16B but is uncommon.
-  if (Opcode == Z80::ADD_HL_FI || Opcode == Z80::SUB_HL_FI)
-    return 10;
-
   // Inline-runtime pseudos expand to multiple MBBs after BranchRelaxation.
   // Report exact expanded sizes so BranchRelaxation can make precise decisions.
   // SM83 expansions are larger due to lacking ADC HL,HL / SBC HL,DE / EX DE,HL
@@ -2060,127 +2047,7 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     // clang-format on
   }
 
-  // Handle pseudo-instructions that have no encoding
-  if (MI.isDebugInstr() || MI.isLabel() || MI.isPseudo())
-    return 0;
-
-  // COPY is a pseudo that gets eliminated
-  if (Opcode == TargetOpcode::COPY)
-    return 0;
-
-  // PHI nodes get eliminated
-  if (Opcode == TargetOpcode::PHI)
-    return 0;
-
-  // Get the MCInstrDesc for size info
-  const MCInstrDesc &Desc = MI.getDesc();
-
-  // If the instruction has a fixed size from TableGen, use it
-  unsigned Size = Desc.getSize();
-  if (Size != 0)
-    return Size;
-
-  // Default sizes for Z80 instructions
-  switch (Opcode) {
-  // Single-byte instructions (most 8-bit ops, register-to-register)
-  case Z80::NOP:
-  case Z80::HALT:
-  case Z80::RET:
-  case Z80::LD_r_r:
-  case Z80::LD_r_HLind:
-  case Z80::LD_HLind_r:
-  case Z80::ADD_A_r:
-  case Z80::SUB_r:
-  case Z80::AND_r:
-  case Z80::OR_r:
-  case Z80::XOR_r:
-  case Z80::CP_r:
-  case Z80::INC_r:
-  case Z80::DEC_r:
-  case Z80::INC_rr:
-  case Z80::INC_SP:
-  case Z80::DEC_rr:
-  case Z80::DEC_SP:
-  case Z80::ADD_HL_rr:
-  case Z80::ADD_HL_HL:
-  case Z80::ADD_HL_SP:
-  case Z80::PUSH_AF:
-  case Z80::PUSH_BC:
-  case Z80::PUSH_DE:
-  case Z80::PUSH_HL:
-  case Z80::POP_AF:
-  case Z80::POP_BC:
-  case Z80::POP_DE:
-  case Z80::POP_HL:
-  case Z80::RLCA:
-  case Z80::RRCA:
-  case Z80::RLA:
-  case Z80::RRA:
-  case Z80::SCF:
-  case Z80::CCF:
-  case Z80::ADC_A_r:
-  case Z80::SBC_A_r:
-    return 1;
-
-  // Two-byte instructions (with immediate or CB prefix)
-  case Z80::LD_r_n:
-  case Z80::ADD_A_n:
-  case Z80::SUB_n:
-  case Z80::AND_n:
-  case Z80::OR_n:
-  case Z80::XOR_n:
-  case Z80::CP_n:
-  case Z80::SLA_r:
-  case Z80::SRA_r:
-  case Z80::SRL_r:
-  case Z80::SBC_HL_rr:
-  case Z80::SBC_HL_SP:
-  case Z80::ADC_HL_rr:
-  case Z80::ADC_HL_SP:
-  case Z80::PUSH_IX:
-  case Z80::PUSH_IY:
-  case Z80::POP_IX:
-  case Z80::POP_IY:
-    return 2;
-
-  // Three-byte instructions (JP nn, CALL nn, LD rr,nn)
-  // Also SUB_HL_xx pseudos (AND A=1 + SBC HL,xx=2 = 3 bytes)
-  case Z80::JP_nn:
-  case Z80::JP_Z_nn:
-  case Z80::JP_NZ_nn:
-  case Z80::JP_C_nn:
-  case Z80::JP_NC_nn:
-  case Z80::CALL_nn:
-  case Z80::LD_rr_nn:
-  case Z80::LD_SP_nn:
-  case Z80::SUB_HL_rr: // AND A(1) + SBC HL,rr(2) = 3
-    return 3;
-
-  case Z80::CMP16_FLAGS: // LD A,lo(1) + SUB lo(1) + LD A,hi(1) + SBC A,hi(1) =
-                         // 4
-  case Z80::CMP16_SBC_FLAGS: // LD A,lo(1) + SBC A,lo(1) + LD A,hi(1) + SBC
-                             // A,hi(1) = 4
-    return 4;
-
-  case Z80::LOAD8_IND:  // LD A,(rr) = 1
-  case Z80::STORE8_IND: // LD (rr),A = 1
-    return 1;
-
-  // Z80: AND A(1) + ADC/SBC HL,rr(2) + PUSH(1) + POP(1) + LD(1) + RRCA x2(2) +
-  // AND n(2) = 10. SM83: 13 x 1-byte + AND n(2) = 15.
-  case Z80::SADDO16:
-  case Z80::SSUBO16:
-    return STI->isSM83() ? 15 : 10;
-
-  // Four-byte instructions (IX/IY indexed)
-  case Z80::LD_IX_nn:
-  case Z80::LD_IY_nn:
-    return 4;
-
-  default:
-    // For unknown instructions, return a safe default
-    return 3;
-  }
+  return MI.getDesc().getSize();
 }
 
 bool Z80InstrInfo::isBranchOffsetInRange(unsigned BranchOpc,

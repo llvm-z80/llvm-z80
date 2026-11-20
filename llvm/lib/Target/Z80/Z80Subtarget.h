@@ -71,13 +71,10 @@ public:
 
   bool enableSubRegLiveness() const override { return true; }
 
-  bool useAA() const override { return true; }
-
 #define GET_SUBTARGETINFO_MACRO(ATTRIBUTE, DEFAULT, GETTER)                    \
   bool GETTER() const { return ATTRIBUTE; }
 #include "Z80GenSubtargetInfo.inc"
 
-  Z80ProcFamilyEnum getProcFamily() const { return Z80ProcFamily; }
   bool isZ80() const { return Z80ProcFamily == Z80ProcFamilyEnum::Z80; }
   bool isSM83() const { return Z80ProcFamily == Z80ProcFamilyEnum::SM83; }
 
