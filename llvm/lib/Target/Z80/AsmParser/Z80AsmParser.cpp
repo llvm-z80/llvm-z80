@@ -32,6 +32,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCParser/AsmLexer.h"
+#include "llvm/MC/MCParser/MCAsmParserUtils.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
 #include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/MC/MCSectionELF.h"
@@ -104,8 +105,9 @@ public:
     if (!isImm())
       return DiagnosticPredicate::NoMatch;
     if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return DiagnosticPredicate(CE->getValue() >= -128 &&
-                                 CE->getValue() <= 255);
+      return DiagnosticPredicate(
+          (CE->getValue() >= -256 && CE->getValue() <= 255) ||
+          (CE->getValue() >= 0xFF00 && CE->getValue() <= 0xFFFF));
     return DiagnosticPredicate::Match;
   }
 
@@ -242,7 +244,14 @@ private:
 
   ParseStatus parseDirective(AsmToken DirectiveID) override;
 
+  bool parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) override;
+
   bool parseDataExpr(const MCExpr *&Res) override;
+
+  void onLabelParsed(MCSymbol *Symbol) override;
+
+  bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
+                        AsmToken Token, OperandVector &Operands) override;
 
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
@@ -267,6 +276,9 @@ private:
                            SMLoc DispLoc);
   bool parseExpression(const MCExpr *&Expr);
   void eatComma();
+
+  // Are we parsing the sdasz80 dialect?
+  bool isParsingSDAS() { return getContext().getAsmInfo().isSDCC(); }
 
   /// Get the compound token string for a register indirect like "(hl)".
   /// Returns nullptr if the register doesn't use compound tokens.
@@ -303,9 +315,16 @@ public:
     MCAsmParserExtension::Initialize(Parser);
     // Z80 assemblers count .ds in bytes.
     Parser.addAliasForDirective(".ds", ".skip");
-    // sdasz80 reads 010 as decimal 10.
-    if (getContext().getAsmInfo().isSDCC())
+    if (isParsingSDAS()) {
+      // sdasz80 names for .byte and .short.
+      Parser.addAliasForDirective(".db", ".byte");
+      Parser.addAliasForDirective(".fcb", ".byte");
+      Parser.addAliasForDirective(".dw", ".short");
+      Parser.addAliasForDirective(".word", ".short");
+      Parser.addAliasForDirective(".fdb", ".short");
+      // sdasz80 reads 010 as decimal 10.
       getLexer().setLexSDASIntegers(true);
+    }
     MRI = getContext().getRegisterInfo();
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
@@ -395,8 +414,40 @@ bool Z80AsmParser::parseExpression(const MCExpr *&Expr) {
   return false;
 }
 
+// sdasz80 <x and >x take the low and high byte of the next term.
+// For example, ld a,#>(_tbl+1) loads the high byte of _tbl+1.
+bool Z80AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
+  if (!isParsingSDAS() ||
+      (getLexer().isNot(AsmToken::Less) && getLexer().isNot(AsmToken::Greater)))
+    return Parser.parsePrimaryExpr(Res, EndLoc, nullptr);
+  Z80MCExpr::VariantKind Kind = getLexer().is(AsmToken::Less)
+                                    ? Z80MCExpr::VK_ADDR16_LO
+                                    : Z80MCExpr::VK_ADDR16_HI;
+  Parser.Lex(); // Eat '<' or '>'.
+  const MCExpr *Term;
+  if (parsePrimaryExpr(Term, EndLoc))
+    return true;
+  Res = Z80MCExpr::create(Kind, Term, getContext());
+  return false;
+}
+
 bool Z80AsmParser::parseDataExpr(const MCExpr *&Res) {
+  // Skip the '#' before an sdasz80 data value (.dw #0x1234).
+  if (isParsingSDAS() && getLexer().is(AsmToken::Hash))
+    Parser.Lex();
   return parseExpression(Res);
+}
+
+// A second ':' makes the sdasz80 label global.
+void Z80AsmParser::onLabelParsed(MCSymbol *Symbol) {
+  if (!isParsingSDAS() || getLexer().isNot(AsmToken::Colon))
+    return;
+  SMLoc Loc = getLexer().getLoc();
+  Parser.Lex(); // Eat the second ':'.
+  if (Symbol->isTemporary())
+    Error(Loc, "non-local symbol required");
+  else
+    getStreamer().emitSymbolAttribute(Symbol, MCSA_Global);
 }
 
 // Return true when the ')' matching the leading '(' ends the operand.
@@ -429,8 +480,27 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
   SMLoc LParenLoc = Parser.getTok().getLoc();
   Parser.Lex(); // Eat '('
 
+  // Read the sdasgb (hli) and (hld) as (hl+) and (hl-).
+  StringRef Name = Parser.getTok().getString();
+  if (isParsingSDAS() && getSTI().hasFeature(Z80::FeatureSM83) &&
+      Parser.getTok().is(AsmToken::Identifier) &&
+      (Name.equals_insensitive("hli") || Name.equals_insensitive("hld")) &&
+      getLexer().peekTok().is(AsmToken::RParen)) {
+    bool IsPlus = Name.equals_insensitive("hli");
+    Parser.Lex(); // Eat hli or hld
+    Parser.Lex(); // Eat ')'
+    Operands.push_back(
+        Z80Operand::CreateToken(IsPlus ? "(hl+)" : "(hl-)", LParenLoc));
+    return false;
+  }
+
+  // Skip the '#' before an sdasz80 address (ld (#_x),a).
+  bool IsAddress = isParsingSDAS() && Parser.getTok().is(AsmToken::Hash);
+  if (IsAddress)
+    Parser.Lex();
+
   // Check for register inside parentheses
-  if (Parser.getTok().is(AsmToken::Identifier)) {
+  if (!IsAddress && Parser.getTok().is(AsmToken::Identifier)) {
     MCRegister Reg = tryParseRegisterName();
     if (Reg) {
       SMLoc RegLoc = Parser.getTok().getLoc();
@@ -677,6 +747,24 @@ ParseStatus Z80AsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
   return ParseStatus::Success;
 }
 
+// sdasz80 sym == expr makes sym a global constant.
+bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
+                                    AsmToken Token, OperandVector &Operands) {
+  if (!isParsingSDAS() || getLexer().isNot(AsmToken::EqualEqual))
+    return parseInstruction(Info, Name, Token.getLoc(), Operands);
+  Parser.Lex(); // Eat '=='
+  MCSymbol *Sym = nullptr;
+  const MCExpr *Value;
+  if (MCParserUtils::parseAssignmentExpression(Token.getString(), true, Parser,
+                                               Sym, Value))
+    return true;
+  if (Sym) {
+    getStreamer().emitAssignment(Sym, Value);
+    getStreamer().emitSymbolAttribute(Sym, MCSA_Global);
+  }
+  return false;
+}
+
 bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                     SMLoc NameLoc, OperandVector &Operands) {
   // Add the mnemonic as the first operand
@@ -719,13 +807,16 @@ bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
 }
 
 /// Parse sdasz80 directives that differ from standard GNU as.
-/// Currently handles:
-///   .area _CODE  → .section .text
-///   .area _DATA  → .section .data
-///   .area _BSS   → .section .bss
-///   .area _X     → .section _X
 ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
   StringRef IDVal = DirectiveID.getString();
+  // Skip the sdasz80 module and listing directives.
+  if (isParsingSDAS() &&
+      StringSwitch<bool>(IDVal.lower())
+          .Cases({".module", ".title", ".sbttl", ".optsdcc"}, true)
+          .Default(false)) {
+    Parser.eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
   if (IDVal.lower() != ".area")
     return ParseStatus::NoMatch;
 
@@ -747,18 +838,28 @@ ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
   if (Parser.parseEOL())
     return ParseStatus::Failure;
 
-  // Map sdasz80 area names to ELF sections
-  StringRef Section = StringSwitch<StringRef>(AreaName)
-                          .Cases({"_CODE", "_HOME"}, ".text")
-                          .Cases({"_DATA", "_INITIALIZED"}, ".data")
-                          .Case("_BSS", ".bss")
-                          .Default(AreaName);
+  // In sdas, _DATA and _INITIALIZED have no initial values.
+  // In other environments, these areas have initial values.
+  // So we make both uninitialized for sdcc and map both to .data otherwise.
+  bool IsSDCCEnv = getSTI().getTargetTriple().getEnvironment() == Triple::SDCC;
+  StringRef Section =
+      StringSwitch<StringRef>(AreaName)
+          .Cases({"_CODE", "_HOME"}, ".text")
+          .Cases({"_DATA", "_INITIALIZED"}, IsSDCCEnv ? AreaName : ".data")
+          .Case("_BSS", ".bss")
+          .Default(AreaName);
 
-  getStreamer().switchSection(getContext().getELFSection(
-      Section, Section == ".bss" ? ELF::SHT_NOBITS : ELF::SHT_PROGBITS,
-      Section == ".bss"    ? (ELF::SHF_ALLOC | ELF::SHF_WRITE)
-      : Section == ".data" ? (ELF::SHF_ALLOC | ELF::SHF_WRITE)
-                           : (ELF::SHF_ALLOC | ELF::SHF_EXECINSTR)));
+  unsigned Type = ELF::SHT_PROGBITS;
+  unsigned Flags = ELF::SHF_ALLOC | ELF::SHF_EXECINSTR;
+  if (Section == ".data") {
+    Flags = ELF::SHF_ALLOC | ELF::SHF_WRITE;
+  } else if (is_contained({"_DATA", "_INITIALIZED", ".bss"}, Section)) {
+    Type = ELF::SHT_NOBITS;
+    Flags = ELF::SHF_ALLOC | ELF::SHF_WRITE;
+  } else if (Section == "_INITIALIZER") {
+    Flags = ELF::SHF_ALLOC;
+  }
+  getStreamer().switchSection(getContext().getELFSection(Section, Type, Flags));
 
   return ParseStatus::Success;
 }
@@ -796,6 +897,8 @@ bool Z80AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                            OperandVector &Operands,
                                            MCStreamer &Out, uint64_t &ErrorInfo,
                                            bool MatchingInlineAsm) {
+  if (Operands.empty())
+    return false;
   MCInst Inst;
   unsigned MatchResult =
       MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm);

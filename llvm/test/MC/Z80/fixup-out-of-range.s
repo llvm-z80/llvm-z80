@@ -7,6 +7,9 @@
 ; CHECK: [[#@LINE+1]]:{{[0-9]+}}: error: fixup value out of range
 	in	a, (late_port)
 	ld	hl, late_imm16
+; CHECK: [[#@LINE+1]]:{{[0-9]+}}: error: fixup value out of range
+	ld	a, late_imm8
 
 .equ late_port, 0x1FF
 .equ late_imm16, 0x5678
+.equ late_imm8, -257
