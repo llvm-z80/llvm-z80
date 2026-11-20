@@ -104,8 +104,9 @@ public:
     if (!isImm())
       return DiagnosticPredicate::NoMatch;
     if (const auto *CE = dyn_cast<MCConstantExpr>(ImmVal))
-      return DiagnosticPredicate(CE->getValue() >= -128 &&
-                                 CE->getValue() <= 255);
+      return DiagnosticPredicate(
+          (CE->getValue() >= -256 && CE->getValue() <= 255) ||
+          (CE->getValue() >= 0xFF00 && CE->getValue() <= 0xFFFF));
     return DiagnosticPredicate::Match;
   }
 
