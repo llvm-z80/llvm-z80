@@ -1338,8 +1338,8 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
       return false;
     }
 
-    // Without a frame pointer there is no IX+d to fold into, so unfold back
-    // to the reload and the register form the selection replaced.
+    // Without a frame pointer there is no IX+d to fold into. So unfold back
+    // to the reload and the register ALU that spill folding replaced.
     if (Opc == Z80::ALU_Ac_FI) {
       unsigned Op = Z80::getAluFIOp(*MI);
       auto NextIt = std::next(MI);

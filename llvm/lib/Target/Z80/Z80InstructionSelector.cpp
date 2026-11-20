@@ -894,7 +894,7 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
 
   unsigned Opcode = MI.getOpcode();
 
-  // Helper: extract an 8-bit constant from G_CONSTANT.
+  // Return the value of a G_CONSTANT.
   auto getConst8 = [&](Register Reg) -> std::optional<int64_t> {
     MachineInstr *Def = MRI.getVRegDef(Reg);
     if (Def && Def->getOpcode() == TargetOpcode::G_CONSTANT)

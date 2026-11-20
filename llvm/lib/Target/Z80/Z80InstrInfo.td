@@ -694,10 +694,9 @@ def SPILL_POP : Z80Pseudo<(outs Any16:$dst), (ins)> {
 
 // 8-bit ALU against a frame slot, with the accumulator as an operand as in
 // the register forms. $op says which operation, so one pseudo covers them
-// all. Selection cannot name the addressing mode yet: whether the frame
-// pointer exists and whether the displacement fits are settled in
-// eliminateFrameIndex, which picks IX+d, an address in a pair, or unfolds
-// back to a reload and a register ALU.
+// all. Spill folding creates this pseudo before frame offsets are assigned.
+// So eliminateFrameIndex picks IX+d, an address in a pair, or unfolds back
+// to a reload and a register ALU.
 def ALU_Ac_FI : Z80Pseudo<(outs Ac:$dst),
                           (ins Ac:$lhs, i32imm:$op, i32imm:$fi, i32imm:$offset)> {
   let Constraints = "$dst = $lhs";

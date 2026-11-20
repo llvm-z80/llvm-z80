@@ -1,9 +1,8 @@
 ; RUN: llc -verify-machineinstrs -mtriple=z80 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s
 ;
 ; An 8-bit ALU operation can read its operand out of a frame slot, so a value
-; that is only wanted there never needs a register. Whether the slot is
-; reachable that way is settled after the frame is laid out, so selection
-; leaves the addressing mode open and the expansion picks it.
+; that is only wanted there never needs a register. The pre-emit peephole
+; folds the IX+d load into the ALU operation.
 
 declare void @sink(ptr)
 
