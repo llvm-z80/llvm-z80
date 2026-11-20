@@ -17,4 +17,7 @@
 	in	a, (#5)
 ; CHECK: encoding: [0xd3,0x05]
 	out	(#5), a
+; (#hl) is memory at the symbol hl.
+; CHECK: encoding: [0x3a,A,A]
+	ld	a, (#hl)
 .endif

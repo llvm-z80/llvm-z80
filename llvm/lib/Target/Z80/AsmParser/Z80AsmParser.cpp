@@ -311,17 +311,16 @@ public:
     MCAsmParserExtension::Initialize(Parser);
     // Z80 assemblers count .ds in bytes.
     Parser.addAliasForDirective(".ds", ".skip");
-    // sdasz80 names for .byte and .short.
     if (isParsingSDAS()) {
+      // sdasz80 names for .byte and .short.
       Parser.addAliasForDirective(".db", ".byte");
       Parser.addAliasForDirective(".fcb", ".byte");
       Parser.addAliasForDirective(".dw", ".short");
       Parser.addAliasForDirective(".word", ".short");
       Parser.addAliasForDirective(".fdb", ".short");
-    }
-    // sdasz80 reads 010 as decimal 10.
-    if (getContext().getAsmInfo().isSDCC())
+      // sdasz80 reads 010 as decimal 10.
       getLexer().setLexSDASIntegers(true);
+    }
     MRI = getContext().getRegisterInfo();
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
@@ -439,8 +438,12 @@ bool Z80AsmParser::parseDataExpr(const MCExpr *&Res) {
 void Z80AsmParser::onLabelParsed(MCSymbol *Symbol) {
   if (!isParsingSDAS() || getLexer().isNot(AsmToken::Colon))
     return;
+  SMLoc Loc = getLexer().getLoc();
   Parser.Lex(); // Eat the second ':'.
-  getStreamer().emitSymbolAttribute(Symbol, MCSA_Global);
+  if (Symbol->isTemporary())
+    Error(Loc, "non-local symbol required");
+  else
+    getStreamer().emitSymbolAttribute(Symbol, MCSA_Global);
 }
 
 // Return true when the ')' matching the leading '(' ends the operand.
@@ -488,11 +491,12 @@ bool Z80AsmParser::parseParenOperand(OperandVector &Operands,
   }
 
   // Skip the '#' before an sdasz80 address (ld (#_x),a).
-  if (isParsingSDAS() && Parser.getTok().is(AsmToken::Hash))
+  bool IsAddress = isParsingSDAS() && Parser.getTok().is(AsmToken::Hash);
+  if (IsAddress)
     Parser.Lex();
 
   // Check for register inside parentheses
-  if (Parser.getTok().is(AsmToken::Identifier)) {
+  if (!IsAddress && Parser.getTok().is(AsmToken::Identifier)) {
     MCRegister Reg = tryParseRegisterName();
     if (Reg) {
       SMLoc RegLoc = Parser.getTok().getLoc();
@@ -781,11 +785,6 @@ bool Z80AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
 }
 
 /// Parse sdasz80 directives that differ from standard GNU as.
-/// Currently handles:
-///   .area _CODE  → .section .text
-///   .area _DATA  → .section .data
-///   .area _BSS   → .section .bss
-///   .area _X     → .section _X
 ParseStatus Z80AsmParser::parseDirective(AsmToken DirectiveID) {
   StringRef IDVal = DirectiveID.getString();
   // Skip the sdasz80 module and listing directives.
