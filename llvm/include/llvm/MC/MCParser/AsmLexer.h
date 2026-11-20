@@ -68,6 +68,7 @@ class AsmLexer {
   bool LexMasmIntegers = false;
   bool LexMasmStrings = false;
   bool LexMotorolaIntegers = false;
+  bool LexSDASIntegers = false;
   bool UseMasmDefaultRadix = false;
   unsigned DefaultRadix = 10;
   bool LexHLASMIntegers = false;
@@ -183,6 +184,9 @@ public:
   /// Set whether to lex Motorola-style integer literals, such as $deadbeef or
   /// %01010110.
   void setLexMotorolaIntegers(bool V) { LexMotorolaIntegers = V; }
+
+  /// Set whether to lex SDAS-flavour integers, where 010 is decimal 10.
+  void setLexSDASIntegers(bool V) { LexSDASIntegers = V; }
 
   /// Set whether to lex HLASM-flavour integers. For now this is only [0-9]*
   void setLexHLASMIntegers(bool V) { LexHLASMIntegers = V; }

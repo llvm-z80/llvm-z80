@@ -303,6 +303,9 @@ public:
     MCAsmParserExtension::Initialize(Parser);
     // Z80 assemblers count .ds in bytes.
     Parser.addAliasForDirective(".ds", ".skip");
+    // sdasz80 reads 010 as decimal 10.
+    if (getContext().getAsmInfo().isSDCC())
+      getLexer().setLexSDASIntegers(true);
     MRI = getContext().getRegisterInfo();
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
