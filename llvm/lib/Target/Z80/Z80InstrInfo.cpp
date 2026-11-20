@@ -2047,7 +2047,6 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     // clang-format on
   }
 
-  // Pseudos and debug instructions have size 0.
   return MI.getDesc().getSize();
 }
 
