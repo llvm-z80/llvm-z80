@@ -1,0 +1,49 @@
+# RUN: llc -mtriple=z80 -run-pass=branch-relaxation -verify-machineinstrs %s -o - | FileCheck %s
+#
+# Test that BranchRelaxation handles DJNZ_e without crashing in getBranchDestBlock
+# and computes accurate instruction offsets in isBranchOffsetInRange.
+
+--- |
+  target triple = "z80"
+  define void @test_djnz_loop() { ret void }
+  define void @test_djnz_forward() { ret void }
+...
+---
+name:            test_djnz_loop
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    $b = LD_r_n 10
+    DJNZ_e %bb.0, implicit-def $b, implicit $b
+  bb.1:
+    RET
+...
+---
+name:            test_djnz_forward
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    $b = LD_r_n 5
+    DJNZ_e %bb.2, implicit-def $b, implicit $b
+  bb.1:
+    $a = LD_r_n 1
+    RET implicit $a
+  bb.2:
+    $a = LD_r_n 0
+    RET implicit $a
+...
+
+# CHECK-LABEL: name: test_djnz_loop
+# CHECK:      $b = LD_r_n 10
+# CHECK-NEXT: DJNZ_e %bb.0
+# CHECK:      RET
+
+# CHECK-LABEL: name: test_djnz_forward
+# CHECK:      $b = LD_r_n 5
+# CHECK-NEXT: DJNZ_e %bb.2
+# CHECK:      $a = LD_r_n 1
+# CHECK:      RET
+# CHECK:      $a = LD_r_n 0
+# CHECK:      RET
