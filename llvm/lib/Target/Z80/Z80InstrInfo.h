@@ -15,7 +15,7 @@
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "Z80OpcodeUtils.h"
-#include "llvm/CodeGen/LivePhysRegs.h"
+#include "llvm/CodeGen/LiveRegUnits.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
@@ -454,26 +454,17 @@ inline bool readsUndef(const MachineInstr &MI, Register Reg) {
   return Found;
 }
 
-/// Whether \p Reg still matters where \p At sits: something at or below it
-/// reads the value, or a successor expects it. This is the question behind
-/// every save-and-restore decision and every peephole that borrows a register.
-///
-/// Reserved registers are asked about by membership: LivePhysRegs reports them
-/// as unavailable whether or not they carry anything, so only that answer is
-/// meaningful for F. For everything else availability is the right test,
-/// since a pair matters as soon as either half does.
+/// Whether \p Reg holds a value that something at or after \p At reads.
 inline bool isLiveAt(MachineBasicBlock &MBB, MachineBasicBlock::iterator At,
                      MCRegister Reg, const TargetRegisterInfo *TRI) {
-  const MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-  LivePhysRegs Live(*TRI);
-  Live.addLiveOutsNoPristines(MBB);
+  LiveRegUnits Live(*TRI);
+  Live.addLiveOuts(MBB);
   for (MachineBasicBlock::iterator I = MBB.end(); I != At;) {
     --I;
-    Live.stepBackward(*I);
+    if (!I->isDebugInstr())
+      Live.stepBackward(*I);
   }
-  if (MRI.isReserved(Reg))
-    return Live.contains(Reg);
-  return !Live.available(MRI, Reg);
+  return !Live.available(Reg);
 }
 
 /// Keep \p Reg readable at \p At. Register allocation marked the last read of
