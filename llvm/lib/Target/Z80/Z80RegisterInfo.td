@@ -134,14 +134,8 @@ def GR16 : Z80Reg16Class<(add BC, DE, HL)>;
 // rr of ADD HL,rr, ADC HL,rr and SBC HL,rr
 def GR16_BCDE : Z80Reg16Class<(add BC, DE)>;
 
-// Index registers: IX, IY
-def IR16 : Z80Reg16Class<(add IX, IY)>;
-
-// rr of LD SP,rr and ADD rr,SP
-def HLI : Z80Reg16Class<(add HL, IX, IY)>;
-
-// Pairs a 16-bit value can be spilled from
-def Any16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;
+// Virtual register class for HL
+def HLc : Z80Reg16Class<(add HL)>;
 
 // Stack pointer
 def SPc : Z80Reg16Class<(add SP)>;
@@ -150,3 +144,12 @@ def SPc : Z80Reg16Class<(add SP)>;
 def AFc : Z80Reg16Class<(add AF)> {
   let isAllocatable = false;
 }
+
+// Index registers: IX, IY
+def IR16 : Z80Reg16Class<(add IX, IY)>;
+
+// rr of LD SP,rr and ADD rr,SP
+def HLI : Z80Reg16Class<(add HL, IX, IY)>;
+
+// Pairs a 16-bit value can be spilled from
+def Any16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;

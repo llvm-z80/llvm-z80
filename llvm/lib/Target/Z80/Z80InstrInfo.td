@@ -768,6 +768,16 @@ def STORE16_ABS : Z80Pseudo<(outs), (ins i16imm:$addr, GR16:$src)> {
   let mayStore = true;
 }
 
+// 16-bit load and store through (HL).
+def LOAD16_IND : Z80Pseudo<(outs GR16:$dst), (ins HLc:$addr)> {
+  let mayLoad = true;
+  let mayStore = false;
+}
+def STORE16_IND : Z80Pseudo<(outs), (ins GR16_BCDE:$src, HLc:$addr)> {
+  let mayLoad = false;
+  let mayStore = true;
+}
+
 // SUB_HL_xx: 16-bit subtraction pseudo instructions.
 // Generalized 16-bit arithmetic pseudo instructions.
 // The second operand (rr) is a GR16_BCDE virtual register — the register

@@ -878,35 +878,8 @@ static void expandReloadGR16SPRelative(bool IsStatic, MachineBasicBlock &MBB,
     if (NeedSaveHL)
       BuildMI(MBB, MI, DL, TII.get(Z80::POP_HL));
   } else if (DstReg == Z80::HL) {
-    // Load into temp pair, then copy to HL.
-    Register TempReg;
-    if (!isRegLiveAt(Z80::BC, MBB, NextIt, TRI))
-      TempReg = Z80::BC;
-    else if (!isRegLiveAt(Z80::DE, MBB, NextIt, TRI))
-      TempReg = Z80::DE;
-    else
-      TempReg = Z80::BC;
-    bool NeedSaveTemp = isRegLiveAt(TempReg, MBB, NextIt, TRI);
-
-    if (NeedSaveTemp) {
-      Z80::emitPairSavePush(MBB, MI, DL, TII, TempReg);
-      SPDelta += 2;
-    }
-
     emitSlotAddr(MBB, MI, DL, TII, IsStatic, Offset, SPDelta, PreserveFlags);
-
-    Register TempLo = (TempReg == Z80::BC) ? Z80::C : Z80::E;
-    Register TempHi = (TempReg == Z80::BC) ? Z80::B : Z80::D;
-    Z80::buildLoadHL(MBB, MI, DL, TII, TempLo);
-    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
-    Z80::buildLoadHL(MBB, MI, DL, TII, TempHi);
-
-    // Copy temp to HL
-    Z80::buildLD8(MBB, MI, DL, TII, Z80::L, TempLo);
-    Z80::buildLD8(MBB, MI, DL, TII, Z80::H, TempHi);
-
-    if (NeedSaveTemp)
-      BuildMI(MBB, MI, DL, TII.get(getPopOpcode(TempReg)));
+    Z80::emitLoad16HLind(MBB, MI, Z80::HL, TII, TRI);
   } else {
     // DstReg is BC or DE. Use it as its own temp for the load.
     bool NeedSaveHL = isRegLiveAt(Z80::HL, MBB, NextIt, TRI);

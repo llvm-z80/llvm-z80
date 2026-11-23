@@ -16,7 +16,7 @@ declare cc128 i64 @mk_sdcc0(i16, i16)
 ; CHECK-NEXT: push hl
 ; CHECK-NEXT: ld hl,#8738
 ; CHECK-NEXT: push hl
-; CHECK-NEXT: ld hl,#12
+; CHECK-NEXT: ld hl,#10
 ; CHECK-NEXT: add hl,sp
 ; CHECK-NEXT: push hl
 ; CHECK-NEXT: call _mk_smallc
@@ -34,7 +34,7 @@ define void @call_smallc(ptr %out) {
 ; CHECK-NEXT: push hl
 ; CHECK-NEXT: ld hl,#4369
 ; CHECK-NEXT: push hl
-; CHECK-NEXT: ld hl,#12
+; CHECK-NEXT: ld hl,#10
 ; CHECK-NEXT: add hl,sp
 ; CHECK-NEXT: push hl
 ; CHECK-NEXT: call _mk_sdcc0

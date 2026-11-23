@@ -39,9 +39,8 @@ define i16 @bar(i16 %k, ptr %foo, ptr %oldfoo) optsize !dbg !11 {
 ; SM83:       ld hl,L_bar.frame+2
 entry:
     #dbg_value(i16 %k, !13, !DIExpression(), !15)
-  store i16 0, ptr %oldfoo, align 1
-  %bf.value = shl i16 %k, 1
-  store i16 %bf.value, ptr %foo, align 1
+  %v = load i32, ptr %oldfoo, align 1
+  store i32 %v, ptr %foo, align 1
   ret i16 %k
 }
 

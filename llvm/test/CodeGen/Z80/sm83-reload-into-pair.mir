@@ -8,6 +8,7 @@
   define void @into_pair() { ret void }
   define void @hl_still_live() { ret void }
   define void @runs_off_the_block() { ret void }
+  define void @save_before_copy() { ret void }
 ...
 ---
 name:            into_pair
@@ -75,5 +76,33 @@ body:             |
 # CHECK-LABEL: name: runs_off_the_block
 # CHECK:      LD_A_HLI
 # CHECK-NEXT: $h = LD_r_HLind
+
+...
+---
+name:            save_before_copy
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $bc, $sp
+    LDHL_SP_e 8, implicit-def $hl, implicit-def $f, implicit $sp
+    LD_A_HLI implicit-def $a, implicit-def $hl, implicit $hl
+    $h = LD_r_HLind implicit $hl
+    $l = LD_r_r killed $a
+    PUSH_BC implicit $c, implicit $b, implicit-def $sp, implicit $sp
+    $c = LD_r_r $l
+    $b = LD_r_r $h
+    LD_A_BCind implicit-def $a, implicit $bc
+    POP_BC implicit-def $c, implicit-def $b, implicit-def $sp, implicit $sp
+    RET implicit $bc, implicit $a
+
+# A push of the pair before the copy moves up.
+
+# CHECK-LABEL: name: save_before_copy
+# CHECK:      LD_A_HLI
+# CHECK-NEXT: PUSH_BC
+# CHECK-NEXT: $b = LD_r_HLind
+# CHECK-NEXT: $c = LD_r_r killed $a
+# CHECK-NEXT: LD_A_BCind
+# CHECK-NEXT: POP_BC
 
 ...

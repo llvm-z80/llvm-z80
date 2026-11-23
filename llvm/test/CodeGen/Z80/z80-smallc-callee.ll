@@ -44,12 +44,11 @@ define void @call_smallc_callee() {
 ; CHECK-NEXT:  ld b,(hl)
 ; CHECK-NEXT:  ld hl,#2
 ; CHECK-NEXT:  add hl,sp
-; CHECK-NEXT:  ld e,(hl)
+; CHECK-NEXT:  ld a,(hl)
 ; CHECK-NEXT:  inc hl
-; CHECK-NEXT:  ld d,(hl)
+; CHECK-NEXT:  ld h,(hl)
 ; b is the doubled operand.
-; CHECK-NEXT:  ld l,e
-; CHECK-NEXT:  ld h,d
+; CHECK-NEXT:  ld l,a
 ; CHECK-NEXT:  add hl,hl
 ; CHECK:       sbc hl,de
 ; CHECK:       pop bc
@@ -74,11 +73,10 @@ define cc133 void @callee_void(i16 %a, i16 %b) {
 ; CHECK-LABEL: _callee_byval:
 ; CHECK:       ld hl,#2
 ; CHECK-NEXT:  add hl,sp
-; CHECK-NEXT:  ld c,(hl)
+; CHECK-NEXT:  ld a,(hl)
 ; CHECK-NEXT:  inc hl
-; CHECK-NEXT:  ld b,(hl)
-; CHECK-NEXT:  ld l,c
-; CHECK-NEXT:  ld h,b
+; CHECK-NEXT:  ld h,(hl)
+; CHECK-NEXT:  ld l,a
 ; CHECK-NEXT:  push hl
 ; CHECK-NEXT:  ld hl,#6
 ; CHECK-NEXT:  add hl,sp

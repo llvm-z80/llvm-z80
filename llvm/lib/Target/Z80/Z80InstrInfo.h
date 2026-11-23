@@ -532,6 +532,11 @@ inline void emitHLSavePush(MachineBasicBlock &MBB,
                            const TargetInstrInfo &TII) {
   emitPairSavePush(MBB, At, DL, TII, Z80::HL);
 }
+
+/// Load the pair at (HL) into \p Dst.
+void emitLoad16HLind(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+                     MCRegister Dst, const TargetInstrInfo &TII,
+                     const TargetRegisterInfo *TRI);
 } // namespace Z80
 
 class Z80InstrInfo : public Z80GenInstrInfo {

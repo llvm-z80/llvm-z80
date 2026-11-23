@@ -7,6 +7,7 @@
 --- |
   define void @rebase() { ret void }
   define void @hl_needs_the_pop() { ret void }
+  define void @pop_push_rebase() { ret void }
 ...
 ---
 name:            rebase
@@ -45,5 +46,26 @@ body:             |
 # CHECK-LABEL: name: hl_needs_the_pop
 # CHECK:      PUSH_HL
 # CHECK:      POP_HL
+
+...
+---
+name:            pop_push_rebase
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $sp
+    POP_BC implicit-def $c, implicit-def $b, implicit-def $sp, implicit $sp
+    LDHL_SP_e 4, implicit-def $hl, implicit-def $f, implicit $sp
+    $a = LD_r_HLind implicit $hl
+    PUSH_BC implicit $c, implicit $b, implicit-def $sp, implicit $sp
+    RET implicit $a
+
+# POP ... PUSH: the pair stays on the stack and LDHL SP,e moves to e+2.
+
+# CHECK-LABEL: name: pop_push_rebase
+# CHECK-NOT:  POP_BC
+# CHECK:      LDHL_SP_e 6
+# CHECK-NEXT: $a = LD_r_HLind
+# CHECK-NEXT: RET
 
 ...

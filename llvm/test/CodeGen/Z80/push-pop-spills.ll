@@ -167,17 +167,17 @@ define i16 @stack_args(i16 %val, i16 %bits, i8 %pos, i8 %n) {
 ; A debug value names the spill slot of %k.
 define i16 @debug_value(i16 %k, ptr %p, ptr %q) optsize !dbg !3 {
 ; Z80-LABEL:  _debug_value:
-; Z80:        push de
-; Z80-NEXT:   ld hl,4
+; Z80:        push hl
+; Z80-NEXT:   push de
+; Z80-NEXT:   ld hl,6
 ; Z80-NEXT:   add hl,sp
 ; SM83-LABEL: _debug_value:
-; SM83:       push bc
-; SM83-NEXT:  push de
+; SM83:       push de
+; SM83-NEXT:  push bc
 ; SM83-NEXT:  ldhl sp,6
     #dbg_value(i16 %k, !7, !DIExpression(), !9)
-  store i16 0, ptr %q, align 1
-  %v = shl i16 %k, 1
-  store i16 %v, ptr %p, align 1
+  %v = load i32, ptr %q, align 1
+  store i32 %v, ptr %p, align 1
   ret i16 %k
 }
 
