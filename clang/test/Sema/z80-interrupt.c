@@ -3,7 +3,7 @@
 
 __attribute__((interrupt)) void isr(void) {}
 __attribute__((interrupt("nested"))) void isr_nested(void) {}
-__attribute__((interrupt("nmi"))) void isr_nmi(void) {} // sm83-warning {{'interrupt' attribute argument not supported: nmi}}
+__attribute__((interrupt("nmi"))) void isr_nmi(void) {} // sm83-error {{'interrupt' attribute argument 'nmi' is not supported on SM83}}
 __attribute__((interrupt("fast"))) void isr_fast(void) {} // expected-warning {{'interrupt' attribute argument not supported: fast}}
 __attribute__((interrupt("nested", "nmi"))) void isr_two(void) {} // expected-error {{'interrupt' attribute takes no more than 1 argument}}
 __attribute__((interrupt(1))) void isr_number(void) {} // expected-error {{expected string literal as argument of 'interrupt' attribute}}

@@ -50,14 +50,18 @@ void SemaZ80::handleInterruptAttr(Decl *D, const ParsedAttr &AL) {
       !SemaRef.checkStringLiteralArgumentAttr(AL, 0, Str, &ArgLoc))
     return;
 
-  // SM83 has no non-maskable interrupt.
   Z80InterruptAttr::InterruptType Kind;
-  if (!Z80InterruptAttr::ConvertStrToInterruptType(Str, Kind) ||
-      (Kind == Z80InterruptAttr::NMI &&
-       getASTContext().getTargetInfo().getTriple().getArch() ==
-           llvm::Triple::sm83)) {
+  if (!Z80InterruptAttr::ConvertStrToInterruptType(Str, Kind)) {
     Diag(AL.getLoc(), diag::warn_attribute_type_not_supported)
         << AL << Str << ArgLoc;
+    return;
+  }
+
+  // SM83 has no non-maskable interrupt.
+  if (Kind == Z80InterruptAttr::NMI &&
+      getASTContext().getTargetInfo().getTriple().getArch() ==
+          llvm::Triple::sm83) {
+    Diag(AL.getLoc(), diag::err_z80_interrupt_nmi_sm83);
     return;
   }
 

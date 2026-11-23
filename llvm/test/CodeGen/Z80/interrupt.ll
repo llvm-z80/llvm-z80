@@ -101,13 +101,13 @@ define void @isr_pointer_chase() #0 {
 }
 
 ; Test: nested interrupt handler enables interrupts before saving registers
+; and returns with a plain reti
 define void @isr_nested() "interrupt"="nested" {
 ; Z80-LABEL: _isr_nested:
 ; Z80:       ; %bb.0:
 ; Z80-NEXT:  ei
 ; Z80-NEXT:  push af
 ; Z80:       pop af
-; Z80-NEXT:  ei
 ; Z80-NEXT:  reti
 
 ; SM83-LABEL: _isr_nested:

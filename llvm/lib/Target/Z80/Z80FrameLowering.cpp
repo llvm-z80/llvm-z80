@@ -440,9 +440,9 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
   uint64_t CSSize = MF.getInfo<Z80FunctionInfo>()->getCalleeSavedFrameSize();
   uint64_t LocalSize = StackSize - CSSize;
 
-  // Maskable interrupt handlers re-enable interrupts right before RETI.
+  // Non-nested maskable interrupt handlers re-enable interrupts before RETI.
   if (MF.getFunction().hasFnAttribute("interrupt") && !STI.isSM83() &&
-      getInterruptKind(MF) != "nmi")
+      getInterruptKind(MF) != "nested" && getInterruptKind(MF) != "nmi")
     MBBI = BuildMI(MBB, MBBI, DL, TII.get(Z80::EI))
                .setMIFlag(MachineInstr::FrameDestroy)
                ->getIterator();

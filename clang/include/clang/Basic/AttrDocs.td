@@ -3399,7 +3399,7 @@ The semantics are as follows:
 - Without a parameter, interrupts stay disabled while the handler runs. The
   handler returns with `ei; reti`, or with `reti` on SM83.
 - With "nested", the first instruction is `ei`. So other interrupts may
-  interrupt the handler. It returns like the handler without a parameter.
+  interrupt the handler. It returns with `reti`.
 - With "nmi", the handler returns with `retn`.
   }];
 }
