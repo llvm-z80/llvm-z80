@@ -297,8 +297,8 @@ static bool isIncDec16(const MachineInstr &MI, unsigned Opc, Register Pair) {
 static bool cancelIncDecHL(MachineBasicBlock &MBB,
                            const TargetRegisterInfo *TRI) {
   auto UsesHL = [&](const MachineInstr &MI) {
-    return MI.isCall() || MI.isInlineAsm() ||
-           MI.readsRegister(Z80::HL, TRI) || MI.modifiesRegister(Z80::HL, TRI);
+    return MI.isCall() || MI.isInlineAsm() || MI.readsRegister(Z80::HL, TRI) ||
+           MI.modifiesRegister(Z80::HL, TRI);
   };
   bool Changed = false;
   for (MachineInstr &Inc : make_early_inc_range(MBB)) {
