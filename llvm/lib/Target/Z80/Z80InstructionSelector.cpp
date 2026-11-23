@@ -1289,23 +1289,15 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     }
 
     if (DstTy.getSizeInBits() <= 16) {
-      // 16-bit load: load low byte, then high byte
-      // addr -> HL, load (HL) to E, inc HL, load (HL) to D
-      // Result in DE, then copy to DstReg
       if (!RBI.constrainGenericRegister(DstReg, Z80::GR16RegClass, MRI) ||
           !RBI.constrainGenericRegister(AddrReg, Z80::GR16RegClass, MRI))
         return false;
 
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
-          .addReg(AddrReg);
-      // Load low byte
-      Z80::buildLoadHL(MBB, MI, DL, TII, Z80::E);
-      // Increment address
-      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
-      // Load high byte
-      Z80::buildLoadHL(MBB, MI, DL, TII, Z80::D);
-      // Copy result to destination
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(Z80::DE);
+      Register Ptr = MRI.createVirtualRegister(&Z80::HLcRegClass);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Ptr).addReg(AddrReg);
+      BuildMI(MBB, MI, DL, TII.get(Z80::LOAD16_IND), DstReg)
+          .addReg(Ptr)
+          .cloneMemRefs(MI);
       MI.eraseFromParent();
       return true;
     }
@@ -1452,36 +1444,18 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
     }
 
     if (SrcTy.getSizeInBits() <= 16) {
-      // 16-bit store: store low byte, then high byte
-      // Copy value to DE, addr to HL, store E to (HL), inc HL, store D to (HL)
       if (!RBI.constrainGenericRegister(SrcReg, Z80::GR16RegClass, MRI) ||
           !RBI.constrainGenericRegister(AddrReg, Z80::GR16RegClass, MRI))
         return false;
 
-      // Copy value to DE (for E=low, D=high).
-      // For undef sources, skip the COPY and mark the implicit sub-register
-      // uses as undef directly — processImplicitDefs only propagates undef
-      // to the first user instruction, missing subsequent sub-register uses.
-      MachineInstr *SrcDef = MRI.getVRegDef(SrcReg);
-      bool IsUndef =
-          SrcDef && SrcDef->getOpcode() == TargetOpcode::G_IMPLICIT_DEF;
-
-      if (!IsUndef)
-        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::DE)
-            .addReg(SrcReg);
-      // Copy address to HL
-      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Z80::HL)
-          .addReg(AddrReg);
-      // Store low byte directly from E (no A intermediary)
-      auto &StoreLo = *Z80::buildStoreHL(MBB, MI, DL, TII, Z80::E);
-      // Increment address
-      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
-      // Store high byte directly from D
-      auto &StoreHi = *Z80::buildStoreHL(MBB, MI, DL, TII, Z80::D);
-      if (IsUndef) {
-        StoreLo.findRegisterUseOperand(Z80::E, /*TRI=*/nullptr)->setIsUndef();
-        StoreHi.findRegisterUseOperand(Z80::D, /*TRI=*/nullptr)->setIsUndef();
-      }
+      Register Val = MRI.createVirtualRegister(&Z80::GR16_BCDERegClass);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Val).addReg(SrcReg);
+      Register Ptr = MRI.createVirtualRegister(&Z80::HLcRegClass);
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Ptr).addReg(AddrReg);
+      BuildMI(MBB, MI, DL, TII.get(Z80::STORE16_IND))
+          .addReg(Val)
+          .addReg(Ptr)
+          .cloneMemRefs(MI);
       MI.eraseFromParent();
       return true;
     }

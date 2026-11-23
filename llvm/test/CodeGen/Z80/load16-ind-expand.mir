@@ -1,0 +1,175 @@
+# RUN: llc -verify-machineinstrs -mtriple=z80 -run-pass=post-ra-pseudos %s -o - | FileCheck %s --check-prefixes=CHECK,Z80
+# RUN: llc -verify-machineinstrs -mtriple=sm83 -run-pass=post-ra-pseudos %s -o - | FileCheck %s --check-prefixes=CHECK,SM83
+#
+# Expansion of LOAD16_IND and STORE16_IND.
+
+---
+name:            load_into_de_hl_dead
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $hl
+    $de = LOAD16_IND killed $hl
+    RET implicit $de
+
+# CHECK-LABEL: name: load_into_de_hl_dead
+# CHECK:      $e = LD_r_HLind implicit $hl
+# CHECK-NEXT: $hl = INC_rr $hl
+# CHECK-NEXT: $d = LD_r_HLind implicit $hl
+# CHECK-NEXT: RET implicit $de
+
+...
+---
+name:            load_into_bc_hl_live
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $hl
+    $bc = LOAD16_IND $hl
+    RET implicit $bc, implicit $hl
+
+# CHECK-LABEL: name: load_into_bc_hl_live
+# CHECK:      $c = LD_r_HLind implicit $hl
+# CHECK-NEXT: $hl = INC_rr $hl
+# CHECK-NEXT: $b = LD_r_HLind implicit $hl
+# CHECK-NEXT: $hl = DEC_rr $hl
+# CHECK-NEXT: RET
+
+...
+---
+name:            load_into_hl_a_free
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $hl
+    $hl = LOAD16_IND killed $hl
+    RET implicit $hl
+
+# CHECK-LABEL: name: load_into_hl_a_free
+# Z80:        $a = LD_r_HLind implicit $hl
+# Z80-NEXT:   $hl = INC_rr $hl
+# SM83:       LD_A_HLI implicit-def $a, implicit-def $hl, implicit $hl
+# CHECK-NEXT: $h = LD_r_HLind implicit $hl
+# CHECK-NEXT: $l = LD_r_r $a
+# CHECK-NEXT: RET
+
+...
+---
+name:            load_into_hl_pairs_free
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $hl
+    $hl = LOAD16_IND killed $hl
+    RET implicit $hl, implicit $a
+
+# CHECK-LABEL: name: load_into_hl_pairs_free
+# Z80:        $e = LD_r_HLind implicit $hl
+# Z80-NEXT:   $hl = INC_rr $hl
+# Z80-NEXT:   $d = LD_r_HLind implicit $hl
+# Z80-NEXT:   EX_DE_HL
+# SM83:       $c = LD_r_HLind implicit $hl
+# SM83-NEXT:  $hl = INC_rr $hl
+# SM83-NEXT:  $b = LD_r_HLind implicit $hl
+# SM83-NEXT:  $l = LD_r_r killed $c
+# SM83-NEXT:  $h = LD_r_r killed $b
+# CHECK-NEXT: RET
+
+...
+---
+name:            load_into_hl_de_live
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $de, $hl
+    $hl = LOAD16_IND killed $hl
+    RET implicit $hl, implicit $a, implicit $de
+
+# CHECK-LABEL: name: load_into_hl_de_live
+# CHECK:      $c = LD_r_HLind implicit $hl
+# CHECK-NEXT: $hl = INC_rr $hl
+# CHECK-NEXT: $b = LD_r_HLind implicit $hl
+# CHECK-NEXT: $l = LD_r_r killed $c
+# CHECK-NEXT: $h = LD_r_r killed $b
+# CHECK-NEXT: RET
+
+...
+---
+name:            load_into_hl_bc_live
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $bc, $hl
+    $hl = LOAD16_IND killed $hl
+    RET implicit $hl, implicit $a, implicit $bc
+
+# CHECK-LABEL: name: load_into_hl_bc_live
+# CHECK:      $e = LD_r_HLind implicit $hl
+# CHECK-NEXT: $hl = INC_rr $hl
+# CHECK-NEXT: $d = LD_r_HLind implicit $hl
+# Z80-NEXT:   EX_DE_HL
+# SM83-NEXT:  $l = LD_r_r killed $e
+# SM83-NEXT:  $h = LD_r_r killed $d
+# CHECK-NEXT: RET
+
+...
+---
+name:            load_into_hl_save
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $bc, $de, $hl
+    $hl = LOAD16_IND killed $hl
+    RET implicit $hl, implicit $a, implicit $bc, implicit $de
+
+# CHECK-LABEL: name: load_into_hl_save{{$}}
+# Z80:        PUSH_DE
+# Z80-NEXT:   $e = LD_r_HLind implicit $hl
+# Z80-NEXT:   $hl = INC_rr $hl
+# Z80-NEXT:   $d = LD_r_HLind implicit $hl
+# Z80-NEXT:   EX_DE_HL
+# Z80-NEXT:   POP_DE
+# SM83:       PUSH_BC
+# SM83-NEXT:  $c = LD_r_HLind implicit $hl
+# SM83-NEXT:  $hl = INC_rr $hl
+# SM83-NEXT:  $b = LD_r_HLind implicit $hl
+# SM83-NEXT:  $l = LD_r_r killed $c
+# SM83-NEXT:  $h = LD_r_r killed $b
+# SM83-NEXT:  POP_BC
+# CHECK-NEXT: RET
+
+...
+---
+name:            load_into_hl_save_half
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $a, $c, $e, $hl
+    $hl = LOAD16_IND killed $hl
+    RET implicit $hl, implicit $a, implicit $c, implicit $e
+
+# CHECK-LABEL: name: load_into_hl_save_half
+# Z80:        PUSH_DE implicit $e, implicit undef $d
+# Z80:        POP_DE
+# SM83:       PUSH_BC implicit $c, implicit undef $b
+# SM83:       POP_BC
+# CHECK-NEXT: RET
+
+...
+---
+name:            store_undef_hl_live
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $hl
+    STORE16_IND undef $de, $hl
+    RET implicit $hl
+
+# CHECK-LABEL: name: store_undef_hl_live
+# CHECK:      LD_HLind_r undef $e, implicit $hl
+# CHECK-NEXT: $hl = INC_rr $hl
+# CHECK-NEXT: LD_HLind_r undef $d, implicit $hl
+# CHECK-NEXT: $hl = DEC_rr $hl
+# CHECK-NEXT: RET
+
+...

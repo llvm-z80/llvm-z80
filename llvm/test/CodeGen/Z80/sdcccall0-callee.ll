@@ -70,9 +70,10 @@ define cc 132 void @callee_void(i16 %a, i16 %b) {
 ; CHECK-LABEL: _callee_reti16:
 ; CHECK:      ld hl,#2
 ; CHECK:      add hl,sp
-; CHECK:      ld c,(hl)
+; CHECK:      ld a,(hl)
 ; CHECK:      inc hl
-; CHECK:      ld b,(hl)
+; CHECK:      ld h,(hl)
+; CHECK:      ld l,a
 ; CHECK:      push hl
 ; CHECK:      ld hl,#6
 ; CHECK:      add hl,sp

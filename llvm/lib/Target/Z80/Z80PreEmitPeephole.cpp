@@ -58,7 +58,6 @@ STATISTIC(NumLDHLStepped,
           "Number of consecutive LDHL SP addresses stepped with INC/DEC");
 STATISTIC(NumPostIncLoads,
           "Number of loads rewritten to the post-increment form");
-STATISTIC(NumHLPostIncLoads, "Number of 16-bit HL loads rewritten through HL+");
 STATISTIC(NumSlotForwarded,
           "Number of SM83 SP-relative slot accesses forwarded");
 STATISTIC(NumStoreForwarded, "Number of stores forwarded to a following load");
@@ -292,6 +291,28 @@ static Register getAluRegSrc(const MachineInstr &MI, unsigned &IXdOpc) {
 /// Z80::DEC_rr.
 static bool isIncDec16(const MachineInstr &MI, unsigned Opc, Register Pair) {
   return MI.getOpcode() == Opc && MI.getOperand(0).getReg() == Pair;
+}
+
+// Erase DEC HL ... INC HL with no use of HL between them.
+static bool cancelIncDecHL(MachineBasicBlock &MBB,
+                           const TargetRegisterInfo *TRI) {
+  auto UsesHL = [&](const MachineInstr &MI) {
+    return MI.isCall() || MI.isInlineAsm() || MI.readsRegister(Z80::HL, TRI) ||
+           MI.modifiesRegister(Z80::HL, TRI);
+  };
+  bool Changed = false;
+  for (MachineInstr &Inc : make_early_inc_range(MBB)) {
+    if (!isIncDec16(Inc, Z80::INC_rr, Z80::HL))
+      continue;
+    auto Before = std::next(MachineBasicBlock::reverse_iterator(Inc));
+    auto Dec = find_if(make_range(Before, MBB.rend()), UsesHL);
+    if (Dec == MBB.rend() || !isIncDec16(*Dec, Z80::DEC_rr, Z80::HL))
+      continue;
+    Dec->eraseFromParent();
+    Inc.eraseFromParent();
+    Changed = true;
+  }
+  return Changed;
 }
 
 // Whether a stack access may be reasoned about as an ordinary read or write
@@ -581,65 +602,56 @@ static bool eraseDeadFrameReloads(MachineBasicBlock &MBB,
   return Changed;
 }
 
-// SM83 reloads a 16-bit frame slot through HL, which doubles as the address
-// register: LD A,(HL+); LD H,(HL); LD L,A. When the value was wanted in
-// another pair the copy out of HL follows, and the two halves can simply be
-// loaded where they belong instead.
+// Load a pair reloaded into HL straight into the BC or DE it is copied to,
+// when HL is dead after the copy. A push of that pair before the copy moves up.
 //
-//   ld a,(hl+) ; ld h,(hl) ; ld l,a ; ld c,l ; ld b,h
-//     ->  ld a,(hl+) ; ld b,(hl) ; ld c,a
-//
-// Only when HL itself is dead afterwards, since the rewrite stops writing it.
+//   LD A,(HL+); LD H,(HL); LD L,A; [PUSH BC;] LD C,L; LD B,H
+//   -> LD A,(HL+); [PUSH BC;] LD B,(HL); LD C,A
 static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
                                    const TargetInstrInfo *TII,
                                    const TargetRegisterInfo *TRI) {
   static const struct {
-    MCPhysReg Lo, Hi;
-  } Pairs[] = {{Z80::C, Z80::B}, {Z80::E, Z80::D}};
+    MCPhysReg Lo, Hi, Pair;
+  } Pairs[] = {{Z80::C, Z80::B, Z80::BC}, {Z80::E, Z80::D, Z80::DE}};
 
   bool Changed = false;
   for (auto MII = MBB.begin(); MII != MBB.end();) {
-    auto Load = MII;
-    if (Load->getOpcode() != Z80::LD_A_HLI) {
-      ++MII;
+    MachineInstr &Load = *MII++;
+    if (Load.getOpcode() != Z80::LD_A_HLI)
       continue;
-    }
-    auto LoadHi = std::next(Load);
-    if (LoadHi == MBB.end() || !isLoadHL(*LoadHi, Z80::H)) {
-      ++MII;
+    MachineInstr *LoadHi = Load.getNextNode();
+    if (!LoadHi || !isLoadHL(*LoadHi, Z80::H))
       continue;
-    }
-    auto SetL = std::next(LoadHi);
-    if (SetL == MBB.end() || !isLD8(*SetL, Z80::L, Z80::A)) {
-      ++MII;
+    MachineInstr *SetL = LoadHi->getNextNode();
+    if (!SetL || !isLD8(*SetL, Z80::L, Z80::A))
       continue;
-    }
-    auto SetLo = std::next(SetL);
-    if (SetLo == MBB.end()) {
-      ++MII;
+    MachineInstr *Save = SetL->getNextNode();
+    MachineInstr *SetLo = Save;
+    if (Save && (Save->getOpcode() == Z80::PUSH_BC ||
+                 Save->getOpcode() == Z80::PUSH_DE))
+      SetLo = Save->getNextNode();
+    else
+      Save = nullptr;
+    MachineInstr *SetHi = SetLo ? SetLo->getNextNode() : nullptr;
+    if (!SetHi)
       continue;
-    }
-    auto SetHi = std::next(SetLo);
-    if (SetHi == MBB.end()) {
-      ++MII;
-      continue;
-    }
 
     const auto *P = llvm::find_if(Pairs, [&](const auto &P) {
       return isLD8(*SetLo, P.Lo, Z80::L) && isLD8(*SetHi, P.Hi, Z80::H);
     });
+    auto End = std::next(MachineBasicBlock::iterator(SetHi));
     if (P == std::end(Pairs) ||
-        !isRegDeadAfter(std::next(SetHi), MBB, TRI, Z80::HL)) {
-      ++MII;
+        (Save && Save->getOpcode() != Z80::getPushOpcode(P->Pair)) ||
+        !isRegDeadAfter(End, MBB, TRI, Z80::HL))
       continue;
-    }
 
     LLVM_DEBUG(dbgs() << "  Reload straight into pair: " << *SetLo);
+    if (Save)
+      MBB.splice(LoadHi, &MBB, Save);
     Z80::buildLoadHL(MBB, LoadHi, LoadHi->getDebugLoc(), *TII, P->Hi)
         .cloneMemRefs(*LoadHi);
     Z80::buildLD8(MBB, LoadHi, LoadHi->getDebugLoc(), *TII, P->Lo, Z80::A);
-    MII = std::next(SetHi);
-    MBB.erase(LoadHi, MII);
+    MII = MBB.erase(LoadHi, End);
     ++NumPairReloads;
     Changed = true;
   }
@@ -648,14 +660,11 @@ static bool reloadDirectlyIntoPair(MachineBasicBlock &MBB,
   return Changed;
 }
 
-// --- Keep a saved register on the stack across untouched stretches ---
+// Erase POP rr ... PUSH rr when rr is dead after the push and nothing between
+// them uses rr or SP, except LDHL SP,e, which moves to e+2.
 //
-// Consecutive stack accesses each save and restore a live HL around
-// themselves, producing POP rr ... PUSH rr with nothing in between that
-// cares. When the stretch touches neither rr nor SP (removing the pair
-// leaves SP two lower there, so any SP-relative access would slip), the
-// value can simply stay on the stack. The adjacent-pair case is handled
-// by the POP/PUSH peephole above; this is its windowed extension.
+//   POP BC; LDHL SP,4; LD A,(HL); PUSH BC
+//   -> LDHL SP,6; LD A,(HL)
 static bool elidePopPushAcrossStretch(MachineBasicBlock &MBB,
                                       const TargetInstrInfo *TII,
                                       const TargetRegisterInfo *TRI) {
@@ -670,36 +679,41 @@ static bool elidePopPushAcrossStretch(MachineBasicBlock &MBB,
   };
   bool Changed = false;
   for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
-    auto Next = std::next(MII);
-    for (const auto &P : Pairs) {
-      if (MII->getOpcode() != P.PopOpc)
+    MachineInstr &Pop = *MII++;
+    const auto *P = llvm::find_if(
+        Pairs, [&](const auto &P) { return Pop.getOpcode() == P.PopOpc; });
+    if (P == std::end(Pairs))
+      continue;
+    SmallVector<MachineInstr *, 8> Rebase;
+    unsigned Budget = 32;
+    for (auto J = MII; J != MIE && Budget--; ++J) {
+      if (J->getOpcode() == Z80::LDHL_SP_e &&
+          !J->modifiesRegister(P->Reg, TRI)) {
+        // Only slots at or above SP, with room for two more.
+        int64_t Disp = SignExtend64<8>(J->getOperand(0).getImm());
+        if (Disp < 0 || !isInt<8>(Disp + 2))
+          break;
+        Rebase.push_back(&*J);
         continue;
-      unsigned Budget = 32;
-      for (auto J = Next; J != MIE && Budget--; ++J) {
-        if (J->getOpcode() == P.PushOpc) {
-          // The pop also refills the register itself; anything reading it
-          // after the push would see stale contents without the pair.
-          if (!isRegDeadAfter(std::next(J), MBB, TRI, P.Reg))
-            break;
-          LLVM_DEBUG(dbgs() << "  Pop/push elision across stretch: " << *MII);
-          MBB.erase(J);
-          Next = MBB.erase(MII);
-          ++NumPopPushElided;
-          Changed = true;
-          break;
-        }
-        // Push and pop model their SP movement through getSPAdjust, not
-        // operands, so ask both ways: anything that moves or even reads SP
-        // would see it two bytes short inside the shortened stretch.
-        if (J->isCall() || J->isBranch() || J->isTerminator() ||
-            J->isInlineAsm() || J->readsRegister(P.Reg, TRI) ||
-            J->modifiesRegister(P.Reg, TRI) || TII->getSPAdjust(*J) != 0 ||
-            J->readsRegister(Z80::SP, TRI) || J->modifiesRegister(Z80::SP, TRI))
-          break;
       }
-      break;
+      if (J->getOpcode() == P->PushOpc) {
+        if (!isRegDeadAfter(std::next(J), MBB, TRI, P->Reg))
+          break;
+        for (MachineInstr *MI : Rebase)
+          MI->getOperand(0).setImm(MI->getOperand(0).getImm() + 2);
+        LLVM_DEBUG(dbgs() << "  Pop/push elision across stretch: " << Pop);
+        MII = MBB.erase(J);
+        Pop.eraseFromParent();
+        ++NumPopPushElided;
+        Changed = true;
+        break;
+      }
+      if (J->isCall() || J->isBranch() || J->isTerminator() ||
+          J->isInlineAsm() || J->readsRegister(P->Reg, TRI) ||
+          J->modifiesRegister(P->Reg, TRI) || TII->getSPAdjust(*J) != 0 ||
+          J->readsRegister(Z80::SP, TRI) || J->modifiesRegister(Z80::SP, TRI))
+        break;
     }
-    MII = Next;
   }
   if (Changed)
     recomputeLivenessFlags(MBB);
@@ -1273,6 +1287,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // definition nobody reads only muddies that.
     Changed |= eraseDeadFrameReloads(MBB, TRI);
     Changed |= foldCopyIntoFrameAccess(MBB, TII, TRI);
+    Changed |= cancelIncDecHL(MBB, TRI);
 
     // --- Peephole: POP rr; PUSH rr → (remove both) ---
     // When a register pair is popped and immediately pushed back, the stack
@@ -1568,9 +1583,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
           if (StoreSrc == Z80::A)
             StoreSrc = Register();
 
-          // Skip if this load is part of a 16-bit HL load pattern that the
-          // later peephole will fold more profitably (5B → 3B vs our 2B → 2B).
-          // Pattern: LD C/E,(HL); INC HL; LD B/D,(HL); LD L,C/E; LD H,B/D
+          // Slot forwarding needs LD lo,(HL); INC HL; LD hi,(HL) intact.
           if (LoadDst.isValid() && IsInc) {
             auto I3 = std::next(NextIt);
             if (I3 != MIE) {
@@ -1579,7 +1592,7 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
                                                      : Register();
               if (HiReg.isValid() && isLoadHL(*I3, HiReg)) {
                 ++MII;
-                continue; // Let 16-bit HL load peephole handle it
+                continue;
               }
             }
           }
@@ -1614,88 +1627,6 @@ bool Z80PreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
         }
 
         ++MII;
-      }
-
-      // --- Peephole: 16-bit HL load via HL+ (SM83 only) ---
-      // When loading a 16-bit value from (HL) into HL itself via BC or DE:
-      //   LD lo,(HL); INC HL; LD hi,(HL); LD L,lo; LD H,hi  (5B)
-      // → LD A,(HL+); LD H,(HL); LD L,A                     (3B, saves 2B)
-      // LD A,(HL+) loads lo byte and increments HL in one instruction.
-      // LD H,(HL) reads the hi byte (HL still points to hi) before writing H.
-      // LD L,A completes the 16-bit value in HL.
-      // Conditions: A dead after (clobbered), register pair dead after (not
-      // loaded).
-      for (MachineBasicBlock::iterator MII = MBB.begin(), MIE = MBB.end();
-           MII != MIE;) {
-        MachineInstr &MI = *MII;
-
-        // I1: LD C,(HL) or LD E,(HL)
-        bool IsBC = isLoadHL(MI, Z80::C);
-        bool IsDE = isLoadHL(MI, Z80::E);
-        if (!IsBC && !IsDE) {
-          ++MII;
-          continue;
-        }
-
-        auto I2 = std::next(MII);
-        if (I2 == MIE || !isIncDec16(*I2, Z80::INC_rr, Z80::HL)) {
-          ++MII;
-          continue;
-        }
-        auto I3 = std::next(I2);
-        if (I3 == MIE) {
-          ++MII;
-          continue;
-        }
-        if (!isLoadHL(*I3, IsBC ? Z80::B : Z80::D)) {
-          ++MII;
-          continue;
-        }
-
-        auto I4 = std::next(I3);
-        if (I4 == MIE) {
-          ++MII;
-          continue;
-        }
-        if (!isLD8(*I4, Z80::L, IsBC ? Z80::C : Z80::E)) {
-          ++MII;
-          continue;
-        }
-
-        auto I5 = std::next(I4);
-        if (I5 == MIE) {
-          ++MII;
-          continue;
-        }
-        if (!isLD8(*I5, Z80::H, IsBC ? Z80::B : Z80::D)) {
-          ++MII;
-          continue;
-        }
-
-        auto After = std::next(I5);
-        if (!isRegDeadAfter(After, MBB, TRI, Z80::A)) {
-          ++MII;
-          continue;
-        }
-        MCPhysReg PairReg = IsBC ? Z80::BC : Z80::DE;
-        if (!isRegDeadAfter(After, MBB, TRI, PairReg)) {
-          ++MII;
-          continue;
-        }
-
-        LLVM_DEBUG(dbgs() << "  16-bit HL load via HL+: " << MI);
-        DebugLoc DL = MI.getDebugLoc();
-        BuildMI(MBB, MI, DL, TII->get(Z80::LD_A_HLI));
-        Z80::buildLoadHL(MBB, MI, DL, *TII, Z80::H);
-        Z80::buildLD8(MBB, MI, DL, *TII, Z80::L, Z80::A);
-
-        I5->eraseFromParent();
-        I4->eraseFromParent();
-        I3->eraseFromParent();
-        I2->eraseFromParent();
-        MII = MBB.erase(MII);
-        ++NumHLPostIncLoads;
-        Changed = BlockChanged = true;
       }
     }
 

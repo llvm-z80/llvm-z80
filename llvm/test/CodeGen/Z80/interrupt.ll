@@ -5,6 +5,7 @@
 
 @g = global i8 0
 @w = global i16 0
+@pp = global ptr null
 
 define void @isr() #0 {
 ; Z80-LABEL: _isr:
@@ -72,6 +73,22 @@ define void @isr_flags_only() #0 {
   %v = load volatile i16, ptr @w
   %s = add i16 %v, 300
   store volatile i16 %s, ptr @w
+  ret void
+}
+
+; Test: interrupt handler that never saves AF leaves A alone
+define void @isr_pointer_chase() #0 {
+; Z80-LABEL: _isr_pointer_chase:
+; Z80-NOT:   ld a,
+; Z80:       reti
+
+; SM83-LABEL: _isr_pointer_chase:
+; SM83-NOT:   ld a,
+; SM83:       reti
+  %p = load volatile ptr, ptr @pp
+  %q = load volatile ptr, ptr %p
+  %v = load volatile i16, ptr %q
+  store volatile i16 %v, ptr @w
   ret void
 }
 

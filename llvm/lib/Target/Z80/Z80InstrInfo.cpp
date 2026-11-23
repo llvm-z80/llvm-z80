@@ -977,6 +977,59 @@ bool Z80InstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
   return true;
 }
 
+// Load the pair at (HL) into Dst.
+void Z80::emitLoad16HLind(MachineBasicBlock &MBB,
+                          MachineBasicBlock::iterator MI, MCRegister Dst,
+                          const TargetInstrInfo &TII,
+                          const TargetRegisterInfo *TRI) {
+  DebugLoc DL = MI->getDebugLoc();
+  MachineBasicBlock::iterator Next = std::next(MI);
+  // Dst is BC or DE.
+  if (Dst != Z80::HL) {
+    // LD lo,(HL); INC HL; LD hi,(HL); + DEC HL; (if necessary)
+    Z80::buildLoadHL(MBB, MI, DL, TII, TRI->getSubReg(Dst, Z80::sub_lo));
+    Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    Z80::buildLoadHL(MBB, MI, DL, TII, TRI->getSubReg(Dst, Z80::sub_hi));
+    if (Z80::isLiveAt(MBB, Next, Z80::HL, TRI))
+      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::DEC_rr, Z80::HL);
+    return;
+  }
+
+  bool IsSM83 = MBB.getParent()->getSubtarget<Z80Subtarget>().isSM83();
+  // Dst is HL and A is free.
+  if (!Z80::isLiveAt(MBB, Next, Z80::A, TRI)) {
+    if (IsSM83) {
+      // LD A,(HL+); LD H,(HL); LD L,A
+      BuildMI(MBB, MI, DL, TII.get(Z80::LD_A_HLI));
+    } else {
+      // LD A,(HL); INC HL; LD H,(HL); LD L,A
+      Z80::buildLoadHL(MBB, MI, DL, TII, Z80::A);
+      Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+    }
+    Z80::buildLoadHL(MBB, MI, DL, TII, Z80::H);
+    Z80::buildLD8(MBB, MI, DL, TII, Z80::L, Z80::A);
+    return;
+  }
+
+  // Dst is HL and A is live.
+  // SM83: LD C,(HL); INC HL; LD B,(HL); LD L,C; LD H,B
+  // Z80: LD E,(HL); INC HL; LD D,(HL); EX DE,HL
+  MCRegister Tmp = IsSM83 ? Z80::BC : Z80::DE;
+  MCRegister Other = IsSM83 ? Z80::DE : Z80::BC;
+  if (Z80::isLiveAt(MBB, Next, Tmp, TRI) &&
+      !Z80::isLiveAt(MBB, Next, Other, TRI))
+    Tmp = Other;
+  bool Save = Z80::isLiveAt(MBB, Next, Tmp, TRI);
+  if (Save)
+    Z80::emitPairSavePush(MBB, MI, DL, TII, Tmp);
+  Z80::buildLoadHL(MBB, MI, DL, TII, TRI->getSubReg(Tmp, Z80::sub_lo));
+  Z80::buildIncDec16(MBB, MI, DL, TII, Z80::INC_rr, Z80::HL);
+  Z80::buildLoadHL(MBB, MI, DL, TII, TRI->getSubReg(Tmp, Z80::sub_hi));
+  TII.copyPhysReg(MBB, MI, DL, Z80::HL, Tmp, /*KillSrc=*/true);
+  if (Save)
+    BuildMI(MBB, MI, DL, TII.get(Z80::getPopOpcode(Tmp)));
+}
+
 bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   MachineBasicBlock &MBB = *MI.getParent();
   const TargetRegisterInfo *TRI = STI->getRegisterInfo();
@@ -1094,6 +1147,23 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
                    : Src == Z80::BC ? Z80::LD_nnind_BC
                                     : Z80::LD_nnind_DE;
     BuildMI(MBB, MI, DL, get(Opc)).add(MI.getOperand(0));
+    MI.eraseFromParent();
+    return true;
+  }
+
+  case Z80::LOAD16_IND:
+    Z80::emitLoad16HLind(MBB, MI, MI.getOperand(0).getReg(), *this, TRI);
+    MI.eraseFromParent();
+    return true;
+
+  case Z80::STORE16_IND: {
+    // LD (HL),lo; INC HL; LD (HL),hi; + DEC HL; (if necessary)
+    Register Src = MI.getOperand(0).getReg();
+    Z80::buildStoreHL(MBB, MI, DL, *this, TRI->getSubReg(Src, Z80::sub_lo));
+    Z80::buildIncDec16(MBB, MI, DL, *this, Z80::INC_rr, Z80::HL);
+    Z80::buildStoreHL(MBB, MI, DL, *this, TRI->getSubReg(Src, Z80::sub_hi));
+    if (Z80::isLiveAt(MBB, std::next(MI.getIterator()), Z80::HL, TRI))
+      Z80::buildIncDec16(MBB, MI, DL, *this, Z80::DEC_rr, Z80::HL);
     MI.eraseFromParent();
     return true;
   }
