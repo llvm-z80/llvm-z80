@@ -49,8 +49,9 @@ public:
       return;
     auto *Fn = cast<llvm::Function>(GV);
 
-    if (FD->getAttr<Z80InterruptAttr>())
-      Fn->addFnAttr("interrupt");
+    if (const auto *Attr = FD->getAttr<Z80InterruptAttr>())
+      Fn->addFnAttr("interrupt", Z80InterruptAttr::ConvertInterruptTypeToStr(
+                                     Attr->getInterrupt()));
   }
 };
 } // namespace

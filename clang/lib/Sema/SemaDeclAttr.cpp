@@ -62,6 +62,7 @@
 #include "clang/Sema/SemaSwift.h"
 #include "clang/Sema/SemaWasm.h"
 #include "clang/Sema/SemaX86.h"
+#include "clang/Sema/SemaZ80.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -6775,17 +6776,7 @@ static void handleInterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     break;
   case llvm::Triple::z80:
   case llvm::Triple::sm83:
-    if (hasFunctionProto(D) && getFunctionOrMethodNumParams(D) != 0) {
-      S.Diag(D->getLocation(), diag::warn_interrupt_signal_attribute_invalid)
-          << /*Z80*/ 4 << /*interrupt*/ 0 << 0;
-      break;
-    }
-    if (!getFunctionOrMethodResultType(D)->isVoidType()) {
-      S.Diag(D->getLocation(), diag::warn_interrupt_signal_attribute_invalid)
-          << /*Z80*/ 4 << /*interrupt*/ 0 << 1;
-      break;
-    }
-    handleSimpleAttribute<Z80InterruptAttr>(S, D, AL);
+    S.Z80().handleInterruptAttr(D, AL);
     break;
   case llvm::Triple::riscv32:
   case llvm::Triple::riscv64:

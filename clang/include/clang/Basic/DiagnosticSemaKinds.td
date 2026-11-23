@@ -473,6 +473,8 @@ def warn_interrupt_signal_attribute_invalid
               "%select{no parameters|a 'void' return type}2">,
       InGroup<IgnoredAttributes>,
       LegacyStableIds<["warn_interrupt_attribute_invalid"]>;
+def err_z80_interrupt_nmi_sm83 : Error<
+  "'interrupt' attribute argument 'nmi' is not supported on SM83">;
 def warn_riscv_repeated_interrupt_attribute : Warning<
   "repeated RISC-V 'interrupt' attribute">, InGroup<IgnoredAttributes>;
 def note_riscv_repeated_interrupt_attribute : Note<

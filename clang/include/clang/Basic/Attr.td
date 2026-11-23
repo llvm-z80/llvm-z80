@@ -1096,6 +1096,9 @@ def AVRInterrupt : InheritableAttr, TargetSpecificAttr<TargetAVR> {
 def Z80Interrupt : InheritableAttr, TargetSpecificAttr<TargetZ80> {
   let Spellings = [GCC<"interrupt">];
   let Subjects = SubjectList<[Function]>;
+  let Args = [EnumArgument<"Interrupt", "InterruptType", /*is_string=*/true,
+                           ["", "nested", "nmi"],
+                           ["Generic", "Nested", "NMI"], 1>];
   let ParseKind = "Interrupt";
   let Documentation = [Z80InterruptDocs];
 }

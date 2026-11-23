@@ -3382,13 +3382,25 @@ def Z80InterruptDocs : Documentation {
   let Category = DocCatFunction;
   let Heading = "interrupt (Z80)";
   let Content = [{
-Clang supports the GNU style ``__attribute__((interrupt))`` attribute on
-Z80 and SM83 targets. This attribute may be attached to a function definition and
-instructs the backend to generate appropriate function entry/exit code so that it
-can be used directly as an interrupt service routine.
+Clang supports the GNU style `__attribute__((interrupt("TYPE")))` attribute on
+Z80 targets. This attribute may be attached to a function definition and instructs
+the backend to generate appropriate function entry/exit code so that it can be used
+directly as an interrupt service routine.
 
-The function must take no arguments and return void. All registers are saved on
-entry and restored on exit. The function returns with ``reti`` instead of ``ret``.
+The parameter passed to the interrupt attribute is optional, but if provided it
+must be a string literal with one of the following values: "nested", "nmi".
+"nmi" is not available on SM83.
+
+The semantics are as follows:
+
+- The function must take no arguments and return void.
+- The prologue and epilogue save and restore every register the function
+  changes.
+- Without a parameter, interrupts stay disabled while the handler runs. The
+  handler returns with `ei; reti`, or with `reti` on SM83.
+- With "nested", the first instruction is `ei`. So other interrupts may
+  interrupt the handler. It returns with `reti`.
+- With "nmi", the handler returns with `retn`.
   }];
 }
 

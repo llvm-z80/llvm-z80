@@ -364,7 +364,7 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
                                         FunctionLoweringInfo &FLI) const {
   MachineFunction &MF = MIRBuilder.getMF();
 
-  // Check if this is an interrupt handler (uses RETI instead of RET).
+  // Check if this is an interrupt handler (uses RETI or RETN instead of RET).
   bool IsInterrupt = MF.getFunction().hasFnAttribute("interrupt");
 
   // Determine if this function uses callee-cleanup (RET_CLEANUP vs RET).
@@ -378,7 +378,12 @@ bool Z80CallLoweringCommon::lowerReturn(MachineIRBuilder &MIRBuilder,
         MachineInstrBuilder RetMI;
         if (IsInterrupt) {
           const auto &STI = MF.getSubtarget<Z80Subtarget>();
-          unsigned RetiOpc = STI.isSM83() ? Z80::SM83_RETI : Z80::RETI;
+          bool IsNMI =
+              MF.getFunction().getFnAttribute("interrupt").getValueAsString() ==
+              "nmi";
+          unsigned RetiOpc = STI.isSM83() ? Z80::SM83_RETI
+                             : IsNMI      ? Z80::RETN
+                                          : Z80::RETI;
           RetMI = MIRBuilder.buildInstr(RetiOpc);
         } else if (CleanupBytes > 0)
           RetMI = MIRBuilder.buildInstr(Z80::RET_CLEANUP).addImm(CleanupBytes);
