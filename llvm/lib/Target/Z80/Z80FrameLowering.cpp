@@ -26,6 +26,7 @@
 #include "Z80Subtarget.h"
 #include "Z80TargetMachine.h"
 
+#include "llvm/CodeGen/LiveRegUnits.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -321,6 +322,21 @@ Register Z80FrameLowering::callFrameDestroyScratch(const Z80Subtarget &STI,
   return Z80::HL;  // LD HL,N; ADD HL,SP; LD SP,HL
 }
 
+static StringRef getInterruptKind(const MachineFunction &MF) {
+  return MF.getFunction().getFnAttribute("interrupt").getValueAsString();
+}
+
+void Z80FrameLowering::determineCalleeSaves(MachineFunction &MF,
+                                            BitVector &SavedRegs,
+                                            RegScavenger *RS) const {
+  TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
+
+  // Frame code changes F.
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  if (MFI.hasStackObjects() || MFI.isFrameAddressTaken())
+    SavedRegs.set(Z80::AF);
+}
+
 void Z80FrameLowering::emitPrologue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -329,36 +345,48 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
 
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   uint64_t StackSize = MFI.getStackSize();
+  uint64_t CSSize = MF.getInfo<Z80FunctionInfo>()->getCalleeSavedFrameSize();
+  uint64_t LocalSize = StackSize - CSSize;
+
+  // Nested interrupt handlers re-enable interrupts in function entry.
+  if (getInterruptKind(MF) == "nested")
+    BuildMI(MBB, MBBI, DL, TII.get(Z80::EI))
+        .setMIFlag(MachineInstr::FrameSetup);
+
+  // Skip the callee-saved push instructions.
+  while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup) &&
+         MBBI->getOpcode() != Z80::ADJCALLSTACKDOWN)
+    ++MBBI;
 
   if (hasFP(MF)) {
     // --- Frame pointer mode (IX = frame pointer) ---
     bool NeedsFP = MF.getInfo<Z80FunctionInfo>()->AccessesFixedObject ||
                    MFI.isFrameAddressTaken() || MFI.hasVarSizedObjects();
 
-    if (!StackSize && !NeedsFP)
+    if (!LocalSize && !NeedsFP)
       return;
 
     // Z80 prologue:
-    // 1. PUSH IX          - Save old frame pointer
+    // 1. PUSH IX            - Save old frame pointer
     // 2. LD IX,0; ADD IX,SP - IX = SP (frame pointer)
-    // 3. Adjust SP for locals (only if StackSize > 0)
+    // 3. Adjust SP for locals (only if LocalSize > 0)
     BuildMI(MBB, MBBI, DL, TII.get(Z80::PUSH_IX));
     BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_IX_nn)).addImm(0);
     BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_IX_SP));
 
-    if (StackSize > 0) {
-      unsigned PushCount = StackSize / 2;
+    if (LocalSize > 0) {
+      unsigned PushCount = LocalSize / 2;
       if (PushCount <= 4) {
         for (unsigned i = 0; i < PushCount; ++i)
           emitStackAllocPush(MBB, MBBI, DL, TII);
-        if (StackSize % 2)
+        if (LocalSize % 2)
           BuildMI(MBB, MBBI, DL, TII.get(Z80::DEC_SP));
       } else {
         // Large frame: PUSH HL; LD HL,-(size-2); ADD HL,SP; LD SP,HL;
         // restore HL from IX-based save location.
         Z80::emitHLSavePush(MBB, MBBI, DL, TII);
         Z80::buildLD16n(MBB, MBBI, DL, TII, Z80::HL)
-            .addImm(-(int64_t)(StackSize - 2) & 0xFFFF);
+            .addImm(-(int64_t)(LocalSize - 2) & 0xFFFF);
         BuildMI(MBB, MBBI, DL, TII.get(Z80::ADD_HL_SP));
         BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_SP_HL));
         Z80::buildLoadIdx(MBB, MBBI, DL, TII, Z80::LD_r_IXd, Z80::L, -2);
@@ -367,22 +395,8 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
     }
   } else {
     // --- No frame pointer (IX is allocatable) ---
-    // Callee-saved registers are already pushed by spillCalleeSavedRegisters.
-    // We only need to allocate space for locals (StackSize - CSSize).
-    const Z80FunctionInfo *FI = MF.getInfo<Z80FunctionInfo>();
-    uint64_t CSSize = FI->getCalleeSavedFrameSize();
-    // Static frames can leave the tracked stack smaller than the pushed
-    // callee saves; an unsigned wrap here would emit allocation forever.
-    uint64_t LocalSize = StackSize > CSSize ? StackSize - CSSize : 0;
-
     if (LocalSize == 0)
       return;
-
-    // Skip past callee-saved PUSHes (inserted before prologue by PEI).
-    while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup) &&
-           MBBI->getOpcode() != Z80::ADJCALLSTACKDOWN) {
-      ++MBBI;
-    }
 
     const auto &STI = MF.getSubtarget<Z80Subtarget>();
     if (STI.isSM83() && LocalSize <= 128) {
@@ -391,10 +405,10 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF,
           .addImm(-(int64_t)LocalSize);
     } else {
       unsigned PushCount = LocalSize / 2;
-      // Check if HL might hold an incoming argument (live-in to entry block).
-      // If so, we must not clobber HL with the large-frame LD HL approach.
-      bool HLLive =
-          MBB.isLiveIn(Z80::HL) || MBB.isLiveIn(Z80::H) || MBB.isLiveIn(Z80::L);
+      // Keep HL intact when HL is live-in or an unsaved callee-saved register.
+      LiveRegUnits Live(*MF.getSubtarget().getRegisterInfo());
+      Live.addLiveIns(MBB);
+      bool HLLive = !Live.available(Z80::HL);
       if (HLLive || PushCount <= 12) {
         // Use PUSH AF (1 byte per 2 bytes, doesn't clobber any registers).
         for (unsigned i = 0; i < PushCount; ++i)
@@ -420,46 +434,41 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
   if (MBBI != MBB.end())
     DL = MBBI->getDebugLoc();
 
-  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  const auto &STI = MF.getSubtarget<Z80Subtarget>();
+  const TargetInstrInfo &TII = *STI.getInstrInfo();
   uint64_t StackSize = MFI.getStackSize();
+  uint64_t CSSize = MF.getInfo<Z80FunctionInfo>()->getCalleeSavedFrameSize();
+  uint64_t LocalSize = StackSize - CSSize;
+
+  // Maskable interrupt handlers re-enable interrupts right before RETI.
+  if (MF.getFunction().hasFnAttribute("interrupt") && !STI.isSM83() &&
+      getInterruptKind(MF) != "nmi")
+    MBBI = BuildMI(MBB, MBBI, DL, TII.get(Z80::EI))
+               .setMIFlag(MachineInstr::FrameDestroy)
+               ->getIterator();
+
+  // Skip back over the callee-saved pop instructions.
+  while (MBBI != MBB.begin() &&
+         std::prev(MBBI)->getFlag(MachineInstr::FrameDestroy))
+    --MBBI;
 
   if (hasFP(MF)) {
     bool NeedsFP = MF.getInfo<Z80FunctionInfo>()->AccessesFixedObject ||
                    MFI.isFrameAddressTaken() || MFI.hasVarSizedObjects();
 
-    if (!StackSize && !NeedsFP)
+    if (!LocalSize && !NeedsFP)
       return;
 
-    // Z80 epilogue (before RET):
+    // Z80 epilogue:
     // 1. LD SP,IX   - Restore stack pointer from frame pointer
     // 2. POP IX     - Restore old frame pointer
     BuildMI(MBB, MBBI, DL, TII.get(Z80::LD_SP_IX));
     BuildMI(MBB, MBBI, DL, TII.get(Z80::POP_IX));
   } else {
-    // No frame pointer: deallocate locals only.
-    // Callee-saved registers are restored by restoreCalleeSavedRegisters,
-    // which inserts POPs (with FrameDestroy flag) before the return.
-    // We must insert local deallocation BEFORE those callee-save restores,
-    // since the stack layout is: [locals | callee-saves | ret-addr].
-    const Z80FunctionInfo *FI = MF.getInfo<Z80FunctionInfo>();
-    uint64_t CSSize = FI->getCalleeSavedFrameSize();
-    uint64_t LocalSize = StackSize > CSSize ? StackSize - CSSize : 0;
-
     if (LocalSize == 0)
       return;
 
-    // Walk MBBI backwards past callee-save restore POPs (FrameDestroy flag)
-    // so we insert local deallocation before them.
-    while (MBBI != MBB.begin()) {
-      auto Prev = std::prev(MBBI);
-      if (Prev->getFlag(MachineInstr::FrameDestroy))
-        MBBI = Prev;
-      else
-        break;
-    }
-
-    MF.getSubtarget<Z80Subtarget>().getInstrInfo()->releaseStack(MBB, MBBI, DL,
-                                                                 LocalSize);
+    STI.getInstrInfo()->releaseStack(MBB, MBBI, DL, LocalSize);
   }
 }
 

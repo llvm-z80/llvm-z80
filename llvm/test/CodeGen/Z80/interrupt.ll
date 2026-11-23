@@ -2,21 +2,29 @@
 ; RUN: llc -verify-machineinstrs -mtriple=sm83 -z80-asm-format=sdasz80 -O1 < %s | FileCheck %s --check-prefix=SM83
 
 ; Test: interrupt handler saves registers and returns with reti
+; Z80 enables interrupts right before reti. SM83 reti enables them.
 
 @g = global i8 0
 @w = global i16 0
 @pp = global ptr null
 
+declare void @use(ptr)
+
 define void @isr() #0 {
 ; Z80-LABEL: _isr:
+; Z80-NOT:   ei
 ; Z80:       push af
 ; Z80:       push bc
-; Z80:       reti
+; Z80:       pop af
+; Z80-NEXT:  ei
+; Z80-NEXT:  reti
 
 ; SM83-LABEL: _isr:
+; SM83-NOT:   ei
 ; SM83:       push af
 ; SM83:       push bc
-; SM83:       reti
+; SM83:       pop af
+; SM83-NEXT:  reti
   store volatile i8 66, ptr @g
   ret void
 }
@@ -92,4 +100,90 @@ define void @isr_pointer_chase() #0 {
   ret void
 }
 
+; Test: nested interrupt handler enables interrupts before saving registers
+define void @isr_nested() "interrupt"="nested" {
+; Z80-LABEL: _isr_nested:
+; Z80:       ; %bb.0:
+; Z80-NEXT:  ei
+; Z80-NEXT:  push af
+; Z80:       pop af
+; Z80-NEXT:  ei
+; Z80-NEXT:  reti
+
+; SM83-LABEL: _isr_nested:
+; SM83:       ; %bb.0:
+; SM83-NEXT:  ei
+; SM83-NEXT:  push af
+; SM83:       pop af
+; SM83-NEXT:  reti
+  store volatile i8 66, ptr @g
+  ret void
+}
+
+; Test: interrupt handler saves AF before the frame setup changes F, and the
+; frame setup leaves the unsaved HL alone
+define void @isr_big_frame() #0 {
+; Z80-LABEL: _isr_big_frame:
+; Z80:       ; %bb.0:
+; Z80-NEXT:  push af
+; Z80-NOT:   ld sp,hl
+; Z80:       reti
+
+; SM83-LABEL: _isr_big_frame:
+; SM83:       ; %bb.0:
+; SM83-NEXT:  push af
+; SM83-NEXT:  add sp,#-100
+; SM83:       add sp,#100
+; SM83-NEXT:  pop af
+; SM83-NEXT:  reti
+  %buf = alloca [100 x i8]
+  %p = getelementptr [100 x i8], ptr %buf, i16 0, i16 50
+  store volatile i8 0, ptr %p
+  ret void
+}
+
+; Test: interrupt handler sets the frame pointer up after saving registers,
+; and releases the frame before restoring them
+define void @isr_frame_pointer() #1 {
+; Z80-LABEL: _isr_frame_pointer:
+; Z80:       ; %bb.0:
+; Z80-NEXT:  push af
+; Z80:       push iy
+; Z80-NEXT:  push ix
+; Z80-NEXT:  ld ix,#0
+; Z80-NEXT:  add ix,sp
+; Z80-NEXT:  push af
+; Z80-NEXT:  push af
+; Z80-NEXT:  push ix
+; Z80-NEXT:  pop hl
+; Z80-NEXT:  ld bc,#65532
+; Z80:       call _use
+; Z80-NEXT:  ld sp,ix
+; Z80-NEXT:  pop ix
+; Z80-NEXT:  pop iy
+; Z80:       pop af
+; Z80-NEXT:  ei
+; Z80-NEXT:  reti
+
+; SM83-LABEL: _isr_frame_pointer:
+; SM83:       push af
+; SM83:       add sp,#-4
+; SM83:       add sp,#4
+; SM83:       pop af
+; SM83-NEXT:  reti
+  %buf = alloca [4 x i8]
+  call void @use(ptr %buf)
+  ret void
+}
+
+; Test: interrupt handler without locals sets no frame pointer up
+define void @isr_frame_pointer_no_locals() #1 {
+; Z80-LABEL: _isr_frame_pointer_no_locals:
+; Z80-NOT:   add ix,sp
+; Z80:       reti
+  store volatile i8 66, ptr @g
+  ret void
+}
+
 attributes #0 = { "interrupt" }
+attributes #1 = { "interrupt" "frame-pointer"="all" }

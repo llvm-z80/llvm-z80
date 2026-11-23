@@ -16,6 +16,7 @@
 #include "Z80.h"
 #include "Z80FrameLowering.h"
 #include "Z80InstrInfo.h"
+#include "Z80MachineFunctionInfo.h"
 #include "Z80OpcodeUtils.h"
 #include "Z80Subtarget.h"
 #include "llvm/CodeGen/LiveIntervals.h"
@@ -1099,8 +1100,9 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
   bool UseFP = TFI->hasFP(MF);
 
   // Z80 stack frame layout (with frame pointer):
-  //   [parameters]     (IX+4, IX+5, ...)  - passed by caller
-  //   [return address] (IX+2, IX+3)       - pushed by CALL
+  //   [parameters]     (IX+4+CS, ...)     - passed by caller
+  //   [return address] (IX+2+CS)          - pushed by CALL
+  //   [callee saves]   (IX+2, ...)        - CS bytes, pushed first
   //   [saved IX]       (IX+0, IX+1)       - pushed in prologue, IX points here
   //   [local var 1]    (IX-2, IX-1)       - allocated in prologue
   //   [local var 2]    (IX-4, IX-3)       <- SP after allocation
@@ -1113,7 +1115,8 @@ bool Z80RegisterInfo::eliminateFrameIndexImpl(MachineBasicBlock::iterator MI,
   //   [local var 2]    <- SP
 
   if (UseFP) {
-    Offset += 2; // Skip saved IX
+    // Skip saved IX and the callee saves above IX.
+    Offset += 2 + MF.getInfo<Z80FunctionInfo>()->getCalleeSavedFrameSize();
   } else {
     Offset += MFI.getStackSize() + SPAdj;
     // SPAdj does not count SPILL_PUSH and SPILL_POP.

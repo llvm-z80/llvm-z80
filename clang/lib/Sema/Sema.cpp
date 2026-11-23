@@ -69,6 +69,7 @@
 #include "clang/Sema/SemaSystemZ.h"
 #include "clang/Sema/SemaWasm.h"
 #include "clang/Sema/SemaX86.h"
+#include "clang/Sema/SemaZ80.h"
 #include "clang/Sema/TemplateDeduction.h"
 #include "clang/Sema/TypoCorrection.h"
 #include "llvm/ADT/DenseMap.h"
@@ -312,6 +313,7 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
       SystemZPtr(std::make_unique<SemaSystemZ>(*this)),
       WasmPtr(std::make_unique<SemaWasm>(*this)),
       X86Ptr(std::make_unique<SemaX86>(*this)),
+      Z80Ptr(std::make_unique<SemaZ80>(*this)),
       MSPointerToMemberRepresentationMethod(
           LangOpts.getMSPointerToMemberRepresentationMethod()),
       MSStructPragmaOn(false), VtorDispStack(LangOpts.getVtorDispMode()),
