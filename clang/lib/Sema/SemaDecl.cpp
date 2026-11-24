@@ -62,6 +62,7 @@
 #include "clang/Sema/SemaSYCL.h"
 #include "clang/Sema/SemaSwift.h"
 #include "clang/Sema/SemaWasm.h"
+#include "clang/Sema/SemaZ80.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLForwardCompat.h"
@@ -3040,6 +3041,8 @@ static bool mergeDeclAttribute(Sema &S, NamedDecl *D,
     NewAttr = S.Wasm().mergeImportNameAttr(D, *INA);
   else if (const auto *ENA = dyn_cast<WebAssemblyExportNameAttr>(Attr))
     NewAttr = S.Wasm().mergeExportNameAttr(D, *ENA);
+  else if (const auto *PRA = dyn_cast<Z80PreservesRegsAttr>(Attr))
+    NewAttr = S.Z80().mergePreservesRegsAttr(D, *PRA);
   else if (const auto *TCBA = dyn_cast<EnforceTCBAttr>(Attr))
     NewAttr = S.mergeEnforceTCBAttr(D, *TCBA);
   else if (const auto *TCBLA = dyn_cast<EnforceTCBLeafAttr>(Attr))

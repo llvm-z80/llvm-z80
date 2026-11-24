@@ -1507,3 +1507,10 @@ StringRef Z80RegisterInfo::getRegAsmName(MCRegister Reg) const {
     return "";
   }
 }
+
+#define GET_REGISTER_MATCHER
+#include "Z80GenAsmMatcher.inc"
+
+MCRegister Z80RegisterInfo::getRegByAsmName(StringRef Name) const {
+  return MatchRegisterName(Name);
+}

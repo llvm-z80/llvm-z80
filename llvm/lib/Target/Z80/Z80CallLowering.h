@@ -165,6 +165,10 @@ protected:
                                          ArrayRef<unsigned> StackArgIndices,
                                          unsigned StackArgBytes) const;
 
+  /// The registers a function of convention \p CC returns \p RetTy in.
+  SmallVector<Register, 2> getResultRegs(const MachineFunction &MF,
+                                         CallingConv::ID CC, Type *RetTy) const;
+
 public:
   Z80CallLoweringCommon(const TargetLowering *TL, CallingConvRegs Regs,
                         CallingConvRegs Regs0)

@@ -19,12 +19,16 @@
 
 namespace clang {
 class ParsedAttr;
+class Z80PreservesRegsAttr;
 
 class SemaZ80 : public SemaBase {
 public:
   SemaZ80(Sema &S);
 
   void handleInterruptAttr(Decl *D, const ParsedAttr &AL);
+  void handlePreservesRegsAttr(Decl *D, const ParsedAttr &AL);
+  Z80PreservesRegsAttr *mergePreservesRegsAttr(Decl *D,
+                                               const Z80PreservesRegsAttr &AL);
 };
 
 } // namespace clang

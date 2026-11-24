@@ -19,6 +19,7 @@
 #include "clang/Sema/Attr.h"
 #include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/Sema.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 namespace clang {
 SemaZ80::SemaZ80(Sema &S) : SemaBase(S) {}
@@ -67,6 +68,58 @@ void SemaZ80::handleInterruptAttr(Decl *D, const ParsedAttr &AL) {
 
   D->addAttr(::new (getASTContext())
                  Z80InterruptAttr(getASTContext(), AL, Kind));
+}
+
+void SemaZ80::handlePreservesRegsAttr(Decl *D, const ParsedAttr &AL) {
+  if (!AL.checkAtLeastNumArgs(SemaRef, 1))
+    return;
+
+  static constexpr StringRef Z80Regs[] = {
+      "a", "b", "c", "d", "e", "h", "l", "iyl", "iyh",
+  };
+  static constexpr StringRef SM83Regs[] = {
+      "a", "b", "c", "d", "e", "h", "l",
+  };
+  ArrayRef<StringRef> KnownRegs = Z80Regs;
+  if (getASTContext().getTargetInfo().getTriple().isSM83())
+    KnownRegs = SM83Regs;
+  SmallVector<const IdentifierInfo *, 9> Regs;
+  for (unsigned I = 0, E = AL.getNumArgs(); I != E; ++I) {
+    if (!AL.isArgIdent(I)) {
+      Diag(AL.getLoc(), diag::err_attribute_argument_n_type)
+          << AL << I + 1 << AANT_ArgumentIdentifier;
+      return;
+    }
+    IdentifierLoc *Arg = AL.getArgAsIdent(I);
+    const IdentifierInfo *Reg = Arg->getIdentifierInfo();
+    if (!llvm::is_contained(KnownRegs, Reg->getName())) {
+      Diag(Arg->getLoc(), diag::warn_attribute_type_not_supported)
+          << AL << Reg->getName();
+      continue;
+    }
+    Regs.push_back(Reg);
+  }
+  if (Regs.empty())
+    return;
+
+  D->addAttr(::new (getASTContext()) Z80PreservesRegsAttr(
+      getASTContext(), AL, Regs.data(), Regs.size()));
+}
+
+Z80PreservesRegsAttr *
+SemaZ80::mergePreservesRegsAttr(Decl *D, const Z80PreservesRegsAttr &AL) {
+  const auto *Existing = D->getAttr<Z80PreservesRegsAttr>();
+  if (!Existing)
+    return AL.clone(getASTContext());
+  // Every declaration must list the same registers.
+  if (llvm::SmallPtrSet<const IdentifierInfo *, 9>(Existing->regs_begin(),
+                                                   Existing->regs_end()) !=
+      llvm::SmallPtrSet<const IdentifierInfo *, 9>(AL.regs_begin(),
+                                                   AL.regs_end())) {
+    Diag(Existing->getLocation(), diag::err_duplicate_attribute) << *Existing;
+    Diag(AL.getLoc(), diag::note_previous_attribute);
+  }
+  return nullptr;
 }
 
 } // namespace clang

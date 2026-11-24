@@ -42,12 +42,25 @@ public:
 
   void setTargetAttributes(const Decl *D, llvm::GlobalValue *GV,
                            CodeGen::CodeGenModule &CGM) const override {
-    if (GV->isDeclaration())
-      return;
     const auto *FD = dyn_cast_or_null<FunctionDecl>(D);
     if (!FD)
       return;
     auto *Fn = cast<llvm::Function>(GV);
+
+    if (const auto *Attr =
+            FD->getMostRecentDecl()->getAttr<Z80PreservesRegsAttr>()) {
+      SmallString<32> Regs;
+      for (const IdentifierInfo *Reg : Attr->regs()) {
+        if (!Regs.empty())
+          Regs += ',';
+        Regs += Reg->getName();
+      }
+      Fn->addFnAttr("z80-preserves-regs", Regs);
+    }
+
+    // Other attributes do not have a meaning for declarations.
+    if (GV->isDeclaration())
+      return;
 
     if (const auto *Attr = FD->getAttr<Z80InterruptAttr>())
       Fn->addFnAttr("interrupt", Z80InterruptAttr::ConvertInterruptTypeToStr(

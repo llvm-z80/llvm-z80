@@ -58,6 +58,9 @@ public:
   // Return the name of a register for inline assembly
   StringRef getRegAsmName(MCRegister Reg) const override;
 
+  // Return the register with the given assembly name, or none
+  MCRegister getRegByAsmName(StringRef Name) const;
+
 private:
   /// The elimination itself. The public entry point wraps it to carry the
   /// pseudo's memory operands onto whatever performs the access.
