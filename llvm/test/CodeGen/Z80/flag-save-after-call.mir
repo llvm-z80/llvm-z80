@@ -1,0 +1,53 @@
+# RUN: llc -mtriple=sm83 -z80-static-frames=false -run-pass=prolog-epilog \
+# RUN:   -verify-machineinstrs %s -o - | FileCheck %s
+#
+# The spill sits between the DEC that sets the flags and the branch that
+# reads them, so its LDHL SP,e is wrapped in PUSH AF and POP AF. The call
+# before it reads A as an argument, then clobbers it through its mask and
+# defines nothing, so the PUSH has to read A as undefined.
+
+--- |
+  declare void @f(i8)
+  define void @loop() { ret void }
+...
+---
+name:            loop
+legalized:       true
+regBankSelected: true
+selected:        true
+tracksRegLiveness: true
+noPhis:          true
+isSSA:           false
+noVRegs:         true
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+stack:
+  - { id: 0, type: spill-slot, size: 1, alignment: 1 }
+body:             |
+  bb.0:
+    successors: %bb.1
+
+  bb.1:
+    successors: %bb.2, %bb.1
+
+    ADJCALLSTACKDOWN 0, 0, implicit-def $sp, implicit $sp
+    $a = LD_r_n 1
+    CALL_nn @f, sm83_csr, implicit $a
+    ADJCALLSTACKUP 0, 0, implicit-def $sp, implicit $sp
+    $b = LD_r_n 3
+    $b = DEC_r killed $b, implicit-def $f
+    SPILL_GR8 killed $b, %stack.0, 0 :: (store (s8) into %stack.0)
+    JP_NZ_nn %bb.1, implicit $f
+    JP_nn %bb.2
+
+  bb.2:
+    RET
+...
+
+# CHECK-LABEL: name: loop
+# CHECK:       CALL_nn @f, sm83_csr
+# CHECK:       $b = DEC_r
+# CHECK-NEXT:  PUSH_AF implicit $f, implicit undef $a
+# CHECK-NEXT:  LDHL_SP_e
+# CHECK-NEXT:  POP_AF

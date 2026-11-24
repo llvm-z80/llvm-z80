@@ -190,7 +190,6 @@ def DJNZ_e : Inst16<"djnz", 0x10, RelativeMode>;
 def CALL_IY : Z80Pseudo<(outs), (ins)> {
   let isCall = true;
   let Uses = [IY];
-  let Defs = [A, BC, DE, HL, IY, F];
   let mayLoad = true;
   let mayStore = true;
   let hasSideEffects = true;

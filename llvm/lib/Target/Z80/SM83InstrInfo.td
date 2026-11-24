@@ -124,7 +124,6 @@ def LD_A_HLD : Inst8<"ld a, (hl-)", 0x3A> {
 def CALL_HL : Z80Pseudo<(outs), (ins)> {
   let isCall = true;
   let Uses = [HL];
-  let Defs = [A, BC, DE, HL, F];
   let mayLoad = true;
   let mayStore = true;
   let hasSideEffects = true;

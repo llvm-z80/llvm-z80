@@ -436,12 +436,9 @@ def JP_HLind : Inst8<"jp (hl)", 0xE9> {
 //  Call and Return Group (common subset: NZ/Z/NC/C conditions only)
 //===----------------------------------------------------------------------===//
 
-// CALL nn - Caller-saved registers are clobbered by calls.
-// Argument registers are added dynamically as implicit uses in lowerCall.
-// IY: caller-saved on Z80; harmless on SM83 where IY is reserved.
+// CALL nn - Call subroutine
 def CALL_nn : Inst24<"call", 0xCD, TargetMode> {
   let isCall = true;
-  let Defs = [A, BC, DE, HL, IY, F];
 }
 
 // CALL cc,nn
