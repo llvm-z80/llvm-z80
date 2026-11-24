@@ -213,7 +213,7 @@ public:
   void addPreRegAlloc() override;
   void addFastRegAlloc() override { addOptimizedRegAlloc(); }
   void addOptimizedRegAlloc() override;
-  bool addRegAssignAndRewriteOptimized() override;
+  void addRegAssignAndRewriteOptimized() override;
 
   void addPreSched2() override;
   void addPreEmitPass() override;
@@ -302,9 +302,8 @@ void Z80PassConfig::addOptimizedRegAlloc() {
   TargetPassConfig::addOptimizedRegAlloc();
 }
 
-bool Z80PassConfig::addRegAssignAndRewriteOptimized() {
-  if (!TargetPassConfig::addRegAssignAndRewriteOptimized())
-    return false;
+void Z80PassConfig::addRegAssignAndRewriteOptimized() {
+  TargetPassConfig::addRegAssignAndRewriteOptimized();
 
   // Mitigation for https://github.com/llvm/llvm-project/issues/156428
   // Remove spurious super-register implicit-defs added by LiveVariables.
@@ -316,7 +315,6 @@ bool Z80PassConfig::addRegAssignAndRewriteOptimized() {
   // them.
   if (getOptLevel() != CodeGenOptLevel::None)
     addPass(createZ80PushPopSpillsPass());
-  return true;
 }
 
 void Z80PassConfig::addPreSched2() {

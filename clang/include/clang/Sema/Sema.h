@@ -54,6 +54,7 @@
 #include "clang/Basic/StackExhaustionHandler.h"
 #include "clang/Basic/TemplateKinds.h"
 #include "clang/Basic/TokenKinds.h"
+#include "clang/Lex/TextEncoding.h"
 #include "clang/Sema/AnalysisBasedWarnings.h"
 #include "clang/Sema/Attr.h"
 #include "clang/Sema/CleanupInfo.h"
@@ -115,7 +116,7 @@ struct InlineAsmIdentifierInfo;
 namespace clang {
 class ADLResult;
 class APValue;
-struct ASTConstraintSatisfaction;
+class ASTConstraintSatisfaction;
 class ASTConsumer;
 class ASTContext;
 class ASTDeclReader;
@@ -1468,6 +1469,18 @@ public:
   /// OpenMP, and SYCL.
   SemaDiagnosticBuilder::DeferredDiagnosticsType DeviceDeferredDiags;
 
+  /// An inverse call graph, mapping known-emitted functions to their
+  /// known-emitted callers (plus the location of the call).  It is populated
+  /// while emitting deferred diagnostics and is used to print call stack notes
+  /// for all offload languages.
+  ///
+  /// Functions that we can tell a priori must be emitted aren't added to this
+  /// map. A function may have multiple callers that force it into device
+  /// context, so we store all of them to produce complete diagnostics.
+  llvm::DenseMap</* Callee = */ CanonicalDeclPtr<const FunctionDecl>,
+                 /* Callers = */ llvm::SmallVector<FunctionDeclAndLoc, 1>>
+      DeviceKnownEmittedFns;
+
   /// CurContext - This is the current declaration context of parsing.
   DeclContext *CurContext;
 
@@ -2143,9 +2156,13 @@ public:
     bool ShouldAct;
   };
 
-  /// Last section used with #pragma init_seg.
-  StringLiteral *CurInitSeg;
-  SourceLocation CurInitSegLoc;
+  /// Used for #pragma init_seg.
+  struct InitSegPragmaState {
+    SourceLocation PragmaLocation;
+    StringLiteral *Segment = nullptr;
+    FunctionDecl *Func = nullptr;
+  };
+  InitSegPragmaState CurInitSeg;
 
   /// Sections used with #pragma alloc_text.
   llvm::StringMap<std::tuple<StringRef, SourceLocation>> FunctionToSectionMap;
@@ -2316,8 +2333,10 @@ public:
                             StringLiteral *SegmentName);
 
   /// Called on well-formed \#pragma init_seg().
+  /// If a function name is provided (", func-name"), it is passed via Func.
   void ActOnPragmaMSInitSeg(SourceLocation PragmaLocation,
-                            StringLiteral *SegmentName);
+                            StringLiteral *SegmentName,
+                            IdentifierLoc *Func = nullptr);
 
   /// Called on well-formed \#pragma alloc_text().
   void ActOnPragmaMSAllocText(
@@ -6304,6 +6323,21 @@ public:
   void DefineDefaultedComparison(SourceLocation Loc, FunctionDecl *FD,
                                  DefaultedComparisonKind DCK);
 
+  /// Check a defaulted postfix increment or decrement operator function
+  /// (C++2d [over.inc.default]), defining it as deleted if necessary.
+  ///
+  /// \param S The scope in which the function is defaulted, used to perform
+  /// the unqualified name lookups needed by the implicit definition, or
+  /// \c nullptr if those lookups have already been performed.
+  ///
+  /// \returns \c true if the function is ill-formed.
+  bool CheckExplicitlyDefaultedPostfixOperator(Scope *S, FunctionDecl *FD,
+                                               PostfixOperatorKind Kind);
+  /// Synthesize the body of a defaulted postfix increment or decrement
+  /// operator function (C++2d [over.inc.default]p3).
+  void DefineDefaultedPostfixOperator(SourceLocation Loc, FunctionDecl *FD,
+                                      PostfixOperatorKind Kind);
+
   void CheckExplicitObjectMemberFunction(Declarator &D, DeclarationName Name,
                                          QualType R, bool IsLambda,
                                          DeclContext *DC = nullptr);
@@ -6621,10 +6655,17 @@ public:
   void ActOnPureSpecifier(Decl *D, SourceLocation PureSpecLoc);
   void SetDeclDeleted(Decl *dcl, SourceLocation DelLoc,
                       StringLiteral *Message = nullptr);
-  void SetDeclDefaulted(Decl *dcl, SourceLocation DefaultLoc);
+  /// Mark the given declaration as explicitly defaulted.
+  ///
+  /// \param S The scope in which the function is defaulted, if it is
+  /// available. It is used to perform the unqualified name lookups needed by
+  /// the implicit definition of an out-of-class defaulted function.
+  void SetDeclDefaulted(Decl *dcl, SourceLocation DefaultLoc,
+                        Scope *S = nullptr);
 
   void SetFunctionBodyKind(Decl *D, SourceLocation Loc, FnBodyKind BodyKind,
-                           StringLiteral *DeletedMessage = nullptr);
+                           StringLiteral *DeletedMessage = nullptr,
+                           Scope *S = nullptr);
   void ActOnStartTrailingRequiresClause(Scope *S, Declarator &D);
   ExprResult ActOnFinishTrailingRequiresClause(ExprResult ConstraintExpr);
   ExprResult ActOnRequiresClause(ExprResult ConstraintExpr);
@@ -7284,6 +7325,12 @@ public:
   /// variable will have in the given scope.
   QualType getCapturedDeclRefType(ValueDecl *Var, SourceLocation Loc);
 
+  /// Handle a use of the variably modified type \p T in the current context.
+  /// Array bounds evaluated in an enclosing context are captured by the
+  /// lambdas in between; if a local class or a block is in between instead,
+  /// the use is diagnosed. Returns false if the use is invalid.
+  bool CheckVariablyModifiedTypeUse(QualType T, SourceLocation Loc);
+
   /// Mark all of the declarations referenced within a particular AST node as
   /// referenced. Used when template instantiation instantiates a non-dependent
   /// type -- entities referenced by the type are now referenced.
@@ -7332,7 +7379,7 @@ public:
 
   ExprResult ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
                                SourceLocation TemplateKWLoc, UnqualifiedId &Id,
-                               bool HasTrailingLParen, bool IsAddressOfOperand,
+                               bool IsCall, bool IsAddressOfOperand,
                                CorrectionCandidateCallback *CCC = nullptr,
                                bool IsInlineAsmIdentifier = false);
 
@@ -7395,7 +7442,7 @@ public:
                    const TemplateArgumentListInfo *TemplateArgs = nullptr);
 
   bool UseArgumentDependentLookup(const CXXScopeSpec &SS, const LookupResult &R,
-                                  bool HasTrailingLParen);
+                                  bool IsCall);
 
   /// BuildQualifiedDeclarationNameExpr - Build a C++ qualified
   /// declaration name, generally during template instantiation.
@@ -7445,7 +7492,8 @@ public:
   /// from multiple tokens.  However, the common case is that StringToks points
   /// to one string.
   ExprResult ActOnStringLiteral(ArrayRef<Token> StringToks,
-                                Scope *UDLScope = nullptr);
+                                Scope *UDLScope = nullptr,
+                                ConversionAction Action = CA_ToLiteralEncoding);
 
   ExprResult ActOnUnevaluatedStringLiteral(ArrayRef<Token> StringToks);
 
@@ -7621,8 +7669,10 @@ public:
                            bool AllowRecovery = false);
 
   /// BuildBuiltinCallExpr - Create a call to a builtin function specified by Id
-  //  with the specified CallArgs
-  Expr *BuildBuiltinCallExpr(SourceLocation Loc, Builtin::ID Id,
+  /// with the specified CallArgs. Id is unsigned rather than Builtin::ID, so
+  /// that it can also be a target-specific builtin ID, which is not in
+  /// Builtin::ID, e.g., BPF::BI__builtin_preserve_enum_value.
+  Expr *BuildBuiltinCallExpr(SourceLocation Loc, unsigned Id,
                              MultiExprArg CallArgs);
 
   using ADLCallKind = CallExpr::ADLCallKind;
@@ -8497,6 +8547,10 @@ public:
 private:
   static BinaryOperatorKind ConvertTokenKindToBinaryOpcode(tok::TokenKind Kind);
 
+  /// Maps the size expression of each VLA type created inside a function,
+  /// block or lambda to the context in which that size is evaluated.
+  llvm::DenseMap<const Expr *, const DeclContext *> VLASizeExprOwners;
+
   /// Methods for marking which expressions involve dereferencing a pointer
   /// marked with the 'noderef' attribute. Expressions are checked bottom up as
   /// they are parsed, meaning that a noderef pointer may not be accessed. For
@@ -9018,9 +9072,6 @@ public:
   concepts::TypeRequirement *BuildTypeRequirement(
       concepts::Requirement::SubstitutionDiagnostic *SubstDiag);
   concepts::NestedRequirement *BuildNestedRequirement(Expr *E);
-  concepts::NestedRequirement *
-  BuildNestedRequirement(StringRef InvalidConstraintEntity,
-                         const ASTConstraintSatisfaction &Satisfaction);
   ExprResult ActOnRequiresExpr(SourceLocation RequiresKWLoc,
                                RequiresExprBodyDecl *Body,
                                SourceLocation LParenLoc,
@@ -11493,7 +11544,8 @@ private:
   ///@{
 
 public:
-  ExprResult ActOnGCCAsmStmtString(Expr *Stm, bool ForAsmLabel);
+  ExprResult ActOnGCCAsmStmtString(Expr *Stm, bool ForAsmLabel,
+                                   bool IsConstexpr = false);
   StmtResult ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
                              bool IsVolatile, unsigned NumOutputs,
                              unsigned NumInputs, IdentifierInfo **Names,
@@ -15305,7 +15357,7 @@ private:
   /// The key is based on the unsubstituted expression and the parameter
   /// mapping. This lets us not substituting the mapping more than once,
   /// which is (very!) expensive.
-  llvm::DenseMap<llvm::FoldingSetNodeID,
+  llvm::DenseMap<llvm::FoldingSetNodeIDRef,
                  UnsubstitutedConstraintSatisfactionCacheResult>
       UnsubstitutedConstraintSatisfactionCache;
 
@@ -15313,7 +15365,7 @@ private:
   /// concepts. Substituting into normalized concepts can be extremely expensive
   /// due to the redundancy of template parameters. This cache is intended for
   /// use by TemplateInstantiator to avoid redundant semantic checking.
-  llvm::DenseMap<llvm::FoldingSetNodeID, TemplateArgumentLoc>
+  llvm::DenseMap<llvm::FoldingSetNodeIDRef, TemplateArgumentLoc>
       *CurrentCachedTemplateArgs = nullptr;
 
   /// Caches pairs of template-like decls whose associated constraints were
@@ -15330,7 +15382,7 @@ private:
 
   /// Cache whether the associated constraint of a declaration
   /// is satisfied.
-  llvm::ContextualFoldingSet<ConstraintSatisfaction, const ASTContext &>
+  llvm::DenseMap<llvm::FoldingSetNodeIDRef, ConstraintSatisfaction *>
       SatisfactionCache;
 
   // The current stack of constraint satisfactions, so we can exit-early.

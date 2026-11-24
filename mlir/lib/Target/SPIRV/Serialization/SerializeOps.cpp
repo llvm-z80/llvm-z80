@@ -432,6 +432,8 @@ LogicalResult Serializer::processFuncOp(spirv::FuncOp op) {
   functions.append(functionBody.begin(), functionBody.end());
   functionHeader.clear();
   functionBody.clear();
+  valueIDMap.clear();
+  blockIDMap.clear();
 
   return success();
 }
@@ -1199,6 +1201,21 @@ LogicalResult Serializer::processOp<spirv::GenericCastToPtrExplicitOp>(
   operands.push_back(static_cast<uint32_t>(resultStorage));
   encodeInstructionInto(functionBody, spirv::Opcode::OpGenericCastToPtrExplicit,
                         operands);
+  return success();
+}
+
+template <>
+LogicalResult Serializer::processOp<spirv::KHRAbortOp>(spirv::KHRAbortOp op) {
+  Value message = op.getMessage();
+  uint32_t messageTypeID = 0;
+  if (failed(processType(op.getLoc(), message.getType(), messageTypeID)))
+    return failure();
+  uint32_t messageID = getValueID(message);
+  assert(messageID && "use before def!");
+  if (failed(emitDebugLine(functionBody, op.getLoc())))
+    return failure();
+  encodeInstructionInto(functionBody, spirv::Opcode::OpAbortKHR,
+                        {messageTypeID, messageID});
   return success();
 }
 

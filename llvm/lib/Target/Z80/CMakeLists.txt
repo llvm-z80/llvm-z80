@@ -2,19 +2,19 @@ add_llvm_component_group(Z80)
 
 set(LLVM_TARGET_DEFINITIONS Z80.td)
 
-tablegen(LLVM Z80GenAsmMatcher.inc -gen-asm-matcher)
-tablegen(LLVM Z80GenAsmWriter.inc -gen-asm-writer)
-tablegen(LLVM Z80GenDisassemblerTables.inc -gen-disassembler)
-tablegen(LLVM Z80GenPreLegalizeGICombiner.inc -gen-global-isel-combiner
+llvm_tablegen(Z80GenAsmMatcher.inc -gen-asm-matcher)
+llvm_tablegen(Z80GenAsmWriter.inc -gen-asm-writer)
+llvm_tablegen(Z80GenDisassemblerTables.inc -gen-disassembler)
+llvm_tablegen(Z80GenPreLegalizeGICombiner.inc -gen-global-isel-combiner
               -combiners="Z80PreLegalizerCombiner")
-tablegen(LLVM Z80GenPostLegalizeGICombiner.inc -gen-global-isel-combiner
+llvm_tablegen(Z80GenPostLegalizeGICombiner.inc -gen-global-isel-combiner
               -combiners="Z80PostLegalizerCombiner")
-tablegen(LLVM Z80GenInstrInfo.inc -gen-instr-info)
-tablegen(LLVM Z80GenMCCodeEmitter.inc -gen-emitter)
-tablegen(LLVM Z80GenMCPseudoLowering.inc -gen-pseudo-lowering)
-tablegen(LLVM Z80GenRegisterBank.inc -gen-register-bank)
-tablegen(LLVM Z80GenRegisterInfo.inc -gen-register-info)
-tablegen(LLVM Z80GenSubtargetInfo.inc -gen-subtarget)
+llvm_tablegen(Z80GenInstrInfo.inc -gen-instr-info)
+llvm_tablegen(Z80GenMCCodeEmitter.inc -gen-emitter)
+llvm_tablegen(Z80GenMCPseudoLowering.inc -gen-pseudo-lowering)
+llvm_tablegen(Z80GenRegisterBank.inc -gen-register-bank)
+llvm_tablegen(Z80GenRegisterInfo.inc -gen-register-info)
+llvm_tablegen(Z80GenSubtargetInfo.inc -gen-subtarget)
 
 add_public_tablegen_target(Z80CommonTableGen)
 

@@ -653,6 +653,13 @@ public:
                                     SmallVectorImpl<Register> &UpdatedDefs,
                                     GISelChangeObserver &Observer) {
     if (!llvm::canReplaceReg(DstReg, SrcReg, MRI)) {
+      // Move the def of DstReg to the COPY, so that DstReg does not get a
+      // second def either.
+      MachineOperand &DefMO = *MRI.def_begin(DstReg);
+      MachineInstr &DefMI = *DefMO.getParent();
+      Observer.changingInstr(DefMI);
+      DefMO.setReg(MRI.createGenericVirtualRegister(MRI.getType(DstReg)));
+      Observer.changedInstr(DefMI);
       Builder.buildCopy(DstReg, SrcReg);
       UpdatedDefs.push_back(DstReg);
       return;
@@ -663,8 +670,10 @@ public:
       UseMIs.push_back(&UseMI);
       Observer.changingInstr(UseMI);
     }
-    // Replace the registers.
-    MRI.replaceRegWith(DstReg, SrcReg);
+    // Replace the uses only, so that SrcReg does not get a second def.
+    for (MachineOperand &MO :
+         llvm::make_early_inc_range(MRI.use_operands(DstReg)))
+      MO.setReg(SrcReg);
     UpdatedDefs.push_back(SrcReg);
     // Notify the observer that we changed the instructions.
     for (auto *UseMI : UseMIs)
@@ -1002,10 +1011,6 @@ public:
 
         replaceRegOrBuildCopy(DefReg, FoundVal, MRI, MIB, UpdatedDefs,
                               Observer);
-        // We only want to replace the uses, not the def of the old reg.
-        Observer.changingInstr(MI);
-        MI.getOperand(DefIdx).setReg(DefReg);
-        Observer.changedInstr(MI);
         DeadDefs[DefIdx] = true;
       }
       return DeadDefs.all();
@@ -1639,7 +1644,7 @@ private:
   bool isInstUnsupported(const LegalityQuery &Query) const {
     using namespace LegalizeActions;
     auto Step = LI.getAction(Query);
-    return Step.Action == Unsupported || Step.Action == NotFound;
+    return Step.Action == Unsupported;
   }
 
   bool isInstLegal(const LegalityQuery &Query) const {
