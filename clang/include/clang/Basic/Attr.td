@@ -3735,6 +3735,14 @@ def SmallC : DeclOrTypeAttr, TargetSpecificAttr<TargetZ80> {
   let Documentation = [SmallCDocs];
 }
 
+def Z80PreservesRegs : InheritableAttr, TargetSpecificAttr<TargetZ80> {
+  let Spellings = [Clang<"preserves_regs">];
+  let Subjects = SubjectList<[Function]>;
+  let Args = [VariadicIdentifierArgument<"Regs">];
+  let PragmaAttributeSupport = 0;
+  let Documentation = [Z80PreservesRegsDocs];
+}
+
 def Target : InheritableAttr {
   let Spellings = [GCC<"target">];
   let Args = [StringArgument<"featuresStr">];

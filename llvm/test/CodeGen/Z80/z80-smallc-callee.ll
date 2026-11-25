@@ -51,13 +51,10 @@ define void @call_smallc_callee() {
 ; CHECK-NEXT:  ld l,a
 ; CHECK-NEXT:  add hl,hl
 ; CHECK:       sbc hl,de
-; CHECK:       pop bc
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  push bc
-; CHECK-NEXT:  ret
+; CHECK:       pop hl
+; CHECK-NEXT:  pop af
+; CHECK-NEXT:  pop af
+; CHECK-NEXT:  jp (hl)
 define cc133 void @callee_void(i16 %a, i16 %b) {
   %b2 = shl i16 %b, 1
   %s = sub i16 %a, %b2
@@ -83,15 +80,11 @@ define cc133 void @callee_void(i16 %a, i16 %b) {
 ; The scalar is the doubled operand, so swapping the two slots is observable.
 ; CHECK:       add hl,hl
 ; CHECK:       sbc hl,de
-; CHECK:       pop bc
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  inc sp
-; CHECK-NEXT:  push bc
-; CHECK-NEXT:  ret
+; CHECK:       pop hl
+; CHECK-NEXT:  pop af
+; CHECK-NEXT:  pop af
+; CHECK-NEXT:  pop af
+; CHECK-NEXT:  jp (hl)
 define cc133 void @callee_byval(ptr byval(%ByValPair) %p, i16 %x) {
   %v = load i16, ptr %p
   %x2 = shl i16 %x, 1

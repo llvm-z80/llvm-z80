@@ -35,10 +35,9 @@ define void @call_callee() {
 ; (b) callee side, reads args off the stack frame and callee-cleans them
 ; ============================================================================
 
-; void return (HL dead): args come from SP-relative offsets; cleanup uses the
-; return-address preservation sequence
-; (pop return addr into HL, drop the 4 arg bytes with inc sp x2, restore return
-; addr with ex (sp),hl).
+; void return (HL dead): args come from SP-relative offsets. The cleanup pops
+; the return address into HL, drops the 4 argument bytes with POP AF and
+; returns with jp (hl).
 ; CHECK-LABEL: _callee_void:
 ; CHECK:      ld hl,#2
 ; CHECK:      add hl,sp
@@ -50,13 +49,10 @@ define void @call_callee() {
 ; CHECK:      ld c,(hl)
 ; CHECK:      inc hl
 ; CHECK:      ld b,(hl)
-; CHECK:      pop bc
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: push bc
-; CHECK-NEXT: ret
+; CHECK:      pop hl
+; CHECK-NEXT: pop af
+; CHECK-NEXT: pop af
+; CHECK-NEXT: jp (hl)
 define cc 132 void @callee_void(i16 %a, i16 %b) {
   %scaled_a = mul i16 %a, 10
   %s = add i16 %scaled_a, %b
@@ -64,9 +60,8 @@ define cc 132 void @callee_void(i16 %a, i16 %b) {
   ret void
 }
 
-; i16 return: value comes back in HL (not DE, so no `ex de,hl`), and because HL
-; holds the return value the cleanup uses the BC fallback (pop return addr into
-; BC, drop 4 arg bytes with inc sp x4, push BC back).
+; i16 return: value comes back in HL (not DE, so no `ex de,hl`). So the return
+; address goes through BC.
 ; CHECK-LABEL: _callee_reti16:
 ; CHECK:      ld hl,#2
 ; CHECK:      add hl,sp
@@ -82,10 +77,8 @@ define cc 132 void @callee_void(i16 %a, i16 %b) {
 ; CHECK:      ld b,(hl)
 ; CHECK-NOT:  ex de,hl
 ; CHECK:      pop bc
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
+; CHECK-NEXT: pop af
+; CHECK-NEXT: pop af
 ; CHECK-NEXT: push bc
 ; CHECK-NEXT: ret
 define cc 132 i16 @callee_reti16(i16 %a, i16 %b) {
@@ -95,16 +88,14 @@ define cc 132 i16 @callee_reti16(i16 %a, i16 %b) {
 
 ; i32 return: callee cleanup is FORCED even though the return is > 16 bits.
 ; sdcccall(1) would caller-clean here; cc 132 must still pop its own 4 arg
-; bytes (BC-fallback pop/push).  Return value is in DE:HL.
+; bytes. The return address goes through BC. Return value is in DE:HL.
 ; CHECK-LABEL: _callee_reti32:
 ; CHECK:      ld hl,#2
 ; CHECK:      add hl,sp
 ; CHECK:      ld de,#0
 ; CHECK-NEXT: pop bc
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
+; CHECK-NEXT: pop af
+; CHECK-NEXT: pop af
 ; CHECK-NEXT: push bc
 ; CHECK-NEXT: ret
 define cc 132 i32 @callee_reti32(i16 %a, i16 %b) {

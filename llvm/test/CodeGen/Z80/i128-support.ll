@@ -48,7 +48,7 @@ define i128 @xor128(i128 %a, i128 %b) {
 ; Test: i128 equality comparison
 define i1 @eq128(i128 %a, i128 %b) {
 ; CHECK-LABEL: _eq128:
-; CHECK:       ret
+; CHECK:       jp (hl)
   %r = icmp eq i128 %a, %b
   ret i1 %r
 }
@@ -56,7 +56,7 @@ define i1 @eq128(i128 %a, i128 %b) {
 ; Test: i128 inequality comparison
 define i1 @ne128(i128 %a, i128 %b) {
 ; CHECK-LABEL: _ne128:
-; CHECK:       ret
+; CHECK:       jp (hl)
   %r = icmp ne i128 %a, %b
   ret i1 %r
 }
@@ -64,7 +64,7 @@ define i1 @ne128(i128 %a, i128 %b) {
 ; Test: i128 signed less-than comparison
 define i1 @slt128(i128 %a, i128 %b) {
 ; CHECK-LABEL: _slt128:
-; CHECK:       ret
+; CHECK:       jp (hl)
   %r = icmp slt i128 %a, %b
   ret i1 %r
 }
@@ -72,7 +72,7 @@ define i1 @slt128(i128 %a, i128 %b) {
 ; Test: i128 unsigned less-than comparison
 define i1 @ult128(i128 %a, i128 %b) {
 ; CHECK-LABEL: _ult128:
-; CHECK:       ret
+; CHECK:       jp (hl)
   %r = icmp ult i128 %a, %b
   ret i1 %r
 }

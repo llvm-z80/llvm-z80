@@ -326,6 +326,54 @@ static void addResultDefs(MachineInstrBuilder Call, const uint32_t *Mask,
     }
 }
 
+SmallVector<Register, 2>
+Z80CallLoweringCommon::getResultRegs(const MachineFunction &MF,
+                                     CallingConv::ID CC, Type *RetTy) const {
+  if (RetTy->isVoidTy())
+    return {};
+  const CallingConvRegs &Regs = getRegsForCC(CC);
+  switch (MF.getDataLayout().getTypeAllocSize(RetTy).getFixedValue()) {
+  case 1:
+    return {Regs.Ret_I8};
+  case 2:
+    return {Regs.Ret_I16};
+  case 3:
+  case 4:
+    return {Regs.Ret_I32_Hi, Regs.Ret_I32_Lo};
+  default:
+    // An empty value, or a value wider than 4 bytes.
+    return {};
+  }
+}
+
+/// The registers in \p RegNames, a "z80-preserves-regs" value, that a function
+/// keeps, except \p ArgRegs and \p RetRegs.
+static SmallVector<MCRegister, 9> getPreservedRegs(const MachineFunction &MF,
+                                                   StringRef RegNames,
+                                                   ArrayRef<Register> ArgRegs,
+                                                   ArrayRef<Register> RetRegs) {
+  const auto &STI = MF.getSubtarget<Z80Subtarget>();
+  const Z80RegisterInfo *TRI = STI.getRegisterInfo();
+  auto Overlaps = [&](MCRegister Reg, ArrayRef<Register> Regs) {
+    return any_of(Regs, [&](Register R) { return TRI->regsOverlap(R, Reg); });
+  };
+
+  SmallVector<MCRegister, 9> Kept;
+  for (StringRef Name : split(RegNames, ',')) {
+    MCRegister Reg = TRI->getRegByAsmName(Name.trim());
+    if (!Reg)
+      continue;
+    // SM83 has no IX or IY.
+    if (STI.isSM83() && Overlaps(Reg, {Z80::IX, Z80::IY}))
+      continue;
+    for (MCRegister Sub : TRI->subregs_inclusive(Reg))
+      if (!is_contained(Kept, Sub) && !Overlaps(Sub, ArgRegs) &&
+          !Overlaps(Sub, RetRegs))
+        Kept.push_back(Sub);
+  }
+  return Kept;
+}
+
 //===----------------------------------------------------------------------===//
 // Z80CallLowering — Z80-specific register config
 //===----------------------------------------------------------------------===//
@@ -680,6 +728,34 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   if (isUnsupportedCCForSubtarget(MF, CC))
     return false;
 
+  // Save the pair of every register the body keeps for its callers.
+  Attribute PreservesRegs = F.getFnAttribute("z80-preserves-regs");
+  if (PreservesRegs.isValid() && !F.hasFnAttribute(Attribute::Naked) &&
+      !F.hasFnAttribute("interrupt")) {
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    SmallVector<MCPhysReg, 8> SaveList;
+    for (const MCPhysReg *Reg = TRI->getCalleeSavedRegs(&MF); *Reg; ++Reg)
+      SaveList.push_back(*Reg);
+    SmallVector<Register, 2> Results = getResultRegs(MF, CC, F.getReturnType());
+    for (MCRegister Reg :
+         getPreservedRegs(MF, PreservesRegs.getValueAsString(), {}, Results))
+      for (MCPhysReg Pair : TRI->superregs(Reg)) {
+        if (!Z80::getPushOpcode(Pair))
+          continue;
+        // Popping the pair would overwrite the result in its other half.
+        if (any_of(Results,
+                   [&](Register R) { return TRI->regsOverlap(R, Pair); }))
+          F.getContext().diagnose(DiagnosticInfoUnsupported(
+              F, "cannot keep " + StringRef(TRI->getName(Reg)).lower() +
+                     " for callers, since restoring " +
+                     StringRef(TRI->getName(Pair)).lower() +
+                     " would overwrite the result"));
+        else if (!is_contained(SaveList, Pair))
+          SaveList.push_back(Pair);
+      }
+    MF.getRegInfo().setCalleeSavedRegs(SaveList);
+  }
+
   // Even with no arguments, an sret-demoted return still needs its hidden
   // pointer read from the stack below.
   if (F.arg_empty() && !IsVarArg && FLI.CanLowerReturn)
@@ -1029,6 +1105,10 @@ bool Z80CallLoweringCommon::isEligibleForTailCallOptimization(
   // Interrupt handlers do not tail call.
   const Function &Caller = MF.getFunction();
   if (Caller.hasFnAttribute("interrupt"))
+    return false;
+
+  // A tail callee may not restore the registers this function must preserve.
+  if (Caller.hasFnAttribute("z80-preserves-regs"))
     return false;
 
   // Reject a call whose result comes back through this frame.
@@ -1403,8 +1483,27 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
     return true;
   }
 
-  const uint32_t *Mask =
-      MF.getSubtarget().getRegisterInfo()->getCallPreservedMask(MF, CC);
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  const uint32_t *Mask = TRI->getCallPreservedMask(MF, CC);
+  SmallVector<MCRegister, 9> Kept;
+  if (Info.CB)
+    Kept = getPreservedRegs(
+        MF, Info.CB->getFnAttr("z80-preserves-regs").getValueAsString(),
+        ArgRegs, getResultRegs(MF, CC, Info.OrigRet.Ty));
+  if (!Kept.empty()) {
+    uint32_t *KeptMask = MF.allocateRegMask();
+    std::copy_n(Mask, MachineOperand::getRegMaskSize(TRI->getNumRegs()),
+                KeptMask);
+    for (MCRegister Reg : Kept)
+      KeptMask[Reg.id() / 32] |= 1u << (Reg.id() % 32);
+    for (MCRegister Reg : Kept)
+      for (MCPhysReg Pair : TRI->superregs(Reg))
+        if (none_of(TRI->subregs(Pair), [&](MCPhysReg Half) {
+              return MachineOperand::clobbersPhysReg(KeptMask, Half);
+            }))
+          KeptMask[Pair / 32] |= 1u << (Pair % 32);
+    Mask = KeptMask;
+  }
   CallMI.addRegMask(Mask);
 
   unsigned CalleeCleanupBytes = 0;

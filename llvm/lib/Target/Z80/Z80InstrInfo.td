@@ -1024,9 +1024,10 @@ def ADJCALLSTACKUP : Z80Pseudo<(outs), (ins i16imm:$bytes, i16imm:$prior)>;
 
 // Callee-cleanup return: pops return address, adjusts SP by $bytes, then
 // returns via indirect jump. Used by __sdcccall(1) callee-cleanup and
-// future __z88dk_callee convention.
+// future __z88dk_callee convention. The expansion uses only register pairs
+// that callers do not read.
 let isReturn = true, isTerminator = true, isBarrier = true,
-    Defs = [SP, HL, BC], Uses = [SP], hasSideEffects = true,
+    Defs = [SP], Uses = [SP], hasSideEffects = true,
     mayLoad = false, mayStore = false in {
 def RET_CLEANUP : Z80Pseudo<(outs), (ins i16imm:$bytes)>;
 }

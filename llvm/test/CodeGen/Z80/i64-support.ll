@@ -30,7 +30,7 @@ define i64 @sub64(i64 %a, i64 %b) {
 define i16 @call_add64(i64 %a, i64 %b) {
 ; CHECK-LABEL: _call_add64:
 ; CHECK:       call _add64
-; CHECK:       ret
+; CHECK:       jp (hl)
   %r = call i64 @add64(i64 %a, i64 %b)
   %lo = trunc i64 %r to i16
   ret i16 %lo

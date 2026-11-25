@@ -22,15 +22,16 @@ define float @pick(float %x, float %y, float %a, float %b) {
   ret float %b
 }
 
-; A 16-bit return keeps the cheaper HL scratch.
+; A 16-bit return leaves HL free for the return address.
 ; CHECK-LABEL: sum:
-; CHECK: ld hl,12
-; CHECK: add hl,sp
-; CHECK: ld sp,hl
-; CHECK: ret
+; CHECK: pop hl
+; CHECK: ld iy,12
+; CHECK-NEXT: add iy,sp
+; CHECK-NEXT: ld sp,iy
+; CHECK-NEXT: jp (hl)
 
 ; Z80MIR-LABEL: name: sum
-; Z80MIR: RET{{.*}}implicit $de
+; Z80MIR: JP_HLind{{.*}}implicit $de
 ; SM83MIR-LABEL: name: sum
 ; SM83MIR: JP_HLind{{.*}}implicit $bc
 define i16 @sum(i16 %a, i16 %b, i16 %c, i16 %d, i16 %e, i16 %f, i16 %g, i16 %h) {

@@ -7139,6 +7139,22 @@ with it, and it composes with ``__attribute__((z88dk_callee))``, the pairing
 the z88dk classic library uses for its ``_callee`` entry points.}];
 }
 
+def Z80PreservesRegsDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "preserves_regs (Z80)";
+  let Content = [{
+The ``preserves_regs`` attribute lists registers that a function leaves
+unchanged: any of ``a``, ``b``, ``c``, ``d``, ``e``, ``h``, ``l``, ``iyl`` and
+``iyh``.
+
+.. code-block:: c
+
+  void f(void) __attribute__((preserves_regs(b, c)));
+
+Callers keep values in the listed registers across a call. A function with a
+body saves and restores the listed registers that the body changes.}];
+}
+
 def PreferredNameDocs : Documentation {
   let Category = DocCatDecl;
   let Content = [{

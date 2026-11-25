@@ -7805,6 +7805,9 @@ ProcessDeclAttribute(Sema &S, Decl *D, const ParsedAttr &AL,
   case ParsedAttr::AT_ARMInterruptSaveFP:
     S.ARM().handleInterruptSaveFPAttr(D, AL);
     break;
+  case ParsedAttr::AT_Z80PreservesRegs:
+    S.Z80().handlePreservesRegsAttr(D, AL);
+    break;
   case ParsedAttr::AT_X86ForceAlignArgPointer:
     S.X86().handleForceAlignArgPointerAttr(D, AL);
     break;
