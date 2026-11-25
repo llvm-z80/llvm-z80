@@ -1650,11 +1650,9 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
         IsIY ? "the IY call trampoline" : "the HL call trampoline");
     auto NewMI =
         BuildMI(MBB, MI, DL, get(Z80::CALL_nn)).addExternalSymbol(Name);
-    // Copy implicit operands (argument registers)
-    for (const MachineOperand &MO : MI.implicit_operands()) {
-      if (MO.isReg() && MO.isUse())
-        NewMI.addReg(MO.getReg(), RegState::Implicit);
-    }
+    // Move the pseudo's operands over to the CALL_nn.
+    for (const MachineOperand &MO : MI.implicit_operands())
+      NewMI.add(MO);
     MI.eraseFromParent();
     return true;
   }

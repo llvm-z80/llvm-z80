@@ -3000,7 +3000,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
           .addExternalSymbol(FuncName)
           .addUse(Z80::DE, RegState::Implicit)
-          .addUse(Z80::BC, RegState::Implicit);
+          .addUse(Z80::BC, RegState::Implicit)
+          .addRegMask(
+              TRI.getCallPreservedMask(*MBB.getParent(), CallingConv::C))
+          .addDef(Z80::BC, RegState::Implicit)
+          .addDef(Z80::HL, RegState::Implicit);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
           .addReg(Z80::BC);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), RemReg)
@@ -3014,7 +3018,11 @@ bool Z80InstructionSelector::select(MachineInstr &MI) {
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(Z80::CALL_nn))
           .addExternalSymbol(FuncName)
           .addUse(Z80::HL, RegState::Implicit)
-          .addUse(Z80::DE, RegState::Implicit);
+          .addUse(Z80::DE, RegState::Implicit)
+          .addRegMask(
+              TRI.getCallPreservedMask(*MBB.getParent(), CallingConv::C))
+          .addDef(Z80::DE, RegState::Implicit)
+          .addDef(Z80::HL, RegState::Implicit);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), QuotReg)
           .addReg(Z80::DE);
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY), RemReg)

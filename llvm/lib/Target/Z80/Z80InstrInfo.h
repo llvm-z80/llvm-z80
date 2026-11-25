@@ -355,7 +355,12 @@ inline bool hasLiveValue(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     if (I->isDebugInstr())
       continue;
     bool LiveDef = false, Def = false, Use = false, Killed = false;
+    bool Clobbered = false;
     for (const MachineOperand &MO : I->operands()) {
+      if (MO.isRegMask()) {
+        Clobbered |= MO.clobbersPhysReg(Reg);
+        continue;
+      }
       if (!MO.isReg() || !MO.getReg().isPhysical() ||
           !TRI->regsOverlap(MO.getReg(), Reg))
         continue;
@@ -370,6 +375,8 @@ inline bool hasLiveValue(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     // Definitions take effect after the reads of the same instruction.
     if (Def)
       return LiveDef;
+    if (Clobbered)
+      return false;
     if (Use)
       return !Killed;
   }

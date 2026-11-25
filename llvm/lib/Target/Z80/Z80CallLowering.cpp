@@ -309,6 +309,23 @@ static unsigned getCallOpcode(const CallingConvRegs &Regs, bool IsIndirect,
 }
 } // anonymous namespace
 
+/// Add an implicit def to \p Call for each register \p Mask clobbers that is
+/// read after \p Call, up to \p End.
+static void addResultDefs(MachineInstrBuilder Call, const uint32_t *Mask,
+                          MachineBasicBlock::iterator End) {
+  const TargetRegisterInfo *TRI =
+      Call->getMF()->getSubtarget().getRegisterInfo();
+  for (MachineInstr &MI :
+       make_range(std::next(MachineBasicBlock::iterator(Call.getInstr())), End))
+    for (const MachineOperand &MO : MI.all_uses()) {
+      Register Reg = MO.getReg();
+      if (Reg.isPhysical() && Reg != Z80::SP &&
+          MachineOperand::clobbersPhysReg(Mask, Reg.asMCReg()) &&
+          !Call->definesRegister(Reg, TRI))
+        Call.addDef(Reg, RegState::Implicit);
+    }
+}
+
 //===----------------------------------------------------------------------===//
 // Z80CallLowering — Z80-specific register config
 //===----------------------------------------------------------------------===//
@@ -1386,6 +1403,10 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
     return true;
   }
 
+  const uint32_t *Mask =
+      MF.getSubtarget().getRegisterInfo()->getCallPreservedMask(MF, CC);
+  CallMI.addRegMask(Mask);
+
   unsigned CalleeCleanupBytes = 0;
   if (StackArgBytes > 0 && isCallCalleeCleanup(MF, Info))
     CalleeCleanupBytes = StackArgBytes;
@@ -1610,6 +1631,7 @@ bool Z80CallLoweringCommon::lowerCall(MachineIRBuilder &MIRBuilder,
                                 MF.getSubtarget<Z80Subtarget>());
   }
 
+  addResultDefs(CallMI, Mask, MIRBuilder.getInsertPt());
   return true;
 }
 
