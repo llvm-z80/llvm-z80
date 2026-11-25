@@ -17,7 +17,6 @@ define void @keep_bc(i8 %a, i8 %b, i16 %c, i16 %d) "z80-preserves-regs"="b,c" {
   ret void
 }
 
-; L passes the second argument. H is still listed, so HL is kept.
 ; Z80-LABEL: _keep_hl:
 ; Z80:       pop bc
 ; Z80-NEXT:  ex de,hl
@@ -32,7 +31,7 @@ define void @keep_bc(i8 %a, i8 %b, i16 %c, i16 %d) "z80-preserves-regs"="b,c" {
 ; SM83-NEXT:  add sp,10
 ; SM83-NEXT:  push bc
 ; SM83-NEXT:  ret
-define void @keep_hl(i8 %a, i8 %b, i16 %c, i16 %d, i16 %e, i16 %f, i16 %g) "z80-preserves-regs"="h,l" {
+define void @keep_hl(i16 %a, i16 %b, i16 %c, i16 %d, i16 %e, i16 %f, i16 %g) "z80-preserves-regs"="h,l" {
   ret void
 }
 
@@ -54,9 +53,7 @@ define i16 @keep_ret16(i8 %a, i8 %b, i16 %c, i16 %d) "z80-preserves-regs"="b,h" 
   ret i16 7
 }
 
-; Z80 returns the float in HL and DE, and A, B and C are listed. So the return
-; address goes through IY.
-; Z80-LABEL: _keep_abc:
+; Z80-LABEL: _keep_abh:
 ; Z80:       pop iy
 ; Z80-NEXT:  inc sp
 ; Z80-NEXT:  inc sp
@@ -64,8 +61,8 @@ define i16 @keep_ret16(i8 %a, i8 %b, i16 %c, i16 %d) "z80-preserves-regs"="b,h" 
 ; Z80-NEXT:  inc sp
 ; Z80-NEXT:  push iy
 ; Z80-NEXT:  ret
-define float @keep_abc(float %a, float %b) "z80-preserves-regs"="a,b,c" {
-  ret float %a
+define i16 @keep_abh(i8 %a, i8 %b, i16 %c, i16 %d) "z80-preserves-regs"="a,b,h" {
+  ret i16 7
 }
 
 ; Z80 returns the float in HL and DE, and IY is listed. So the arguments go

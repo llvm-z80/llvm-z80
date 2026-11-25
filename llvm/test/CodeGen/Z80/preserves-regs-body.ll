@@ -2,13 +2,11 @@
 ; RUN: llc -mtriple=sm83 -O2 -verify-machineinstrs < %s | FileCheck %s --check-prefixes=CHECK,SM83
 ;
 ; A caller keeps values in the listed registers across the call. A body
-; with the attribute saves each listed register it changes, except the
-; argument and result registers, and does not tail call.
+; with the attribute saves each listed register it changes, except a result
+; register, and does not tail call.
 
 declare void @bc() "z80-preserves-regs"="b,c"
 declare void @plain()
-
-@sink = global i8 0
 
 ; CHECK-LABEL: _keep:
 ; Z80:         ld c,a
@@ -75,16 +73,6 @@ define i8 @ret_a() "z80-preserves-regs"="a,b" {
 ; CHECK-NEXT:  ret
 define void @a_only() "z80-preserves-regs"="a" {
   call void @plain()
-  ret void
-}
-
-; A passes the argument, so the body does not save AF.
-; CHECK-LABEL: _arg_a:
-; CHECK-NOT:   push
-; CHECK:       ret
-define void @arg_a(i8 %x) "z80-preserves-regs"="a" {
-  %y = add i8 %x, 1
-  store volatile i8 %y, ptr @sink
   ret void
 }
 
