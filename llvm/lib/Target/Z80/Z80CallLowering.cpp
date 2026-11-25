@@ -728,39 +728,6 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
   if (isUnsupportedCCForSubtarget(MF, CC))
     return false;
 
-  // Save the pair of every register the body keeps for its callers.
-  Attribute PreservesRegs = F.getFnAttribute("z80-preserves-regs");
-  if (PreservesRegs.isValid() && !F.hasFnAttribute(Attribute::Naked) &&
-      !F.hasFnAttribute("interrupt")) {
-    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-    SmallVector<MCPhysReg, 8> SaveList;
-    for (const MCPhysReg *Reg = TRI->getCalleeSavedRegs(&MF); *Reg; ++Reg)
-      SaveList.push_back(*Reg);
-    SmallVector<Register, 2> Results = getResultRegs(MF, CC, F.getReturnType());
-    for (MCRegister Reg :
-         getPreservedRegs(MF, PreservesRegs.getValueAsString(), {}, Results))
-      for (MCPhysReg Pair : TRI->superregs(Reg)) {
-        if (!Z80::getPushOpcode(Pair))
-          continue;
-        // Popping the pair would overwrite the result in its other half.
-        if (any_of(Results,
-                   [&](Register R) { return TRI->regsOverlap(R, Pair); }))
-          F.getContext().diagnose(DiagnosticInfoUnsupported(
-              F, "cannot keep " + StringRef(TRI->getName(Reg)).lower() +
-                     " for callers, since restoring " +
-                     StringRef(TRI->getName(Pair)).lower() +
-                     " would overwrite the result"));
-        else if (!is_contained(SaveList, Pair))
-          SaveList.push_back(Pair);
-      }
-    MF.getRegInfo().setCalleeSavedRegs(SaveList);
-  }
-
-  // Even with no arguments, an sret-demoted return still needs its hidden
-  // pointer read from the stack below.
-  if (F.arg_empty() && !IsVarArg && FLI.CanLowerReturn)
-    return true;
-
   const CallingConvRegs &Regs = getRegsForCC(CC);
 
   // SDCC argument passing convention.
@@ -1041,6 +1008,39 @@ bool Z80CallLoweringCommon::lowerFormalArguments(
     Z80FunctionInfo *FuncInfo = MF.getInfo<Z80FunctionInfo>();
     FuncInfo->VarArgsStackIndex = VarArgsFI;
     MFI.setFrameAddressIsTaken(true);
+  }
+
+  // Save the pair of every register the body keeps for its callers.
+  Attribute PreservesRegs = F.getFnAttribute("z80-preserves-regs");
+  if (PreservesRegs.isValid() && !F.hasFnAttribute(Attribute::Naked) &&
+      !F.hasFnAttribute("interrupt")) {
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    SmallVector<MCPhysReg, 8> SaveList;
+    for (const MCPhysReg *Reg = TRI->getCalleeSavedRegs(&MF); *Reg; ++Reg)
+      SaveList.push_back(*Reg);
+    // Callers do not keep values in the argument registers. These registers
+    // are the live-ins of the entry block.
+    SmallVector<Register, 4> ArgRegs;
+    for (const auto &LiveIn : MBB.liveins())
+      ArgRegs.push_back(LiveIn.PhysReg);
+    SmallVector<Register, 2> Results = getResultRegs(MF, CC, F.getReturnType());
+    for (MCRegister Reg : getPreservedRegs(MF, PreservesRegs.getValueAsString(),
+                                           ArgRegs, Results))
+      for (MCPhysReg Pair : TRI->superregs(Reg)) {
+        if (!Z80::getPushOpcode(Pair))
+          continue;
+        // Popping the pair would overwrite the result in its other half.
+        if (any_of(Results,
+                   [&](Register R) { return TRI->regsOverlap(R, Pair); }))
+          F.getContext().diagnose(DiagnosticInfoUnsupported(
+              F, "cannot keep " + StringRef(TRI->getName(Reg)).lower() +
+                     " for callers, since restoring " +
+                     StringRef(TRI->getName(Pair)).lower() +
+                     " would overwrite the result"));
+        else if (!is_contained(SaveList, Pair))
+          SaveList.push_back(Pair);
+      }
+    MF.getRegInfo().setCalleeSavedRegs(SaveList);
   }
 
   return true;
