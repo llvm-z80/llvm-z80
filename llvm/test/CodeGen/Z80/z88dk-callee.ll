@@ -64,8 +64,7 @@ define void @call_callee4() {
 ; CHECK-NEXT: add hl,sp
 ; CHECK:      sbc hl,de
 ; CHECK:      pop bc
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
+; CHECK-NEXT: pop af
 ; CHECK-NEXT: push bc
 ; CHECK-NEXT: ret
 define cc 131 i32 @callee_reti32(i16 %a, i16 %b, i16 %c) {
@@ -86,11 +85,9 @@ define cc 131 i32 @callee_reti32(i16 %a, i16 %b, i16 %c) {
 ; CHECK-NEXT: add hl,sp
 ; CHECK:      sbc hl,de
 ; CHECK:      ex de,hl
-; CHECK-NEXT: pop bc
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: push bc
-; CHECK-NEXT: ret
+; CHECK-NEXT: pop hl
+; CHECK-NEXT: pop af
+; CHECK-NEXT: jp (hl)
 define cc 131 i16 @callee_reti16(i16 %a, i16 %b, i16 %c) {
   %b2 = shl i16 %b, 1
   %ab = sub i16 %a, %b2
@@ -114,13 +111,10 @@ define cc 131 i16 @callee_reti16(i16 %a, i16 %b, i16 %c) {
 ; CHECK-NEXT: add hl,sp
 ; CHECK:      add hl,hl
 ; CHECK:      add hl,de
-; CHECK:      pop bc
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: inc sp
-; CHECK-NEXT: push bc
-; CHECK-NEXT: ret
+; CHECK:      pop hl
+; CHECK-NEXT: pop af
+; CHECK-NEXT: pop af
+; CHECK-NEXT: jp (hl)
 define cc 131 i16 @callee_4arg(i16 %a, i16 %b, i16 %c, i16 %d) {
   %b2 = shl i16 %b, 1
   %ab = sub i16 %a, %b2

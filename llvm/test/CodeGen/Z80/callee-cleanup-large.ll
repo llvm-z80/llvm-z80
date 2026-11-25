@@ -21,14 +21,16 @@ target datalayout = "e-p:16:8-i16:8-i32:8-i64:8-a:8-n8:16"
 
 ; 130 bytes, and nothing in the return registers.
 define cc133 void @big_byval(ptr byval(%Big) %p) {
-; Z80 builds the new SP in HL, which is free here.
+; Z80 pops the return address into HL. EX DE,HL moves the return address to
+; DE during the SP computation in HL.
 ; Z80-LABEL: _big_byval:
-; Z80:         pop bc
+; Z80:         pop hl
+; Z80-NEXT:    ex de,hl
 ; Z80-NEXT:    ld hl,#130
 ; Z80-NEXT:    add hl,sp
 ; Z80-NEXT:    ld sp,hl
-; Z80-NEXT:    push bc
-; Z80-NEXT:    ret
+; Z80-NEXT:    ex de,hl
+; Z80-NEXT:    jp (hl)
 ;
 ; SM83 has no such sequence and must split the add; 127 + 3 = 130.
 ; SM83-LABEL: _big_byval:

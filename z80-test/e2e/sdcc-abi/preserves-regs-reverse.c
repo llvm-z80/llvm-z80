@@ -1,7 +1,7 @@
 // RUN: rm -rf %t && split-file %s %t
 // RUN: %{sdcc} -c %t/sdcc.c -o %t/sdcc.rel
 // RUN: %cc %t/clang.c %t/sdcc.rel -o %t/prog
-// RUN: %run --expect-result=0x0003 %t/prog
+// RUN: %run --expect-result=0x0007 %t/prog
 
 //--- clang.c
 /* SDCC main calls Clang functions that preserve registers. SDCC keeps values
@@ -27,12 +27,19 @@ u8 touch8(u8 x) __attribute__((preserves_regs(b, c, d, e, h, l))) {
     return x + 1;
 }
 
+void touch_stack(u8 x, u8 y, u16 z, u16 w)
+    __attribute__((preserves_regs(b, c, h, l))) {
+    sink = churn(z, w) ^ x ^ y;
+}
+
 //--- sdcc.c
 typedef unsigned char u8;
 typedef unsigned short u16;
 
 extern void touch(u16 x) __preserves_regs(b, c, d, e, h, l);
 extern u8 touch8(u8 x) __preserves_regs(b, c, d, e, h, l);
+extern void touch_stack(u8 x, u8 y, u16 z, u16 w)
+    __preserves_regs(b, c, h, l);
 
 int main(void)
 {
@@ -54,6 +61,15 @@ int main(void)
         acc += touch8(i);
     if (acc == 55)
         status |= (1 << 1);
+
+    /* Bit 2: and a call that pops its stack arguments */
+    acc = 0;
+    for (i = 0; i < 10; i++) {
+        touch_stack(i, 1, i, 2);
+        acc += i;
+    }
+    if (acc == 45)
+        status |= (1 << 2);
 
     return status;
 }

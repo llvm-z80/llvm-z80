@@ -10,7 +10,7 @@
 @x = global [6 x i8] zeroinitializer, align 1
 
 ; CHECK-LABEL: store40:
-; CHECK: ret
+; CHECK: jp (hl)
 define void @store40(i64 %v) {
   %t = trunc i64 %v to i40
   store i40 %t, ptr @x, align 1

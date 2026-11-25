@@ -29,6 +29,7 @@
 #include "llvm/CodeGen/MachineOutliner.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -703,6 +704,23 @@ void Z80InstrInfo::releaseStack(MachineBasicBlock &MBB,
       Live.stepBackward(MI);
   for (MachineInstr *MI : buildStackRelease(*MBB.getParent(), DL, Amount, Live))
     MBB.insert(I, MI);
+}
+
+/// Find a register that the callee-pop return \p MI may overwrite.
+static MCRegister findDeadCallerSavedReg(const MachineInstr &MI,
+                                         const Z80Subtarget &STI) {
+  LiveRegUnits UsedRegs(*STI.getRegisterInfo());
+  // addLiveOuts counts every callee-saved register, saved or not.
+  UsedRegs.addLiveOuts(*MI.getParent());
+  UsedRegs.stepBackward(MI);
+  // POP AF on SM83 clears the low four bits of F.
+  static constexpr MCPhysReg SM83Regs[] = {Z80::HL, Z80::BC, Z80::DE};
+  static constexpr MCPhysReg Z80Regs[] = {Z80::HL, Z80::BC, Z80::DE, Z80::AF,
+                                          Z80::IY};
+  for (MCPhysReg Reg : STI.isSM83() ? ArrayRef(SM83Regs) : ArrayRef(Z80Regs))
+    if (UsedRegs.available(Reg))
+      return Reg;
+  return MCRegister();
 }
 
 // A frame slot access says whether it is volatile in its memory operand, and
@@ -1658,64 +1676,32 @@ bool Z80InstrInfo::expandPostRAPseudoImpl(MachineInstr &MI) const {
   }
 
   case Z80::RET_CLEANUP: {
-    // Callee-cleanup return: pop return address, skip N bytes of stack args,
-    // then return via indirect jump.
+    // Callee-cleanup return: pop the return address, skip the stack arguments,
+    // then return to the address.
     unsigned Amount = MI.getOperand(0).getImm();
-    // SM83's ADD SP,e takes a signed 8-bit displacement, so a cleanup of more
-    // than 127 bytes has to be split across several adds.
-    auto addToSP = [&](unsigned Bytes) {
-      while (Bytes) {
-        unsigned Step = std::min(Bytes, 127u);
-        BuildMI(MBB, MI, DL, get(Z80::ADD_SP_e)).addImm(Step);
-        Bytes -= Step;
-      }
-    };
     MachineInstrBuilder Term;
     if (Amount == 0) {
       Term = BuildMI(MBB, MI, DL, get(Z80::RET));
-    } else if (STI->isSM83() && MI.readsRegister(Z80::HL, TRI)) {
-      // SM83 with an i32/float return: the z88dk classic conventions bring it
-      // back in HLDE, and SM83's only indirect jump goes through HL, so the
-      // usual scratch would destroy the high word.  Return through the stack
-      // instead, on BC, which is not part of a return in that family.
-      // POP BC; ADD SP,e; PUSH BC; RET
-      BuildMI(MBB, MI, DL, get(Z80::POP_BC));
-      addToSP(Amount);
-      BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
-      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
-    } else if (STI->isSM83()) {
-      // SM83: POP HL; ADD SP,e; JP (HL)
-      BuildMI(MBB, MI, DL, get(Z80::POP_HL));
-      addToSP(Amount);
-      Term = BuildMI(MBB, MI, DL, get(Z80::JP_HLind));
-    } else if (Amount <= 8) {
-      // Z80 small: POP BC; INC SP × N; PUSH BC; RET
-      // Use BC (not HL) because HL may hold i32/float return high word.
-      // BC is caller-saved and never part of any Z80 return value.
-      BuildMI(MBB, MI, DL, get(Z80::POP_BC));
-      for (unsigned i = 0; i < Amount; ++i)
-        BuildMI(MBB, MI, DL, get(Z80::INC_SP));
-      BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
-      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
-    } else if (MI.readsRegister(Z80::HL, TRI)) {
-      // Z80 large with an i32/float return: the value travels in HLDE (the
-      // SDCC float exception makes such functions callee-cleanup), so the
-      // usual HL scratch would destroy it. Use IY, which calls already
-      // declare clobbered.
-      BuildMI(MBB, MI, DL, get(Z80::POP_BC));
-      BuildMI(MBB, MI, DL, get(Z80::LD_IY_nn)).addImm(Amount);
-      BuildMI(MBB, MI, DL, get(Z80::ADD_IY_SP));
-      BuildMI(MBB, MI, DL, get(Z80::LD_SP_IY));
-      BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
-      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
     } else {
-      // Z80 large: POP BC; LD HL,N; ADD HL,SP; LD SP,HL; PUSH BC; RET
-      BuildMI(MBB, MI, DL, get(Z80::POP_BC));
-      Z80::buildLD16n(MBB, MI, DL, *this, Z80::HL).addImm(Amount);
-      BuildMI(MBB, MI, DL, get(Z80::ADD_HL_SP));
-      BuildMI(MBB, MI, DL, get(Z80::LD_SP_HL));
-      BuildMI(MBB, MI, DL, get(Z80::PUSH_BC));
-      Term = BuildMI(MBB, MI, DL, get(Z80::RET));
+      MCRegister PopReg = findDeadCallerSavedReg(MI, *STI);
+      if (!PopReg) {
+        const Function &F = MBB.getParent()->getFunction();
+        F.getContext().diagnose(DiagnosticInfoUnsupported(
+            F, "cannot pop the stack arguments on return, since every "
+               "register pair is kept for callers or returns the result"));
+        PopReg = Z80::BC;
+      }
+      // POP rr; <SP adjustment>; PUSH rr; RET
+      // POP HL; <SP adjustment>; JP (HL) (if rr is HL)
+      MachineInstr *Pop = BuildMI(MBB, MI, DL, get(Z80::getPopOpcode(PopReg)));
+      if (PopReg == Z80::HL) {
+        Term = BuildMI(MBB, MI, DL, get(Z80::JP_HLind));
+      } else {
+        BuildMI(MBB, MI, DL, get(Z80::getPushOpcode(PopReg)));
+        Term = BuildMI(MBB, MI, DL, get(Z80::RET));
+      }
+      // Insert the SP adjustment last. releaseStack then counts rr as live.
+      releaseStack(MBB, std::next(Pop->getIterator()), DL, Amount);
     }
     // Uses only; the instructions built above declare their own defs.
     for (const MachineOperand &MO : MI.implicit_operands())
@@ -2092,20 +2078,6 @@ unsigned Z80InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     case Z80::TCRETURN_C_nn: return 3;
     case Z80::TCRETURN_IY: return 2;
     case Z80::TCRETURN_HL: return 1;
-    // Callee-cleanup return.  The sequences are in expandPostRAPseudoImpl;
-    // SM83 needs one ADD SP,e per 127 bytes because the displacement is
-    // signed 8-bit.
-    case Z80::RET_CLEANUP: {
-      unsigned Amount = MI.getOperand(0).getImm();
-      if (Amount == 0)
-        return 1;
-      bool ReadsHL = MI.readsRegister(Z80::HL, STI->getRegisterInfo());
-      if (IsSM83)
-        return (ReadsHL ? 3 : 2) + 2 * ((Amount + 126) / 127);
-      if (Amount <= 8)
-        return 3 + Amount;
-      return ReadsHL ? 11 : 8;
-    }
     case Z80::UADDSAT8: return 5;
     case Z80::USUBSAT8: return 4;
     case Z80::SADDSAT8:
