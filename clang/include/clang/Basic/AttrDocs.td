@@ -7151,14 +7151,8 @@ unchanged: any of ``a``, ``b``, ``c``, ``d``, ``e``, ``h``, ``l``, ``iyl`` and
 
   void f(void) __attribute__((preserves_regs(b, c)));
 
-A direct caller keeps values in the listed registers across the call, except
-in the registers that pass its arguments or return its result. A function
-with a body saves and restores the listed registers it changes, except its
-result registers, and does not tail call. Such a function cannot list a
-register that shares a pair with part of its result, such as ``h`` when ``l``
-returns an 8-bit value. A ``naked`` function is taken as written.
-
-Every declaration of a function must list the same registers.}];
+Callers keep values in the listed registers across a call. A function with a
+body saves and restores the listed registers that the body changes.}];
 }
 
 def PreferredNameDocs : Documentation {
