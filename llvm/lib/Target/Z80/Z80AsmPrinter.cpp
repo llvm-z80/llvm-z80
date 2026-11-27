@@ -19,6 +19,7 @@
 #include "Z80MCInstLower.h"
 #include "Z80MachineFunctionInfo.h"
 #include "Z80RegisterInfo.h"
+#include "Z80SDCCDebug.h"
 #include "Z80Subtarget.h"
 
 #include "llvm/ADT/SmallPtrSet.h"
@@ -77,6 +78,8 @@ public:
                              const char *ExtraCode, raw_ostream &OS) override;
 
   void emitStartOfAsmFile(Module &M) override;
+
+  bool doInitialization(Module &M) override;
 
   void emitGlobalVariable(const GlobalVariable *GV) override;
 
@@ -179,6 +182,19 @@ void Z80AsmPrinter::emitStartOfAsmFile(Module &M) {
       OutContext.reportWarning(SMLoc(), "alignment of '" + F.getName() +
                                             "' is ignored in the " + Format +
                                             " format");
+}
+
+bool Z80AsmPrinter::doInitialization(Module &M) {
+  AsmPrinter::doInitialization(M);
+
+  // The ELF format gets its debug information from DwarfDebug, and the
+  // sdasz80 format gets the debug symbols of SDCC. A module without compile
+  // units has no debug information. The base call has already run
+  // beginModule on its handlers, so Z80SDCCDebug gets no beginModule.
+  if (MAI.isSDCC() && !M.debug_compile_units().empty())
+    Handlers.push_back(std::make_unique<Z80SDCCDebug>(*this));
+
+  return false;
 }
 
 // Whether \p GV has no explicit section, or a section that becomes _DATA or
