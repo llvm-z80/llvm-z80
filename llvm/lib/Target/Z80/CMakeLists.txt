@@ -46,6 +46,7 @@ add_llvm_target(Z80CodeGen
   Z80PushPopSpills.cpp
   Z80RegisterBankInfo.cpp
   Z80RegisterInfo.cpp
+  Z80SDCCDebug.cpp
   Z80ShiftRotateChain.cpp
   Z80StaticFrameAlloc.cpp
   Z80Subtarget.cpp
