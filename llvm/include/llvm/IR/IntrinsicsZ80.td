@@ -36,4 +36,12 @@ let TargetPrefix = "z80" in {
   def int_z80_nop
       : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects, IntrNoCallback]>;
 
+  // Select interrupt mode 2 (IM 2)
+  // void @llvm.z80.im2()
+  def int_z80_im2 : Intrinsic<[], [], [IntrNoMem, IntrHasSideEffects]>;
+
+  // Load the interrupt vector register I from A (LD I,A)
+  // void @llvm.z80.set_i(i8 val)
+  def int_z80_set_i : Intrinsic<[], [llvm_i8_ty], [IntrNoMem, IntrHasSideEffects]>;
+
 }
